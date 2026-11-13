@@ -20,6 +20,8 @@ export type ConnectorCategory =
   | 'data'
   | 'observability'
   | 'browser'
+  // Drives the apps on an agent's own screen (Linux).
+  | 'desktop'
   | 'search'
   | 'productivity'
   | 'finance'
@@ -162,6 +164,21 @@ export interface ConnectorStdioLaunch {
    * the switch under `browser.launchOptions.args` and passes `<flag> <file>`.
    */
   chromeSwitchArg?: { flag: string; style: 'joined' | 'playwrightConfig' }
+  /**
+   * The command is a program Clawboo installs itself, into its runtimes folder,
+   * from a release it pins and checks against a SHA-256 (not an npm package):
+   * `pinnedVersion` is that release, and `args` carry no `@version`.
+   */
+  ownedBinary?: true
+  /**
+   * One child per agent, run ONLY on that agent's own display (DISPLAY and its
+   * cookie set to it, the server's own taken away), and never without one: a
+   * desktop driver started with no display, or the server's, would drive
+   * whatever screen that is. Calls that name no agent are refused.
+   */
+  perAgentDisplay?: true
+  /** The platforms it runs on, when not all. */
+  platforms?: readonly ('linux' | 'darwin' | 'win32')[]
 }
 
 export interface ConnectorHttpLaunch {
@@ -242,6 +259,15 @@ export interface ConnectorDefinition {
    * re-check the list whenever the pin moves.
    */
   destructiveTools?: readonly string[]
+  /**
+   * Tool arguments with which this server writes a file wherever it is told:
+   * a call that carries one, at any depth, is refused. Some read-only tools
+   * take one (Cua Driver's `get_desktop_state` writes its screenshot to
+   * `screenshot_out_file`, following links), and a read grant must not be a
+   * way to overwrite any file the server can reach. Matched against the pinned
+   * version's own schemas: re-check when the pin moves.
+   */
+  fileWritingArgs?: readonly string[]
   /**
    * The server refuses to start without an argument only a human can supply.
    *

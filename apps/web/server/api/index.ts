@@ -10,6 +10,20 @@ import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
 
 import { settingsGET, settingsPOST } from './settings'
 import { accessIdentityGET, accessLaunchCodePOST } from './access'
+import {
+  computerControlPOST,
+  computerInputPOST,
+  computerLinkControlPOST,
+  computerLinkDELETE,
+  computerLinkInfoGET,
+  computerLinkInputPOST,
+  computerLinkLiveGET,
+  computerLinksDELETE,
+  computerLinksPOST,
+  computerLiveGET,
+  computerStatusGET,
+  computerToolsInstallPOST,
+} from './computer'
 import { approvalsGET, approvalsPOST } from './approvals'
 import {
   chatHistoryGET,
@@ -439,6 +453,21 @@ router.get('/api/agents/:agentId/sessions', agentSessionsGET)
 // /api/board/:taskId/folder/* routes.
 router.get('/api/agents/:agentId/screenshot', agentScreenshotGET)
 router.post('/api/agents/:agentId/screenshot/capture', agentScreenshotCapturePOST)
+// The agent's computer: its live screen, take over, and links to it. The
+// /api/computer-link/* routes take a link instead of the access cookie (see
+// api/computer.ts and the access gate's `authorizeLink`).
+router.get('/api/agents/:agentId/computer', computerStatusGET)
+router.get('/api/agents/:agentId/computer/live', computerLiveGET)
+router.post('/api/agents/:agentId/computer/control', computerControlPOST)
+router.post('/api/agents/:agentId/computer/input', computerInputPOST)
+router.post('/api/agents/:agentId/computer/links', sensitiveLimiter, computerLinksPOST)
+router.delete('/api/agents/:agentId/computer/links', computerLinksDELETE)
+router.delete('/api/agents/:agentId/computer/links/:linkId', computerLinkDELETE)
+router.post('/api/computer/tools/install', sensitiveLimiter, computerToolsInstallPOST)
+router.get('/api/computer-link/info', computerLinkInfoGET)
+router.get('/api/computer-link/live', computerLinkLiveGET)
+router.post('/api/computer-link/control', computerLinkControlPOST)
+router.post('/api/computer-link/input', computerLinkInputPOST)
 router.get('/api/agents/:agentId/workspaces', agentWorkspacesGET)
 // The agent's team folder (where its runs start with no worktree), read-only.
 router.get('/api/agents/:agentId/team-folder/tree', agentTeamFolderTreeGET)

@@ -3,8 +3,9 @@
 // a refusal.
 
 import { resolveBootAccessToken } from '../bootAccessToken'
+import { CUA_DRIVER_LAUNCHER, ownedCuaDriver, ownedXvnc, systemXvnc } from '../desktop/tools'
 import { resolveRuntimeBin } from '../platform'
-import { ownedRuntimeLaunch } from '../runtimeFolder'
+import { ownedRuntimeBin, ownedRuntimeLaunch } from '../runtimeFolder'
 import { resolveAgentSdkBinary } from '../runtimes/agentSdkBinary'
 import { secretValuesForExposureCheck } from '../secretsVault'
 import { startAgentUser } from './boot'
@@ -32,6 +33,15 @@ function runtimeBinaries(): { runtime: string; path: string }[] {
       if (!out.some((b) => b.runtime === name && b.path === p)) out.push({ runtime: name, path: p })
     }
   }
+  // An agent's display and its desktop driver run as the agent user too:
+  // the same files the spawns start (displays.ts, spawnPlan.ts), and for Cua
+  // Driver the program its launcher runs as well.
+  const xvnc = systemXvnc() ?? ownedXvnc()
+  if (xvnc) out.push({ runtime: 'xvnc', path: xvnc })
+  const cuaLauncher = ownedRuntimeBin(CUA_DRIVER_LAUNCHER)
+  if (cuaLauncher) out.push({ runtime: 'cua-driver', path: cuaLauncher })
+  const cua = ownedCuaDriver()
+  if (cua) out.push({ runtime: 'cua-driver', path: cua })
   return out
 }
 

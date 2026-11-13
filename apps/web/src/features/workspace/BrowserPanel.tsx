@@ -1,22 +1,56 @@
-// What the agent is looking at — the agent-detail tab's version.
+// What the agent is looking at: the agent-detail Browser card.
 //
-// Deliberately the CHEAP version: the newest screenshot the agent captured,
-// re-fetched on a short interval. Not a video stream. The field's own evidence
-// is that a screencast is a large amount of transport engineering for something
-// people watch as a takeover hatch rather than as a monitor, and that the
-// projects with the most-loved surfaces shipped exactly this — an `<img>` fed
-// from tool results.
+// LIVE while the agent has a browser open: its own display where it has one
+// (Linux), with Take over, or its browser photographed about once a second
+// (a Mac, Windows). See features/computer/ComputerScreen.
 //
-// This one FILLS its pane and labels the frame, because it is a tab with a pane
-// to fill. `BrowserDock` renders the same frame bare. Both read the same probe
-// (`useAgentScreenshot`), so they can never disagree about which frame is current.
+// With no browser open, it falls back to the newest screenshot the agent
+// captured, re-fetched on a short interval, so a Boo that browsed all afternoon
+// still shows where it got to. `BrowserDock` renders that same frame bare. Both
+// read the same probe (`useAgentScreenshot`), so they can never disagree about
+// which frame is current.
+
+import { ComputerLinks } from '@/features/computer/ComputerLinks'
+import { ComputerScreen } from '@/features/computer/ComputerScreen'
 
 import { useAgentScreenshot } from './useAgentScreenshot'
 import { useBrowserGrant } from './useBrowserGrant'
 
 export function BrowserPanel({ agentId }: { agentId: string }) {
-  const { meta, checked, src } = useAgentScreenshot(agentId)
   const grant = useBrowserGrant(agentId)
+
+  if (grant === 'missing') {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <p className="max-w-[42ch] text-center text-[12px] leading-relaxed text-muted-foreground">
+          {/* Naming the real cause. Connecting a browser no longer hands it to
+              the whole fleet, so an agent with no grant is never offered the
+              tools and can never produce a frame. Reported, not offered to fix:
+              granting is a deliberate act and belongs where capabilities are
+              managed, not inside a viewer. */}
+          No browser connector has been granted to this agent, so it has no way to open a page.
+          Grant one from its capabilities to see what it is looking at.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1">
+        <ComputerScreen
+          target={{ kind: 'dashboard', agentId }}
+          idleFallback={<LatestScreenshot agentId={agentId} />}
+        />
+      </div>
+      <ComputerLinks agentId={agentId} />
+    </div>
+  )
+}
+
+/** The newest screenshot the agent took, for when it has no browser open. */
+function LatestScreenshot({ agentId }: { agentId: string }) {
+  const { meta, checked, src } = useAgentScreenshot(agentId)
 
   if (!checked) return null
 
@@ -24,24 +58,17 @@ export function BrowserPanel({ agentId }: { agentId: string }) {
     return (
       <div className="flex h-full items-center justify-center p-6">
         <p className="max-w-[42ch] text-center text-[12px] leading-relaxed text-muted-foreground">
-          {grant === 'missing'
-            ? // Naming the real cause. Connecting a browser no longer hands it to
-              // the whole fleet, so an agent with no grant is never offered the
-              // tools and can never produce a frame. Reported, not offered to
-              // fix: granting is a deliberate act and belongs where capabilities
-              // are managed, not inside a viewer.
-              'No browser connector has been granted to this agent, so it has no way to open a page. Grant one from its capabilities to see what it is looking at.'
-            : 'Nothing captured yet. This shows the most recent screenshot this agent took, once it calls a tool that returns one.'}
+          This agent has no browser open right now. Its screen shows here, live, once it opens one.
         </p>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full flex-col gap-2 p-3">
+    <div className="flex h-full flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          {meta.toolName}
+          Last picture, {meta.toolName}
         </span>
         <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
           {new Date(meta.ts).toLocaleTimeString()}

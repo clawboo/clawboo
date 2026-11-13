@@ -59,7 +59,10 @@ people arrive looking for.
 The `launch` field says how to start the server. For a local server, set `transport: 'stdio'`, the `command`, and
 `args` with an exact version baked in (for example `npx -y <package>@<version>`), and put the same version in
 `pinnedVersion`. A bare package name resolves to the latest release on every spawn, so unpinned entries fail the
-checks. For a remote server, set `transport: 'streamable-http'` and an `https` `url`.
+checks. A program Clawboo installs itself into its runtimes folder, from a release it pins and checks against a
+SHA-256 (Cua Driver), sets `ownedBinary: true` instead: `command` is the program's name, `pinnedVersion` is that
+release, and it runs only from Clawboo's own install, never from a copy on `PATH`, which may be another version. For a
+remote server, set `transport: 'streamable-http'` and an `https` `url`.
 
 </Step>
 
@@ -83,7 +86,14 @@ will not start without a path or value only a person can supply, set `requiresUs
 `perAgentProfileFlag` in its `launch`, so each agent gets its own browser profile, and `blockOriginsArg` and
 `chromeSwitchArg`, which say how the server takes a list of origins to block and one extra Chrome switch. Clawboo uses
 those two to keep the browser off the dashboard and off local files; check them against the server's `--help` when
-you move the pin.
+you move the pin. A desktop driver declares `perAgentDisplay: true` and `platforms: ['linux']`: each agent gets its
+own child, run only on that agent's own display, a call that names no agent is refused, and with no display of the
+agent's own the call is refused rather than run against another screen. The checks allow it only on a curated,
+`ownedBinary` entry in category `desktop`.
+
+When a tool writes a file wherever an argument tells it to, read-only tools included, list those arguments in
+`fileWritingArgs`: Clawboo refuses any call that carries one, at any depth. Cua Driver's `get_desktop_state`, for one,
+writes its screenshot to `screenshot_out_file`.
 
 When the server marks tools destructive that are not, list the ones that are in `destructiveTools` (raw tool
 names). A listed tool needs admin access; an unlisted one is treated as a write, whatever the server's own

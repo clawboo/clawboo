@@ -228,6 +228,57 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
     homepage: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
   },
   {
+    slug: 'cua-driver',
+    displayName: 'Cua Driver',
+    description:
+      "Use the apps on an agent's own screen: windows, clicks, typing and each app's accessibility tree. Linux only.",
+    category: 'desktop',
+    provenance: 'curated',
+    launch: {
+      transport: 'stdio',
+      // Installed by Clawboo into its runtimes folder (Install the desktop
+      // tools), from the release below, checked against its SHA-256.
+      command: 'cua-driver',
+      // `--direct`: this process is the driver. Without it, `mcp` can hand its
+      // calls to one long-lived `cua-driver serve`, shared by every caller of
+      // the same home and outliving Clawboo, on whatever screen it started on.
+      args: ['mcp', '--direct'],
+      pinnedVersion: '0.38.0',
+      ownedBinary: true,
+      // Each agent's own driver, on that agent's own display and never another.
+      perAgentDisplay: true,
+      platforms: ['linux'],
+    },
+    auth: { kind: 'none', inputs: [] },
+    // It drives whatever runs on the screen, a browser included.
+    egressAllow: ['*'],
+    trifecta: { readsPrivateData: true, ingestsUntrustedContent: true, canEgress: true },
+    // Checked against 0.38.0's own tools/list (66 tools). These run code, start
+    // or stop programs, install things, change the driver's own settings, or
+    // move a file between the computer and a website.
+    destructiveTools: [
+      'run_script',
+      'run_steps',
+      'replay_trajectory',
+      'launch_app',
+      'kill_app',
+      'install_extension',
+      'install_ffmpeg',
+      'check_for_update',
+      'set_config',
+      'browser_set_input_files',
+      'browser_download',
+      'clipboard_write',
+      // Starts a browser of the driver's own, without Clawboo's guards.
+      'browser_prepare',
+    ],
+    // Each writes a file wherever it is told (a screenshot, a recording),
+    // through the read-only `get_window_state` and `get_desktop_state` too.
+    fileWritingArgs: ['screenshot_out_file', 'output_dir'],
+    tags: ['desktop', 'computer use', 'linux', 'automation', 'accessibility'],
+    homepage: 'https://github.com/trycua/cua',
+  },
+  {
     slug: 'context7',
     displayName: 'Context7',
     description: 'Pull up-to-date documentation and code examples for a library.',

@@ -78,13 +78,49 @@ The chat sits on the left and cards stack on the right. The buttons in the page 
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Graph**            | The agent with its skills and connectors. Drag from the agent's port onto empty space, or use **+**, to add a skill or connector. The model control sits in the top-right corner. |
 | **Tasks & Routines** | The agent's tasks in **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**, then the routines that send it work, with **New routine**.                            |
-| **Browser**          | The latest screenshot from the agent's web browser.                                                                                                                               |
+| **Browser**          | What its browser shows, live, or on Linux its own screen, which you can take over. See [Watch a screen and take over](#watch-a-screen-and-take-over).                             |
 | **Activity**         | The agent's tool calls, results and errors as they happen.                                                                                                                        |
 | **Details**          | **Computer**, **Personality**, **Permissions**, **Brief** (Boo Zero only) and **Agent Files**.                                                                                    |
 
 In **Tasks & Routines**, click a task to read its output and progress. The comment box at the bottom (**Comment or steer this task…**) sends your comment to the agent the task belongs to, and the line beside **Send** says what sending does. On a running task, the agent gets it during the run. A task that waits on you, or waits in **To do**, starts again for it. A finished task cannot run again, so the note under your comment offers **Send as a follow-up task** instead. Each comment you send shows where it went. See [Steer a running task](/using/board#steer-a-running-task) for every case. **Open on Board** opens the task on the board.
 
 **Computer** under **Details** is a read-only view of the agent's files. It lists the agent's tasks by title, newest first: the git worktree of each board task the agent took that changes files in a repository, and, for a Claude Code, Codex, Hermes or Clawboo Native agent, the folder of each task it ran without a worktree. A task's folder is listed once it is on disk and either holds a file or its task is **In progress** or **In review**. The list looks at the agent's 200 most recent tasks without a worktree and shows at most 50 folders; an older task's files still show in its **Files** section on the Board. After the tasks comes the folder its other runs start in, as in team chat and in its own chat: **Team folder**, or **Shared folder (no team)** for an agent with no team. When there is more than one, pick it from the list at the top. Task folders and the team folder are not git checkouts, so their files carry no change badges or diffs. Until the agent's first run in team chat or its own chat, the team folder reads "No files yet." OpenClaw agents keep their files in the OpenClaw Gateway's workspace instead.
+
+## Watch a screen and take over
+
+The **Browser** card shows what the agent sees, live, while it has a browser open. With no browser open, it shows the last screenshot the agent took and says so.
+
+- **On Linux**, each agent gets a screen of its own: a virtual display that its browser, and any Linux app it starts, opens on. Clawboo starts it when the agent's browser starts and stops it 30 seconds after the browser closes. It needs TigerVNC's `Xvnc` on the server; without it, agents' browsers run as before and the card shows the browser as on a Mac. The screen is Linux only.
+  - **Install the desktop tools**, on an agent's **Screen** view, installs `Xvnc` and Cua Driver (the desktop driver) into Clawboo's own runtimes folder: TigerVNC's own Linux build 1.16.2 and Cua Driver 0.38.0, each checked against the SHA-256 Clawboo pins before it is unpacked. TigerVNC is free software under the GNU GPL version 2; Clawboo downloads it from TigerVNC's own release and runs it as a separate program, never as part of Clawboo. Cua Driver is MIT-licensed.
+  - TigerVNC publishes its build for x86_64 only. On arm64, install TigerVNC's `Xvnc` with your package manager; once agents have a screen, **Install Cua Driver** on the same view adds the driver alone. It is offered only when agents run as their own OS user ([agent isolation](/operating/agent-isolation#set-it-up-on-linux)), which Cua Driver needs; without it, agents still get their screen, the live view and their browser tools. An `Xvnc` your distribution installed is always used first, and Clawboo then downloads no TigerVNC.
+  - Clawboo's copy of TigerVNC needs some of the system's own libraries and its keyboard compiler (`xkbcomp`) with its keyboard data. On Debian and Ubuntu they are in the packages `libxcvt0`, `libxshmfence1`, `libgbm1`, `x11-xkb-utils` and `xkb-data`; other distributions name them differently. A machine with Chromium has most of them. Clawboo installs none of them. Installing `tigervnc-standalone-server` instead gives you your distribution's own `Xvnc`, which brings everything it needs and is then used in place of Clawboo's copy.
+  - When a display cannot start, the **Screen** view names the missing file and, on Debian or Ubuntu, the package that holds it.
+  - With Openbox installed, windows on the screen get frames and can be moved, maximized and closed; without it they have none. Clawboo runs Openbox with a configuration of its own that has no menu and no key that starts a program, and uses no other window manager.
+  - With `at-spi2-core` (and D-Bus) installed, the desktop driver finds buttons and fields through each app's accessibility tree; without them it works from the pixels on the screen. Clawboo installs neither Openbox nor `at-spi2-core`.
+- **On macOS and Windows**, the card shows the agent's browser about once a second. It is for watching only.
+
+### Take over
+
+On an agent's own screen (Linux), click **Take over** to use it yourself, for example to sign in to a site for the agent, answer a two-factor prompt, or get past a check meant for people. While you have control:
+
+- your mouse and keys go to the agent's screen, and the screen shows a highlighted edge. The agent's own programs share that screen, so type a password there only for an agent you trust;
+- the agent's own browser tools wait: each call tells it a person is using its computer and to wait or ask you in chat;
+- the agent's browser is not closed for being idle.
+
+Click **Hand back** when you are done. Control also goes back to the agent when you close the view (after 30 seconds, so a dropped connection can come back), or after 10 minutes without a key or a click from you. One person has control at a time; someone who takes over after you gets it, and your view says **A person has control**.
+
+Whoever may use an agent can use what it holds. Taking over its screen means using its browser's saved sign-ins, and anything its OS user can reach, through a file dialog for example. So the access to decide is who may use each agent: everyone who can open your Clawboo can use every agent, and a link (below) gives someone one agent's screen. If someone should not use an agent's sign-ins, do not give them that agent.
+
+### Share an agent's screen with a link
+
+Below the screen, **View link** and **Control link** make a link to this one agent's screen for someone who has no way into your Clawboo, such as the person who must type their own password into a site the agent uses.
+
+- A **view link** lets them watch. It can never take over.
+- A **control link** also lets them take over and hand back, as above. It is offered only when agents run as their own OS user ([`CLAWBOO_AGENT_USER`](/operating/agent-isolation)): whoever takes over can reach what the agent's browser can on this computer, through a file dialog for example, which otherwise includes Clawboo's own files. Without it, **Control link** is turned off and says why; you can still take over yourself. With it, a control link holder can still reach what every agent can, because all agents share one user.
+- A link reaches this agent's screen and nothing else, from wherever the rest of your Clawboo is reachable. If your Clawboo answers only on this machine, so does the link.
+- It expires: a view link after 8 hours and a control link after 1 hour. **Revoke** ends one link, and **Revoke all** every link to this agent; either closes every view open through it at once and gives control back to the agent. Deleting or archiving the agent, or restarting Clawboo, ends them too, and a link never reaches a new agent made later under the same id.
+- One link opens at most two views at once, and links leave two places on each agent's screen (and eight in all) for the dashboard, so links you hand out never lock you out. An agent has at most 20 links; revoke one to make another.
+- The link is shown once, when you make it. Clawboo keeps only a fingerprint of it and never writes it to a log: the part after `#` is never sent to any server, and the link's page takes it out of the address bar as soon as it opens. The browser that opened it may still keep it in its history, so revoke a link when it is no longer needed.
 
 ## Chat with an agent
 

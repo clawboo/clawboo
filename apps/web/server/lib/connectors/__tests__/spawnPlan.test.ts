@@ -278,3 +278,64 @@ describe("chrome-devtools-mcp's usage statistics and update check", () => {
     expect(plan.env).toEqual({})
   })
 })
+
+describe('a program Clawboo installs itself (Cua Driver)', () => {
+  let runtimes: string
+  beforeEach(() => {
+    runtimes = mkdtempSync(path.join(os.tmpdir(), 'clawboo-spawnplan-owned-'))
+    vi.stubEnv('CLAWBOO_RUNTIMES_DIR', path.join(runtimes, 'rt'))
+    for (const name of [
+      'CUA_DRIVER_RS_TELEMETRY_ENABLED',
+      'CUA_DRIVER_RS_UPDATE_CHECK',
+      'CUA_DRIVER_RS_A11Y_ADVERTISE_MODE',
+      'DO_NOT_TRACK',
+    ]) {
+      vi.stubEnv(name, undefined)
+    }
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(runtimes, { recursive: true, force: true })
+  })
+
+  const launch = { command: 'cua-driver', args: ['mcp', '--direct'], ownedBinary: true }
+
+  it('never runs a copy found on PATH, which may be another version', () => {
+    mockFind.mockReturnValue('/usr/local/bin/cua-driver')
+    try {
+      const plan = planConnectorSpawn(launch)
+      expect(plan.unresolved).toBe(true)
+      expect(plan.command).not.toBe('/usr/local/bin/cua-driver')
+    } finally {
+      mockFind.mockReset()
+    }
+  })
+
+  it('runs from its own install when there is one', async () => {
+    const rf = await import('../../runtimeFolder')
+    const folder = rf.newInstallFolder('desktop')
+    mkdirSync(path.join(folder, 'cua-driver'), { mode: 0o755 })
+    const bin = path.join(folder, 'cua-driver', 'cua-driver')
+    writeFileSync(bin, '#!/bin/sh\n', { mode: 0o755 })
+    rf.commitRuntimeInstall('desktop', {
+      folder,
+      version: 'cua-driver 0.38.0',
+      source: 'test',
+      launchers: { 'cua-driver': { command: bin, args: [] } },
+    })
+    const plan = planConnectorSpawn(launch)
+    expect(plan.unresolved).toBe(false)
+    expect(plan.command).toBe(rf.ownedRuntimeBin('cua-driver'))
+    expect(plan.args).toEqual(['mcp', '--direct'])
+  })
+
+  it('turns off its telemetry and update check, and passes on DO_NOT_TRACK only when set', () => {
+    expect(planConnectorSpawn(launch).env).toEqual({
+      CUA_DRIVER_RS_TELEMETRY_ENABLED: '0',
+      CUA_DRIVER_RS_UPDATE_CHECK: '0',
+      CUA_DRIVER_RS_A11Y_ADVERTISE_MODE: 'all',
+    })
+    vi.stubEnv('DO_NOT_TRACK', '1')
+    expect(planConnectorSpawn(launch).env['DO_NOT_TRACK']).toBe('1')
+  })
+})

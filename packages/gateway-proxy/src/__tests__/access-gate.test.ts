@@ -339,3 +339,70 @@ describe('access gate — websocket upgrades', () => {
     ).toBe(true)
   })
 })
+
+describe('access gate: /api/computer-link/* admits a capability link and nothing else', () => {
+  // `authorizeLink` stands in for the server's real check (a link it minted for
+  // one agent's computer). The link is the credential, so a remote or proxied
+  // request with a good link is admitted, the same as one with the cookie.
+  const consulted: string[] = []
+  const gate = createAccessGate({
+    token: TOKEN,
+    authorizeLink: (req) => {
+      consulted.push(req.url ?? '')
+      return req.headers['x-clawboo-computer-link'] === 'cbcl_good'
+    },
+  })
+  const link = { 'x-clawboo-computer-link': 'cbcl_good' }
+
+  for (const path of [
+    '/api/computer-link/info',
+    '/api/computer-link/live',
+    '/api/computer-link/input',
+  ]) {
+    it(`admits a cookieless ${path} carrying a good link, from anywhere`, () => {
+      for (const [headers, addr] of [
+        [link, '127.0.0.1'],
+        [link, '203.0.113.7'],
+        [{ ...link, 'x-forwarded-for': '203.0.113.7' }, '127.0.0.1'],
+      ] as const) {
+        const cap = mockRes()
+        expect(gate.handleHttp(mockReq(path, headers, addr), cap.res)).toBe(false)
+      }
+    })
+  }
+
+  it('401s a link path with a bad link or none', () => {
+    const bad: Record<string, string>[] = [{}, { 'x-clawboo-computer-link': 'cbcl_forged' }]
+    for (const headers of bad) {
+      const cap = mockRes()
+      expect(gate.handleHttp(mockReq('/api/computer-link/live', headers), cap.res)).toBe(true)
+      expect(cap.statusCode).toBe(401)
+    }
+  })
+
+  // `..%2fsettings` is not listed: every reading of it, the router's included,
+  // stays one segment under /api/computer-link/, where no route serves it.
+  it('never admits a good link anywhere outside its own paths, however the path is spelled', () => {
+    consulted.length = 0
+    for (const path of [
+      '/api/agents/a/computer/live',
+      '/api/settings',
+      '/api/computer-link',
+      '/api/computer-linkx/live',
+      '/api/computer-link/../settings',
+      '/api/computer-link/%2e%2e/settings',
+      '/api/computer-link\\..\\settings',
+    ]) {
+      const cap = mockRes()
+      expect(gate.handleHttp(mockReq(path, link), cap.res), path).toBe(true)
+      expect(cap.statusCode, path).toBe(401)
+    }
+  })
+
+  it('without authorizeLink, /api/computer-link/* needs the cookie like every other route', () => {
+    const plain = createAccessGate({ token: TOKEN })
+    const cap = mockRes()
+    expect(plain.handleHttp(mockReq('/api/computer-link/live', link), cap.res)).toBe(true)
+    expect(cap.statusCode).toBe(401)
+  })
+})

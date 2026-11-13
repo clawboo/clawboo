@@ -40,7 +40,7 @@ It does **not**:
 
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
 - protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins, and a [website login](/using/website-logins) Clawboo filled into its page;
-- keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder;
+- keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder, and on Linux one agent's programs can open another agent's display;
 - change what Clawboo's tools allow. Agents still reach the board, memory and team chat through Clawboo's MCP servers, and approvals, grants and budgets still apply;
 - cover OpenClaw agents. They run inside the OpenClaw Gateway, as whoever started it. Use OpenClaw's own sandbox for them;
 - protect you from running an agent's output yourself, such as merging its branch and running it;
@@ -60,6 +60,7 @@ When Clawboo starts with `CLAWBOO_AGENT_USER` set, it starts one long-lived proc
 | The verify command a task's check runs                                        | the agent user                       |
 | git in a task's checkout, and in the agent user's copy of each repository     | the agent user                       |
 | Connectors with local reach and no saved credential, and each agent's browser | the agent user                       |
+| Each agent's display on Linux, its window manager and session bus             | the agent user                       |
 | Connectors that hold a saved credential (OAuth, an API key)                   | you, so agents cannot read the token |
 | Clawboo itself, its database, the vault, installs and updates                 | you                                  |
 
@@ -77,6 +78,7 @@ Agents keep every tool. They reach Clawboo's MCP servers over HTTP on `127.0.0.1
 | Each agent's runtime home (`CODEX_HOME`, `HERMES_HOME`) | `<agent home>/runtimes/<runtime>/<agent>`     | agent user, `0700` |
 | Claude Code's settings and sessions                     | the agent user's own `~/.claude`              | agent user         |
 | Each agent's browser profile                            | `<agent home>/browser-profiles/`              | agent user, `0700` |
+| Each agent's display: its VNC socket and X cookie       | `<agent home>/desktops/<hash>`                | agent user, `0700` |
 | The agent user's copy of each repository                | `<work folder>/mirrors/<repository hash>.git` | agent user         |
 | Clawboo Native's conversation history                   | unchanged, in the data folder                 | you                |
 

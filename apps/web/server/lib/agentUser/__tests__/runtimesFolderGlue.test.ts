@@ -12,6 +12,7 @@ const apart: { label: string; dir: () => string | null }[] = []
 
 vi.mock('../../runtimeFolder', () => ({
   ownedRuntimeLaunch: (name: string) => launches[name] ?? null,
+  ownedRuntimeBin: (name: string) => launches[name]?.launcher ?? null,
   keepRuntimesDirApartFrom: (label: string, dir: () => string | null) => {
     const entry = { label, dir }
     apart.push(entry)
@@ -22,6 +23,12 @@ vi.mock('../../platform', () => ({
   resolveRuntimeBin: (name: string) => (name === 'codex' ? '/rt/bin/codex' : null),
 }))
 vi.mock('../../runtimes/agentSdkBinary', () => ({ resolveAgentSdkBinary: () => null }))
+vi.mock('../../desktop/tools', () => ({
+  CUA_DRIVER_LAUNCHER: 'cua-driver',
+  ownedCuaDriver: () => null,
+  ownedXvnc: () => null,
+  systemXvnc: () => null,
+}))
 vi.mock('../../secretsVault', () => ({
   secretValuesForExposureCheck: () => [],
   getVaultPaths: () => ({}),

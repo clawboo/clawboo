@@ -34,6 +34,10 @@ import {
   connectorsByCategory,
 } from '@clawboo/connector-catalog'
 import { readdirSync, statSync } from 'node:fs'
+import { isAgentUserMode } from '../lib/agentUser/config'
+import { displaySupport } from '../lib/desktop/displays'
+import { desktopDriverRefusal } from '../lib/desktop/driverPolicy'
+import { ownedRuntimeBin } from '../lib/runtimeFolder'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -347,7 +351,55 @@ export function connectorConfigPUT(req: Request, res: Response): void {
   }
 }
 
-function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDefinition {
+/**
+ * Why this connector cannot run on this machine, or null. Server-side, because
+ * only the server knows its platform and what is installed: a connector for
+ * another platform, or a program Clawboo installs that is not installed yet.
+ */
+export function connectorPlaceRefusal(
+  def: ConnectorDefinition,
+  platform: NodeJS.Platform = process.platform,
+  agentUserMode: boolean = isAgentUserMode(),
+): {
+  reason: 'unsupported-platform' | 'needs-agent-user' | 'not-installed' | 'no-display'
+  error: string
+} | null {
+  if (def.launch.transport !== 'stdio') return null
+  const platforms = def.launch.platforms
+  if (platforms && !platforms.includes(platform as 'linux' | 'darwin' | 'win32')) {
+    return {
+      reason: 'unsupported-platform',
+      error: `${def.displayName} runs on ${platforms.join(', ')} only.`,
+    }
+  }
+  // A desktop driver only where agents run as their own OS user (see driverPolicy).
+  if (def.launch.perAgentDisplay) {
+    const refusal = desktopDriverRefusal(def.displayName, agentUserMode)
+    if (refusal) return { reason: 'needs-agent-user', error: refusal }
+  }
+  // Clawboo's own install only: a copy on PATH may be another version.
+  if (def.launch.ownedBinary && !ownedRuntimeBin(def.launch.command)) {
+    return {
+      reason: 'not-installed',
+      error: `${def.displayName} is not installed. Install it on an agent's Screen view, then connect it.`,
+    }
+  }
+  // It works only on an agent's own screen: where agents get none (displays
+  // turned off, no Xvnc), every call would fail.
+  if (def.launch.perAgentDisplay) {
+    const support = displaySupport(platform)
+    if (!support.ok) {
+      return {
+        reason: 'no-display',
+        error: `${def.displayName} works on an agent's own screen, and agents get none here. ${support.reason}`,
+      }
+    }
+  }
+  return null
+}
+
+/** A catalog entry as the supervisor connects it, with its launch args resolved. */
+export function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDefinition {
   if (def.launch.transport === 'streamable-http') {
     return {
       slug: def.slug,
@@ -374,12 +426,15 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
       ...(def.launch.perAgentProfileFlag
         ? { perAgentProfileFlag: def.launch.perAgentProfileFlag }
         : {}),
+      ...(def.launch.perAgentDisplay ? { perAgentDisplay: true } : {}),
+      ...(def.launch.ownedBinary ? { ownedBinary: true } : {}),
       ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
       ...(def.launch.chromeSwitchArg ? { chromeSwitchArg: def.launch.chromeSwitchArg } : {}),
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,
     ...(def.destructiveTools ? { destructiveTools: def.destructiveTools } : {}),
+    ...(def.fileWritingArgs ? { fileWritingArgs: def.fileWritingArgs } : {}),
     authInputs: def.auth.inputs,
   }
 }
@@ -449,6 +504,11 @@ export async function connectorsConnectPOST(req: Request, res: Response): Promis
     )
     if (refusal) {
       res.status(422).json({ error: CONNECT_REFUSAL_COPY[refusal], reason: refusal })
+      return
+    }
+    const placeRefusal = connectorPlaceRefusal(def)
+    if (placeRefusal) {
+      res.status(422).json({ error: placeRefusal.error, reason: placeRefusal.reason })
       return
     }
 
@@ -686,7 +746,8 @@ export async function restoreConnectorsAtBoot(db: ClawbooDb): Promise<number> {
           credentialsSatisfied(def.slug, def.auth.inputs),
           launchArgsSatisfied(def, argument ?? undefined),
           !remote || bearer || accessToken !== null,
-        )
+        ) ||
+        connectorPlaceRefusal(def)
       ) {
         continue
       }

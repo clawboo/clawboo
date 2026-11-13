@@ -27,6 +27,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { findExecutable, isWindows } from '../platform'
+import { ownedRuntimeBin } from '../runtimeFolder'
 import { resolveWindowsSpawn } from '../runtimes/winSpawn'
 
 export interface ConnectorSpawnPlan {
@@ -68,6 +69,8 @@ interface KnownPackage {
   direct: boolean
   /** The opt-outs it honours for its own usage statistics and update checks. */
   quietEnv?: Readonly<Record<string, string>>
+  /** Opt-outs of the person's that are passed on only when they set them. */
+  passEnv?: readonly string[]
 }
 
 const KNOWN_PACKAGES: ReadonlyMap<string, KnownPackage> = new Map<string, KnownPackage>([
@@ -88,6 +91,30 @@ const KNOWN_PACKAGES: ReadonlyMap<string, KnownPackage> = new Map<string, KnownP
 ])
 
 /**
+ * Programs Clawboo installs itself (`ownedBinary`), by launcher name, with the
+ * same kind of opt-outs.
+ */
+const KNOWN_PROGRAMS: ReadonlyMap<string, KnownPackage> = new Map<string, KnownPackage>([
+  [
+    'cua-driver',
+    {
+      direct: false,
+      // 0.38.0 sends usage telemetry by default and asks GitHub for a newer
+      // release every time `mcp` starts. Both read "0" as off.
+      quietEnv: {
+        CUA_DRIVER_RS_TELEMETRY_ENABLED: '0',
+        CUA_DRIVER_RS_UPDATE_CHECK: '0',
+        // Advertise accessibility on the bus it is given, which is only ever
+        // the agent display's own, whatever desktop it takes itself to be on.
+        CUA_DRIVER_RS_A11Y_ADVERTISE_MODE: 'all',
+      },
+      // The cross-tool opt-out, which it honours above everything else.
+      passEnv: ['DO_NOT_TRACK'],
+    },
+  ],
+])
+
+/**
  * The opt-outs for this package, except where the server's own environment
  * already names the variable: the person decided, and their value is passed on.
  */
@@ -95,6 +122,10 @@ function quietEnvFor(known: KnownPackage | undefined): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [name, value] of Object.entries(known?.quietEnv ?? {})) {
     env[name] = process.env[name] ?? value
+  }
+  for (const name of known?.passEnv ?? []) {
+    const value = process.env[name]
+    if (value !== undefined) env[name] = value
   }
   return env
 }
@@ -264,12 +295,26 @@ function installedBin(pkg: NpxPackage, opts: SpawnPlanOptions): string | null {
  * the message can name what was looked for.
  */
 export function planConnectorSpawn(
-  launch: { command: string; args: readonly string[] },
+  launch: { command: string; args: readonly string[]; ownedBinary?: boolean },
   opts: SpawnPlanOptions = {},
 ): ConnectorSpawnPlan {
   const pkg = pinnedNpxPackage(launch)
-  const known = pkg ? KNOWN_PACKAGES.get(pkg.name) : undefined
+  const known = pkg
+    ? KNOWN_PACKAGES.get(pkg.name)
+    : launch.ownedBinary
+      ? KNOWN_PROGRAMS.get(launch.command)
+      : undefined
   const env = quietEnvFor(known)
+
+  // A program Clawboo installs itself runs from that install and nowhere else:
+  // the catalog's tool lists and refusals are checked against that release, so
+  // a copy of another version found on PATH is not a stand-in for it.
+  if (launch.ownedBinary) {
+    const owned = ownedRuntimeBin(launch.command)
+    const command = owned ?? launch.command
+    const args = [...launch.args]
+    return { command, args, env, display: displayOf(command, args), unresolved: owned === null }
+  }
 
   // Started with the Node that runs this server rather than through the bin's
   // shebang, which would pick whichever `node` is first on PATH.

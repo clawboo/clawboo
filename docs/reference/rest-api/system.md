@@ -776,6 +776,7 @@ The answer is built from the running process alone: no database read, no network
     "workspace.preview": true,
     "agent.nativeShell": true,
     "agent.screenshots": true,
+    "agent.computer": true,
     "routines": true,
     "memory": true,
     "memory.embeddings": true,
@@ -828,6 +829,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                                                                                                                                                                                        |
 | `agent.nativeShell`                                                         | Always. The per-agent switch that lets a Clawboo Native agent ask to run shell commands.                                                                                                                                                                                                                          |
 | `agent.screenshots`                                                         | Always. Screenshots of what an agent's browser shows.                                                                                                                                                                                                                                                             |
+| `agent.computer`                                                            | Always. An agent's screen, live: its own display on Linux, with take over, or its browser elsewhere; and view and control links to it.                                                                                                                                                                            |
 | `routines`                                                                  | Always. Routines, the scheduler (`/api/schedules`).                                                                                                                                                                                                                                                               |
 | `memory`                                                                    | Always. Shared memory: search, save and browse.                                                                                                                                                                                                                                                                   |
 | `memory.embeddings`                                                         | Similarity search may run: `false` when `CLAWBOO_DISABLE_EMBEDDINGS=1`. Whether a provider is ready is in `GET /api/memory/provider`.                                                                                                                                                                             |

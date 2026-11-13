@@ -23,7 +23,7 @@ import { ExecSettings } from '@/features/settings/ExecSettings'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
-import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
+import { ComputerTab } from '@/features/workspace/ComputerTab'
 import { Button } from '@/features/shared/Button'
 import { Spinner } from '@/features/shared/Spinner'
 
@@ -422,11 +422,12 @@ export function InlineEditor({
           </div>
         )}
 
-        {/* Computer tab: read-only view of the agent's task folders and
-            worktrees. The panel owns its own layout, so no padding wrapper here. */}
+        {/* Computer tab: the agent's screen, or a read-only view of its task
+            folders and worktrees. The panel owns its own layout, so no padding
+            wrapper here. */}
         {activeTab === 'computer' && (
           <div style={{ height: '100%', minHeight: 0 }}>
-            <WorkspacePanel agentId={agentId} />
+            <ComputerTab agentId={agentId} />
           </div>
         )}
 
@@ -472,7 +473,7 @@ export function InlineEditor({
             : activeTab === 'permissions'
               ? `${agentName} · Permissions`
               : activeTab === 'computer'
-                ? `${agentName} · Computer · read-only`
+                ? `${agentName} · Computer`
                 : activeTab === 'brief'
                   ? `${agentName} · Brief · display name`
                   : AGENT_FILE_META[activeTab].hint}

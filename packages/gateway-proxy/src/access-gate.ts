@@ -49,6 +49,16 @@ export interface AccessGateOptions {
    * Omitted ⇒ `/api/mcp/*` needs the cookie like every other route.
    */
   authorizeRuntime?: (req: IncomingMessage) => boolean
+  /**
+   * Admits a cookieless request that carries a capability link the server
+   * minted: return true when it does. Consulted only for a path that is under
+   * `/api/computer-link/` however it is read (see request-path.ts), and only
+   * when the cookie is missing or wrong. A link reaches exactly the routes it
+   * names and no other, from wherever the rest of the server is reachable: it
+   * opens no listener and widens no exposure. Omitted: those paths need the
+   * cookie like every other route.
+   */
+  authorizeLink?: (req: IncomingMessage) => boolean
 }
 
 /** A one-time code that trades for the access cookie. */
@@ -259,6 +269,19 @@ export function isRuntimeControlRequest(
   )
 }
 
+/**
+ * True when this request reaches a capability link's own routes (every reading
+ * of its path under `/api/computer-link/`, see request-path.ts) carrying a link
+ * `authorizeLink` vouches for. The link is the credential, so where the request
+ * came from does not matter, the same as the access cookie.
+ */
+export function isCapabilityLinkRequest(
+  req: IncomingMessage,
+  authorizeLink: ((req: IncomingMessage) => boolean) | undefined,
+): boolean {
+  return everyPathUnder(req, '/api/computer-link/') && authorizeLink?.(req) === true
+}
+
 // ─── createAccessGate ───────────────────────────────────────────────────────
 
 /** At most this many unused launch codes are held; minting another drops the oldest. */
@@ -295,6 +318,7 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
   const basePath = String(options.basePath ?? '').trim()
   const cookiePath = basePath || '/'
   const authorizeRuntime = options.authorizeRuntime
+  const authorizeLink = options.authorizeLink
   // The token is written raw into the Set-Cookie value and compared raw against the
   // cookie, but percent-decoded on the query path. A token with a cookie delimiter
   // or other non-token character would corrupt the cookie and lock the operator out
@@ -463,6 +487,7 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       // must be under `/api/mcp/`: one that only resolves there may be routed
       // elsewhere (see isRuntimeControlRequest).
       if (isRuntimeControlRequest(req, authorizeRuntime)) return false
+      if (isCapabilityLinkRequest(req, authorizeLink)) return false
       if (!isAuthorized(req)) {
         res.statusCode = 401
         res.setHeader('Content-Type', 'application/json')

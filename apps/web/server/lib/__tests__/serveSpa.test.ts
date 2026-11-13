@@ -51,7 +51,9 @@ function serve(uiDir: string, basePath = ''): Promise<string> {
   const app = express()
   mountSpa(app, uiDir, basePath)
   return new Promise((resolve) => {
-    const server = app.listen(0, () => {
+    // Bound to the address the test fetches: on all addresses, another process
+    // holding the same port on 127.0.0.1 would answer instead.
+    const server = app.listen(0, '127.0.0.1', () => {
       servers.push(server)
       const addr = server.address()
       const port = typeof addr === 'object' && addr ? addr.port : 0
