@@ -77,6 +77,10 @@ to anyone changing them:
 
 - **HTTP.** `createStreamableHttpHandlers` serves each server inside the dashboard server at `/api/mcp/<server>`.
   Clawboo's own Claude Code, Codex and Hermes runs and the OpenClaw Gateway connect here.
+  `createStatelessHttpHandler` serves the same servers with no MCP session (POST only; GET and DELETE answer
+  `405`), building a server per request. The dashboard server uses it for a live URL (`live=1`, see
+  `AttachScope.live`), which names only an agent and is bound per call to that agent's run in progress: the URL
+  each Hermes profile keeps, since the Hermes gateway holds its connection across runs.
 - **In-process.** `connectInMemoryClient` connects Clawboo Native's MCP bridge to the servers without a network
   hop. `probeServer` checks that a server answers, for the boot probe and the MCP supervisor.
 - **stdio.** `runStdioServer` backs the four bins `clawboo-mcp-tasks`, `clawboo-mcp-memory`, `clawboo-mcp-tools`

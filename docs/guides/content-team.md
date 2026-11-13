@@ -29,7 +29,7 @@ Read this before you rely on the team. What an agent can do depends on its runti
 
 - **Clawboo Native** runs a member when no OpenClaw Gateway is connected and you have an API key or Ollama (with only a ChatGPT sign-in, members start on Codex instead). Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they can read files only in the team's own folder, and on a task they write only in the task's own folder inside it. They cannot browse the web, open your other files, or send and post anything. [Connectors](/using/connectors) add those abilities.
 - **OpenClaw** agents use the tools your OpenClaw Gateway gives them.
-- **Claude Code, Codex and Hermes** agents bring their own tools for commands and files, and run with their own approval prompts turned off. Read [What agents can do](/concepts/permissions) before you put one on a team.
+- **Claude Code, Codex and Hermes** agents bring their own tools for commands and files. Claude Code and Codex run with their own approval prompts turned off, and Hermes asks only before the commands its own policy flags. Read [What agents can do](/concepts/permissions) before you put one on a team.
 
 The skills a catalog agent lists, such as `web-search` or `email-draft`, describe its role. They do not give it a working tool.
 
@@ -122,7 +122,7 @@ The room opens as its own chat. Boo Zero leads it and hands work only to the mem
 2. Read **Latest report** and **Progress** to see where it is.
 3. In the **Comment or steer this task…** box, type a correction, for example "Keep it under 500 words and leave out prices". Click **Send**.
 
-The line beside **Send** says when the agent sees your comment. On most runtimes it reads "… gets this now, before its next step"; a Hermes agent installed without its live mode pauses to read it, then carries on. You should see a note under your comment such as "Sent to Content Writer Boo’s run".
+The line beside **Send** says when the agent sees your comment. It reads "… gets this now, before its next step". You should see a note under your comment such as "Sent to Content Writer Boo’s run".
 
 For a task that failed or was stopped, sending a comment starts its agent on it again, and the agent reads your comment as the run begins. To see every task the team has, click **Board** in the sidebar. Its columns are **Needs you**, **Backlog**, **To do**, **In progress**, **Done** and **Cancelled**. See [Board](/using/board).
 

@@ -111,7 +111,8 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `browser-profiles/`                     | Each agent's browser profile, including sites it is signed in to                                                                                     | Yes                                     |
 | `team-folder-history/<team id>.git`     | The work check's git history of each team's folder                                                                                                   | Holds copies of what agents saved there |
 | `workspaces/`, `worktrees/`, `reviews/` | Left by an older version: a link at each old path to a folder that moved to the work folder, any folder the move kept here, and old review checkouts | Holds what agents saved there           |
-| `runtimes/<runtime>/<agent>/`           | Each Clawboo Native, Codex or Hermes agent's own runtime home                                                                                        | May hold runtime sign-in copies         |
+| `runtimes/<runtime>/<agent>/`           | Each Clawboo Native or Codex agent's own runtime home, and a Hermes agent's home from before it first ran through the Hermes gateway                 | May hold runtime sign-in copies         |
+| `runtimes/hermes/_gateway/`             | The Hermes gateway's home: its config, logs and one profile per Hermes agent under `profiles/` (memory, skills, sessions, its own jobs)              | Holds Hermes keys and sign-in copies    |
 
 The database files, `settings.json` and secrets are owner-only (mode 0600) in an owner-only folder (0700).
 

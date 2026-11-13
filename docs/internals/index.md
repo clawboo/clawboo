@@ -86,11 +86,11 @@ One file, `clawboo.db` in `~/.clawboo` (or `CLAWBOO_HOME`), holds the board, the
 
 ### Agents run on runtimes
 
-A runtime is the engine an agent runs on. Clawboo Native runs inside the server process and calls the provider SDKs directly. Claude Code (through the Claude Agent SDK), Codex (`codex app-server`) and Hermes (its CLI) run as local processes the server starts. OpenClaw agents run inside the OpenClaw Gateway. Each runtime has a `RuntimeAdapter` that maps its output onto one normalized event stream; see [The RuntimeAdapter trait](/internals/runtime-adapter).
+A runtime is the engine an agent runs on. Clawboo Native runs inside the server process and calls the provider SDKs directly. Claude Code (through the Claude Agent SDK) and Codex (`codex app-server`) run as local processes the server starts, and Hermes agents run in one Hermes gateway the server starts and supervises. OpenClaw agents run inside the OpenClaw Gateway. Each runtime has a `RuntimeAdapter` that maps its output onto one normalized event stream; see [The RuntimeAdapter trait](/internals/runtime-adapter).
 
 ### MCP servers give every runtime the same tools
 
-Clawboo hosts four MCP servers over the same SQLite data: Tasks (the board), Memory, Tools and TeamChat. Clawboo Native connects to them in-process. Claude Code, Codex and Hermes attach over loopback HTTP at `/api/mcp/*`; each run's attach URL carries a token the server checks. OpenClaw agents get Tasks, Memory and Tools through the Gateway's config, and no TeamChat. The same servers ship as stdio bins (`clawboo-mcp-tasks` and three more) for agents outside Clawboo; those bins open `~/.openclaw/clawboo/clawboo.db` unless `CLAWBOO_DB_PATH` says otherwise. See [MCP servers](/operating/mcp-servers).
+Clawboo hosts four MCP servers over the same SQLite data: Tasks (the board), Memory, Tools and TeamChat. Clawboo Native connects to them in-process. Claude Code, Codex and Hermes attach over loopback HTTP at `/api/mcp/*`; each attach URL carries a token the server checks. Hermes's gateway keeps one signed URL per agent and server, and the server binds each call to that agent's run in progress. OpenClaw agents get Tasks, Memory and Tools through the Gateway's config, and no TeamChat. The same servers ship as stdio bins (`clawboo-mcp-tasks` and three more) for agents outside Clawboo; those bins open `~/.openclaw/clawboo/clawboo.db` unless `CLAWBOO_DB_PATH` says otherwise. See [MCP servers](/operating/mcp-servers).
 
 ### The OpenClaw Gateway is reached two ways
 
@@ -119,7 +119,7 @@ Most work reaches a runtime along one of two server paths. They share the board 
 
 Two smaller paths sit beside these. A Routine fire aimed at one OpenClaw agent goes through a dispatcher on the server's Gateway connection (`apps/web/server/lib/routines/openclawDispatch.ts`), with no worktree and no verification. A 1:1 chat with a Clawboo Native, Claude Code, Codex or Hermes agent runs one conversational turn per message in `apps/web/server/lib/agentChat/driveAgentChat.ts`, with no board task, in the agent's team folder (`teams/_no-team` for an agent on no team).
 
-Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off on every path, 1:1 chat included. A worktree keeps a task's file changes apart, but it is not a sandbox, and neither is the task's or team's folder that a run without a worktree starts in. [What agents can do](/concepts/permissions) is the page that explains this; [Verification](/concepts/verification) and [Governance](/concepts/governance) cover the checks and budget guards per path.
+Claude Code and Codex run with their own sandboxes and approval prompts turned off on every path, 1:1 chat included, and Hermes asks only before the commands its own policy flags. A worktree keeps a task's file changes apart, but it is not a sandbox, and neither is the task's or team's folder that a run without a worktree starts in. [What agents can do](/concepts/permissions) is the page that explains this; [Verification](/concepts/verification) and [Governance](/concepts/governance) cover the checks and budget guards per path.
 
 ## Where to start reading
 

@@ -81,7 +81,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 ### H
 
-**Hermes**: an open-source agent, published as the `hermes-agent` Python package, and one of the runtimes Clawboo can run agents on. It keeps its own memory and skills between runs. See [Hermes](/runtimes/hermes).
+**Hermes**: an open-source agent from Nous Research, and one of the runtimes Clawboo can run agents on. Clawboo installs its GitHub release and runs every Hermes agent as a Hermes profile in one Hermes gateway that Clawboo starts and watches. It keeps its own memory, skills and scheduled jobs between runs. See [Hermes](/runtimes/hermes).
 
 **Home**: a team's own page, opened from the team's icon on the team rail. It is a placeholder for the team's dashboards and its agents' work; to work with the team, open **General**. See [Tour the dashboard](/getting-started/dashboard-tour).
 
@@ -221,7 +221,7 @@ The dashboard's labels are the names these docs use. The right-hand column lists
 | `RuntimeAdapter`                                  | The interface every runtime implements, with `capabilities()`, `start()`, `events()`, `abort()` and an optional `steer()` among its members                               | [The RuntimeAdapter trait](/internals/runtime-adapter)             |
 | `RuntimeEvent`                                    | The seven event kinds every adapter emits: `text-delta`, `tool-call`, `tool-result`, `status`, `cost`, `done` and `error`                                                 | [The RuntimeAdapter trait](/internals/runtime-adapter)             |
 | Runtime ids                                       | `clawboo-native`, `openclaw`, `claude-code`, `codex` and `hermes`, plus the test-only `clawboo-mock`, offered only with `CLAWBOO_ENABLE_MOCK_RUNTIME=1`                   | [Choose a runtime](/runtimes/index)                                |
-| Steering modes                                    | `live` (Clawboo Native, OpenClaw, Claude Code, Codex, Hermes over ACP) and `interrupt-resume` (Hermes without ACP)                                                        | [Steering a running task](/runtimes/index#steering-a-running-task) |
+| Steering modes                                    | `live` (Clawboo Native, OpenClaw, Claude Code, Codex and Hermes); `interrupt-resume` is defined for a runtime that can only stop and resume, and none uses it today       | [Steering a running task](/runtimes/index#steering-a-running-task) |
 | `AgentSource`                                     | Where the agent list comes from: five sources (OpenClaw, Clawboo Native, and one each for Claude Code, Codex and Hermes), mirrored into SQLite                            | [AgentSource and the agent registry](/internals/agent-source)      |
 | `CapabilitySource`                                | Six sources that report skills, tools and connectors: one per runtime, plus `connector`                                                                                   | [Capabilities](/concepts/capabilities)                             |
 | Manageability tier                                | Whether Clawboo can change a capability: `managed`, `external-write`, `runtime-of-record` or `observe-only`                                                               | [Capabilities](/concepts/capabilities)                             |

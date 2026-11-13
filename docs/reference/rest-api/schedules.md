@@ -1,25 +1,34 @@
 ---
 title: 'Schedules API'
-description: 'REST reference for Routines and OpenClaw cron jobs: list, create, change, pause, resume, delete and run schedules, and read run history and upcoming runs.'
+description: 'REST reference for Routines, OpenClaw cron jobs and Hermes jobs: list, create, change, pause, resume, delete and run schedules, and read run history and upcoming runs.'
 keywords:
-  ['routines', 'scheduler', 'schedules', 'cron', 'gateway cron', 'occurrences', 'run history']
+  [
+    'routines',
+    'scheduler',
+    'schedules',
+    'cron',
+    'gateway cron',
+    'hermes jobs',
+    'occurrences',
+    'run history',
+  ]
 ---
 
-Use these routes to read and change everything that runs on a schedule. One list covers two sources: Clawboo's own [Routines](/using/routines), which schedule team work, and the OpenClaw Gateway's cron jobs, which run an OpenClaw agent's own work outside any team. The schedule list always answers and reports a source that is down as data. A write goes to the source that owns the schedule, and its errors come back as precise status codes with a stable `code`.
+Use these routes to read and change everything that runs on a schedule. One list covers three sources: Clawboo's own [Routines](/using/routines), which schedule team work; the OpenClaw Gateway's cron jobs, which run an OpenClaw agent's own work outside any team; and the jobs each Hermes agent keeps in the Hermes gateway Clawboo runs, which are that agent's own work too. The schedule list always answers and reports a source that is down as data. A write goes to the source that owns the schedule, and its errors come back as precise status codes with a stable `code`.
 
 <Note>
 
-The two sources stay separate. A Routine schedules team work on any runtime: a message to a team's lead (a team routine) or a board task for one agent (an agent routine). A Gateway cron job schedules an OpenClaw agent's own work. Clawboo never puts team work into the Gateway's cron and never creates Gateway cron jobs by itself; the Routines view shows them and lets you change them.
+Team work and the runtimes' own jobs stay separate. A Routine schedules team work on any runtime: a message to a team's lead (a team routine) or a board task for one agent (an agent routine). A Gateway cron job schedules an OpenClaw agent's own work, and a Hermes job a Hermes agent's own work. Clawboo never puts team work into the Gateway's cron or Hermes's scheduler, and never creates jobs there by itself; the Routines view shows them and lets you change them.
 
 </Note>
 
-Every schedule has a **composite `id`** of the form `<source>:<rawId>`: `clawboo-routine:<routine-id>` or `openclaw-gateway-cron:<gateway-job-id>`. The `:id` path segment is URL-decoded and sent to the source it names; an id that matches no source answers **404**. Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address). Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
+Every schedule has a **composite `id`** of the form `<source>:<rawId>`: `clawboo-routine:<routine-id>`, `openclaw-gateway-cron:<gateway-job-id>` or `hermes-gateway-jobs:<profile>.<job-id>`. The `:id` path segment is URL-decoded and sent to the source it names; an id that matches no source answers **404**. Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address). Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
 
 ## Routes
 
 | Method | Path                         | Summary                                                                  | Stream? |
 | ------ | ---------------------------- | ------------------------------------------------------------------------ | ------- |
-| GET    | `/api/schedules`             | Every schedule from both sources (a source that is down is reported)     | No      |
+| GET    | `/api/schedules`             | Every schedule from every source (a source that is down is reported)     | No      |
 | POST   | `/api/schedules`             | Create a schedule in the source named by `source`                        | No      |
 | PATCH  | `/api/schedules/:id`         | Pause, resume, or change the cron spec, label, template, payload, target | No      |
 | DELETE | `/api/schedules/:id`         | Remove a schedule                                                        | No      |
@@ -33,7 +42,7 @@ Every schedule has a **composite `id`** of the form `<source>:<rawId>`: `clawboo
 
 ## The `ScheduleRecord` shape
 
-Both sources describe their schedules in one shape. It is the element type of `schedules[]` on `GET`, and the `schedule` returned by a create, change, pause or resume.
+Every source describes its schedules in one shape. It is the element type of `schedules[]` on `GET`, and the `schedule` returned by a create, change, pause or resume.
 
 ```ts
 {
@@ -41,8 +50,8 @@ Both sources describe their schedules in one shape. It is the element type of `s
   sourceScheduleId: string   // the raw id inside the owning source
   runtime: string            // the runtime a run uses ('openclaw', 'clawboo-native', ...); 'unknown' when there is
                              //   no agent to read it from (see the note on team routines below)
-  owner: string              // which engine runs it ('clawboo' or 'openclaw')
-  source: 'clawboo-routine' | 'openclaw-gateway-cron'
+  owner: string              // which engine runs it ('clawboo', 'openclaw' or 'hermes')
+  source: 'clawboo-routine' | 'openclaw-gateway-cron' | 'hermes-gateway-jobs'
   agentId: string            // the agent a run uses; '' for a team routine
   target?: 'team' | 'agent'  // Routines: who a run goes to
   teamId?: string | null     // Routines: the team whose chat or board receives a run
@@ -52,7 +61,7 @@ Both sources describe their schedules in one shape. It is the element type of `s
   label?: string
   description?: string       // Routines: the instructions each run carries
   cronSpec: string           // a cron expression, `once@<iso>`, `every:<ms>[@anchor:<ms>]` or `at:<iso>`;
-                             //   a Gateway cron expression with a time zone reads `<expr>@tz:<zone>`
+                             //   a Gateway cron or Hermes job expression with a time zone reads `<expr>@tz:<zone>`
   nextRunAt: number | null   // epoch ms of the next run; null when none is scheduled, which
                              //   includes a paused Routine
   lastRunAt?: number
@@ -67,18 +76,19 @@ Both sources describe their schedules in one shape. It is the element type of `s
 }
 ```
 
-`domain` says what a schedule is for: `team-task` is team work that Clawboo schedules (Routines), and `runtime-own-life` is an OpenClaw agent's own job in the Gateway's cron. `manageability` says who owns it: `managed` means Clawboo owns and runs it, `external-write` means the Gateway owns and runs it and Clawboo changes it through the Gateway, and `observe-only` (no source uses it today) would be read-only.
+`domain` says what a schedule is for: `team-task` is team work that Clawboo schedules (Routines), and `runtime-own-life` is an agent's own job in its runtime's scheduler (the OpenClaw Gateway's cron, or Hermes's). `manageability` says who owns it: `managed` means Clawboo owns and runs it, `external-write` means the runtime owns and runs it and Clawboo changes it through the runtime's API, and `observe-only` (no source uses it today) would be read-only.
 
 A team routine stores no agent (`agentId` is `''`). Every answer that returns a schedule (the list, the occurrences route, and a create, change, pause or resume) fills in `teamName` and `agentName`, and for a team routine takes `agentName` and `runtime` from the team's current lead. An agent routine whose agent is gone reads `runtime: 'unknown'`.
 
-| `source`                | `domain`           | `manageability`  | `owner`    | Backed by                                                    |
-| ----------------------- | ------------------ | ---------------- | ---------- | ------------------------------------------------------------ |
-| `clawboo-routine`       | `team-task`        | `managed`        | `clawboo`  | Clawboo's database (the `scheduled_runs` table)              |
-| `openclaw-gateway-cron` | `runtime-own-life` | `external-write` | `openclaw` | The Gateway's cron, through Clawboo's own Gateway connection |
+| `source`                | `domain`           | `manageability`  | `owner`    | Backed by                                                                                    |
+| ----------------------- | ------------------ | ---------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| `clawboo-routine`       | `team-task`        | `managed`        | `clawboo`  | Clawboo's database (the `scheduled_runs` table)                                              |
+| `openclaw-gateway-cron` | `runtime-own-life` | `external-write` | `openclaw` | The Gateway's cron, through Clawboo's own Gateway connection                                 |
+| `hermes-gateway-jobs`   | `runtime-own-life` | `external-write` | `hermes`   | Each Hermes agent's profile in the Hermes gateway, through its API (`/p/<profile>/api/jobs`) |
 
 <Note>
 
-There is no third source. Claude Code, Codex, Hermes and Clawboo Native have no scheduler of their own that Clawboo uses; scheduling any of them is a Routine.
+Claude Code, Codex and Clawboo Native have no scheduler of their own; scheduling any of them is a Routine. So is team work on OpenClaw and Hermes.
 
 </Note>
 
@@ -86,7 +96,7 @@ There is no third source. Claude Code, Codex, Hermes and Clawboo Native have no 
 
 ## `GET /api/schedules`
 
-Every schedule from both sources, with each one's `teamName` and `agentName` filled in. A team routine stores no agent, so it reports the team's current lead (the agent its next run would reach) as `agentName` and `runtime`. A source that fails or is disconnected does not fail the request: it adds a degraded entry to `sources[]`. A Gateway cron list read earlier is served from its cache; with no cache, its jobs are absent until the Gateway reconnects. This route always answers **200**.
+Every schedule from every source, with each one's `teamName` and `agentName` filled in. A team routine stores no agent, so it reports the team's current lead (the agent its next run would reach) as `agentName` and `runtime`. A source that fails or is disconnected does not fail the request: it adds a degraded entry to `sources[]`. A Gateway cron list read earlier is served from its cache; with no cache, its jobs are absent until the Gateway reconnects. Hermes jobs work the same way while the Hermes gateway is not running, and a read never starts it. This route always answers **200**.
 
 - **Path/query params**: none.
 - **Request body**: none.
@@ -99,16 +109,16 @@ Every schedule from both sources, with each one's `teamName` and `agentName` fil
 {
   schedules: ScheduleRecord[]
   sources: Array<{
-    sourceId: 'clawboo-routine' | 'openclaw-gateway-cron'
+    sourceId: 'clawboo-routine' | 'openclaw-gateway-cron' | 'hermes-gateway-jobs'
     ok: boolean
     degraded: boolean
-    reason?: string // 'gateway_disconnected', 'stale_cache', 'not_configured', or an error message
+    reason?: string // 'gateway_disconnected', 'gateway_stopped', 'stale_cache', 'not_configured', or an error message
     at: number      // epoch ms of this read
   }>
 }
 ```
 
-The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs.
+The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs. When the Hermes gateway is not running, the Hermes jobs source reports `reason: 'gateway_stopped'` with no cache, or `'stale_cache'`; a profile it could not read while the gateway runs makes it degraded with that error as the reason. With no Hermes agents, or no Hermes that Clawboo installed, it reports `{ ok: false, degraded: false, reason: 'not_configured' }` and no jobs.
 
 ### Example
 
@@ -122,7 +132,7 @@ curl http://localhost:18790/api/schedules
 
 **A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
-Creates a schedule in the source named by `source`. Before the source is touched, two checks run in order: a read-only (`observe-only`) source answers **403**, and a `domain: 'team-task'` create aimed at the Gateway cron answers **422** (the Gateway cron source refuses it too). The source then runs its own checks.
+Creates a schedule in the source named by `source`. Before the source is touched, two checks run in order: a read-only (`observe-only`) source answers **403**, and a `domain: 'team-task'` create aimed at the Gateway cron or Hermes's jobs answers **422** (both sources refuse it too). The source then runs its own checks.
 
 For a `clawboo-routine` create, the cron spec is checked (a spec that does not parse is a **400**), and the Routine's task template is built from `label`, `taskTemplate` and `target`. The template's `title` defaults to `label` (or `Scheduled team task`), and its `description` is the instructions each run carries. The target is checked too:
 
@@ -133,12 +143,14 @@ A target that fails these checks is a **400** with `code: "invalid_routine_targe
 
 For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` with the job's `payload` (default `{ kind: 'agentTurn', message: label }`, with `'Scheduled wake'` when there is no `label`) and the session target that payload needs: `main` for a `systemEvent`, `isolated` for anything else. The Gateway accepts a mismatched pair but then skips every run, so Clawboo always picks the pair itself.
 
+For a `hermes-gateway-jobs` create, `agentId` must name a Clawboo Hermes agent. Clawboo creates the job in that agent's Hermes profile with `label` as its name (`Scheduled job` without one), the schedule, and a prompt from `payload.prompt`, else `payload.message`, else `label`; a job with no prompt is refused. Hermes takes a cron expression without a time zone (it runs jobs in its own zone), an interval in whole minutes, or one time. The job saves its output in the profile (`deliver: local`), since Hermes's chat channels are off. A write starts the Hermes gateway when it is not running.
+
 - **Path/query params**: none.
 - **Request body**: a `ScheduleCreateSpec`. `source`, `domain` and `cronSpec` are required, plus a `teamId` for a team routine or an `agentId` for anything else:
 
 ```ts
 {
-  source: 'clawboo-routine' | 'openclaw-gateway-cron' // required
+  source: 'clawboo-routine' | 'openclaw-gateway-cron' | 'hermes-gateway-jobs' // required
   domain: 'team-task' | 'runtime-own-life'            // required
   cronSpec: string                                    // required
   target?: 'team' | 'agent'    // Routines: who a run goes to (default 'agent')
@@ -148,7 +160,8 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
   teamTaskId?: string | null   // agent routines: bind to an existing board task (one-shot specs only)
   taskTemplate?: unknown       // Routines: the task template, for example { description }.
                                // Its priority stops at 1 (High) unless the person check passes
-  payload?: unknown            // Gateway jobs: the cron payload, for example { kind: 'agentTurn', message }
+  payload?: unknown            // Gateway jobs: the cron payload, for example { kind: 'agentTurn', message };
+                               // Hermes jobs: { prompt }
   tenantId?: string | null     // unused
 }
 ```
@@ -163,7 +176,7 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
 }
 ```
 
-**`400 Bad Request`**: a required field is missing, `source`, `domain` or `target` is unknown, or a source check failed. `code` is `invalid_body` for the shape check or an invalid task template; `invalid_cron_spec` for a cron spec that does not parse; `invalid_routine_target` for a target that does not check out; and `bound_recurring_schedule` for a recurring spec bound to an existing task. Messages on this page that contain an em dash show it as the JSON escape `\u2014`:
+**`400 Bad Request`**: a required field is missing, `source`, `domain` or `target` is unknown, or a source check failed. `code` is `invalid_body` for the shape check or an invalid task template; `invalid_cron_spec` for a cron spec that does not parse; `invalid_routine_target` for a target that does not check out, or a Hermes job Hermes cannot take (no prompt, a time zone, an interval that is not whole minutes, an agent not on Hermes, or a job Hermes refused); and `bound_recurring_schedule` for a recurring spec bound to an existing task. Messages on this page that contain an em dash show it as the JSON escape `\u2014`:
 
 ```json
 {
@@ -215,7 +228,7 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
 }
 ```
 
-**`422 Unprocessable Entity`**: a `domain: 'team-task'` create was aimed at the Gateway cron:
+**`422 Unprocessable Entity`**: a `domain: 'team-task'` create was aimed at the Gateway cron or Hermes's jobs:
 
 ```json
 {
@@ -224,7 +237,7 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
 }
 ```
 
-**`503 Service Unavailable`**: the target is the Gateway cron and Clawboo's Gateway connection is down:
+**`503 Service Unavailable`**: the target is the Gateway cron and Clawboo's Gateway connection is down, or the target is Hermes's jobs and the Hermes gateway does not answer:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
@@ -295,6 +308,12 @@ For a Gateway cron job:
 - **A change** becomes `cron.update { id, patch }` with the changed `label` (as the job's name), `cronSpec` and `payload`; the Routine-only fields are ignored. A changed `payload` carries the session target it needs, as on create.
 - **The job id is not checked by Clawboo.** It goes to the Gateway as is. When the Gateway has no job with that id, the answer is **404** `unknown_schedule`; any other Gateway error answers **500** with the Gateway's message. The same holds for delete and run.
 
+For a Hermes job:
+
+- **Pause and resume** become Hermes's `POST .../jobs/<job-id>/pause` and `/resume` on the agent's profile.
+- **A change** sends the changed `label` (as the job's name), `cronSpec` and prompt (`payload.prompt`, else `payload.message`) to Hermes as a `PATCH` on the job, with the same schedule rules as on create; the Routine-only fields are ignored. A job's model, provider or folder cannot be changed through the API.
+- **The id is checked first.** It must be `<profile>.<job-id>` with a 12-character hex job id, for a profile that belongs to a Clawboo Hermes agent; otherwise the answer is **404** `unknown_schedule`, as it is when Hermes has no such job. A change Hermes refuses answers **400** `invalid_routine_target`. The same holds for delete and run.
+
 - **Path params**: `id` (composite schedule id).
 - **Request body**: one of:
 
@@ -314,14 +333,14 @@ For a Gateway cron job:
     target?: 'team' | 'agent'     // Routines: point the Routine somewhere else
     agentId?: string | null       // Routines
     teamId?: string | null        // Routines
-    payload?: unknown             // Gateway jobs
+    payload?: unknown             // Gateway jobs; Hermes jobs: { prompt }
   }
 }
 ```
 
 ### Responses
 
-**`200 OK`**: the schedule was changed; the updated record is returned. A Gateway job can come back as `schedule: null` when it cannot be read back right after the change:
+**`200 OK`**: the schedule was changed; the updated record is returned. A Gateway or Hermes job can come back as `schedule: null` when it cannot be read back right after the change:
 
 ```ts
 {
@@ -348,7 +367,7 @@ For a Gateway cron job:
 }
 ```
 
-**`404 Not Found`**: `:id` matches no source, or names a Routine or Gateway job that does not exist:
+**`404 Not Found`**: `:id` matches no source, or names a Routine, Gateway job or Hermes job that does not exist:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
@@ -360,7 +379,7 @@ For a Gateway cron job:
 { "error": "Illegal schedule transition running → paused", "code": "illegal_schedule_transition" }
 ```
 
-**`503 Service Unavailable`**: the target is a Gateway job and Clawboo's Gateway connection is down:
+**`503 Service Unavailable`**: the target is a Gateway job and Clawboo's Gateway connection is down, or a Hermes job and the Hermes gateway does not answer:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
@@ -397,7 +416,7 @@ curl -X PATCH http://localhost:18790/api/schedules/clawboo-routine:<routine-id> 
 
 **A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
-Removes a schedule: a Routine is deleted from Clawboo's database, and a Gateway job is removed with the Gateway's `cron.remove`.
+Removes a schedule: a Routine is deleted from Clawboo's database, a Gateway job is removed with the Gateway's `cron.remove`, and a Hermes job with a `DELETE` on the job in Hermes.
 
 - **Path params**: `id` (composite schedule id).
 - **Request body**: none.
@@ -419,13 +438,13 @@ Removes a schedule: a Routine is deleted from Clawboo's database, and a Gateway 
 }
 ```
 
-**`404 Not Found`**: `:id` matches no source, or names a Routine or Gateway job that does not exist:
+**`404 Not Found`**: `:id` matches no source, or names a Routine, Gateway job or Hermes job that does not exist:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
 ```
 
-**`503 Service Unavailable`**: the target is a Gateway job and Clawboo's Gateway connection is down:
+**`503 Service Unavailable`**: the target is a Gateway job and Clawboo's Gateway connection is down, or a Hermes job and the Hermes gateway does not answer:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
@@ -450,7 +469,7 @@ curl -X DELETE http://localhost:18790/api/schedules/openclaw-gateway-cron:<job-i
 
 **A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
-Runs a schedule now. The answer only says the run was queued; it does not wait for the run. A Routine moves to `queued` and Clawboo's scheduler picks it up at once; a Gateway job gets the Gateway's `cron.run { id, mode: 'force' }`. Only an `idle` Routine can be queued: a paused, errored, queued, claimed or running one answers **409**. So does one a [pause](/using/board#pause-work) holds back, in words that say what is paused. Follow the result in the Routine's run history (`GET /api/schedules/:id/runs`), the event log, or OpenClaw's own cron history.
+Runs a schedule now. The answer only says the run was queued; it does not wait for the run. A Routine moves to `queued` and Clawboo's scheduler picks it up at once; a Gateway job gets the Gateway's `cron.run { id, mode: 'force' }`; a Hermes job gets Hermes's `/run`, and Hermes runs it at its next scheduler tick, within a minute (a paused job is resumed by it). Only an `idle` Routine can be queued: a paused, errored, queued, claimed or running one answers **409**. So does one a [pause](/using/board#pause-work) holds back, in words that say what is paused. Follow the result in the Routine's run history (`GET /api/schedules/:id/runs`), the event log, or OpenClaw's own cron history.
 
 - **Path params**: `id` (composite schedule id).
 - **Request body**: none.
@@ -472,7 +491,7 @@ Runs a schedule now. The answer only says the run was queued; it does not wait f
 }
 ```
 
-**`404 Not Found`**: `:id` matches no source, or names a Routine or Gateway job that does not exist:
+**`404 Not Found`**: `:id` matches no source, or names a Routine, Gateway job or Hermes job that does not exist:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
@@ -484,7 +503,7 @@ Runs a schedule now. The answer only says the run was queued; it does not wait f
 { "error": "Illegal schedule transition paused → queued", "code": "illegal_schedule_transition" }
 ```
 
-**`503 Service Unavailable`**: the target is a Gateway job and Clawboo's Gateway connection is down:
+**`503 Service Unavailable`**: the target is a Gateway job and Clawboo's Gateway connection is down, or a Hermes job and the Hermes gateway does not answer:
 
 ```json
 { "error": "gateway_disconnected", "code": "schedule_source_unavailable" }
@@ -507,7 +526,7 @@ curl -X POST http://localhost:18790/api/schedules/clawboo-routine:<routine-id>/r
 
 ## `GET /api/schedules/:id/runs`
 
-A Routine's recent runs, newest first, built from the Routine's events in the event log. An agent routine's run carries the board task it created, with that task's current title and status. The Gateway keeps its own run history, so a Gateway job id returns an empty list.
+A Routine's recent runs, newest first, built from the Routine's events in the event log. An agent routine's run carries the board task it created, with that task's current title and status. The Gateway and Hermes keep their own run history, so a Gateway or Hermes job id returns an empty list.
 
 - **Path params**: `id` (composite schedule id).
 - **Query params**: `limit` (optional, default `10`, kept between 1 and 50).
@@ -565,7 +584,7 @@ Only runs after now are counted, and only for Routines that will run. These are 
 - a team routine whose team is gone, archived, opted out of server orchestration, or has no active member;
 - an agent routine whose agent is gone, archived, or a person;
 - a Routine a [pause](/using/board#pause-work) or an archived team holds back, since it does not fire until that ends;
-- every OpenClaw Gateway cron job (those are an OpenClaw agent's own work, not team work).
+- every OpenClaw Gateway cron job and Hermes job (those are an agent's own work, not team work).
 
 For an `idle` Routine, the first run is its stored `nextRunAt`, the time the scheduler will actually use, and the cron spec gives the runs after it. A result is reused for up to a minute, and never past its first run, so boards that poll this cost little.
 
@@ -683,30 +702,30 @@ curl -X PUT http://localhost:18790/api/schedules/time-zone \
 
 Every error here is `{ "error": string, "code"?: string }`. Branch on `code`, never on the message:
 
-| `code`                        | Status | Meaning                                                                          |
-| ----------------------------- | ------ | -------------------------------------------------------------------------------- |
-| `invalid_body`                | 400    | The body failed the shape check, or the template is invalid                      |
-| `invalid_cron_spec`           | 400    | The cron spec does not parse                                                     |
-| `bound_recurring_schedule`    | 400    | A recurring spec was bound to an existing board task (one-shot specs only)       |
-| `invalid_routine_target`      | 400    | A Routine's team or agent is missing, archived, or does not match                |
-| `invalid_bounds`              | 400    | The occurrence windows are missing, out of order, too many, or too wide          |
-| `invalid_time_zone`           | 400    | The scheduler time zone is not a time zone name                                  |
-| `unsupported_schedule_write`  | 403    | The source is read-only (`observe-only`) for that action                         |
-| `unknown_schedule`            | 404    | The id matched no source, Routine or Gateway job, or a bound task does not exist |
-| `duplicate_firing_owner`      | 409    | The bound board task is already scheduled by another engine; do not retry        |
-| `illegal_schedule_transition` | 409    | The pause, resume or run is not allowed from the current status                  |
-| `team_task_domain_violation`  | 422    | A `team-task` create was aimed at the Gateway cron                               |
-| `schedule_source_unavailable` | 503    | A write hit the Gateway cron while Clawboo's Gateway connection is down          |
-| _(none)_                      | 500    | Any other error                                                                  |
+| `code`                        | Status | Meaning                                                                                                                            |
+| ----------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_body`                | 400    | The body failed the shape check, or the template is invalid                                                                        |
+| `invalid_cron_spec`           | 400    | The cron spec does not parse                                                                                                       |
+| `bound_recurring_schedule`    | 400    | A recurring spec was bound to an existing board task (one-shot specs only)                                                         |
+| `invalid_routine_target`      | 400    | A Routine's team or agent is missing, archived, or does not match                                                                  |
+| `invalid_bounds`              | 400    | The occurrence windows are missing, out of order, too many, or too wide                                                            |
+| `invalid_time_zone`           | 400    | The scheduler time zone is not a time zone name                                                                                    |
+| `unsupported_schedule_write`  | 403    | The source is read-only (`observe-only`) for that action                                                                           |
+| `unknown_schedule`            | 404    | The id matched no source, Routine, Gateway job or Hermes job, or a bound task does not exist                                       |
+| `duplicate_firing_owner`      | 409    | The bound board task is already scheduled by another engine; do not retry                                                          |
+| `illegal_schedule_transition` | 409    | The pause, resume or run is not allowed from the current status                                                                    |
+| `team_task_domain_violation`  | 422    | A `team-task` create was aimed at the Gateway cron or Hermes's jobs                                                                |
+| `schedule_source_unavailable` | 503    | A write hit the Gateway cron while Clawboo's Gateway connection is down, or Hermes's jobs while the Hermes gateway does not answer |
+| _(none)_                      | 500    | Any other error                                                                                                                    |
 
 A cron spec that does not parse answers `code: "invalid_cron_spec"` with a message that starts `Invalid cron spec`. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
 
-**Source of truth:** `apps/web/server/api/schedules.ts`; the two sources in `apps/web/server/lib/scheduleSource/`; the scheduler time zone in `apps/web/server/lib/routines/timeZone.ts`; error classes in `packages/scheduler/src/errors.ts`; Routine states in `packages/db/src/routines/state-machine.ts`.
+**Source of truth:** `apps/web/server/api/schedules.ts`; the three sources in `apps/web/server/lib/scheduleSource/`; the scheduler time zone in `apps/web/server/lib/routines/timeZone.ts`; error classes in `packages/scheduler/src/errors.ts`; Routine states in `packages/db/src/routines/state-machine.ts`.
 
 ## Related
 
 - [Routines](/using/routines): create and manage Routines in the dashboard.
-- [Scheduling](/concepts/scheduling): how Routines and OpenClaw cron jobs differ, and how a run reaches a team.
+- [Scheduling](/concepts/scheduling): how Routines differ from OpenClaw's and Hermes's own jobs, and how a run reaches a team.
 - [The board](/concepts/the-board): bound tasks and the one-claim rule.
 - [System API](/reference/rest-api/system): the OpenClaw Gateway the cron source talks to.
 - [@clawboo/scheduler](/reference/packages/scheduler): the shared record type, sources and errors.

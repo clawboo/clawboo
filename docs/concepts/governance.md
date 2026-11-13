@@ -142,7 +142,7 @@ Separate approvals decide whether an agent may run a shell command or act in a c
 - A Clawboo Native agent's **Let this Boo ask to run commands** switch, off by default. When it is on, the agent asks before every command, and a run can ask at most 10 times. Commands are offered on runs that have a working folder, which includes team chat and one-to-one chat, and never on Windows.
 - Approvals for actions in connected apps. See [Approvals](/using/approvals).
 
-Claude Code, Codex and Hermes run with their own approval prompts turned off, so Clawboo does not ask before their commands. [What agents can do](/concepts/permissions) explains what that means for your files.
+Claude Code and Codex run with their own approval prompts turned off, so Clawboo does not ask before their commands. Hermes asks only before the commands its own policy flags, and each question is an approval card. [What agents can do](/concepts/permissions) explains what that means for your files.
 
 ## What these guardrails do not cover
 

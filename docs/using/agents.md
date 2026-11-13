@@ -88,7 +88,7 @@ In **Tasks & Routines**, click a task to read its output and progress. The comme
 
 ## Chat with an agent
 
-The chat on an agent's page is a one-to-one conversation with that agent. For a Clawboo Native, Claude Code, Codex or Hermes agent, the Clawboo server runs the chat, so it needs no OpenClaw Gateway. The reply appears as the agent writes it, except on Hermes, whose reply appears in one piece when it finishes. An OpenClaw agent's chat goes through the OpenClaw Gateway, so it works while the Gateway is connected. Only [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat) can hand work to a team, and not on OpenClaw; a hand-off in any other agent's reply shows as a **Not handed off** note.
+The chat on an agent's page is a one-to-one conversation with that agent. For a Clawboo Native, Claude Code, Codex or Hermes agent, the Clawboo server runs the chat, so it needs no OpenClaw Gateway. The reply appears as the agent writes it. An OpenClaw agent's chat goes through the OpenClaw Gateway, so it works while the Gateway is connected. Only [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat) can hand work to a team, and not on OpenClaw; a hand-off in any other agent's reply shows as a **Not handed off** note.
 
 - The chat shows the latest 150 messages. **Load earlier messages** at the top brings in older ones.
 - While the agent works, the send button turns into **Stop**, and it stays that way until the turn ends.
@@ -192,7 +192,7 @@ Clawboo keeps the files of Clawboo Native, Claude Code, Codex and Hermes agents 
 
 See [Command permissions](/using/command-permissions) for the details.
 
-Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo runs them with their own approval prompts and sandboxes turned off, so they can read and change any file your user account can. See [What agents can do](/concepts/permissions).
+Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo runs Claude Code and Codex with their own approval prompts and sandboxes turned off, and Hermes asks only before the commands its own policy flags, so all three can read and change any file your user account can. See [What agents can do](/concepts/permissions).
 
 ## Move an agent to another team
 

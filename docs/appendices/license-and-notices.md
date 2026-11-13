@@ -112,7 +112,8 @@ The 44 curated skills in the marketplace's **Skills** tab are first-party annota
 Clawboo coordinates other open-source AI agent [runtimes](/runtimes/index) as peer teammates. Each runs on its own terms under its own license. Clawboo drives each runtime through its own CLI, SDK or Gateway, and the runtimes reach Clawboo's board, memory and tools over [MCP](/operating/mcp-servers). The acknowledgements section of [`THIRD_PARTY_NOTICES.md`](https://github.com/clawboo/clawboo/blob/main/THIRD_PARTY_NOTICES.md) credits:
 
 - **OpenClaw**: runs its agents through its own Gateway. See [OpenClaw](/runtimes/openclaw).
-- **Hermes** (`hermes-agent`), **Claude Code** (Anthropic Claude Agent SDK), and **Codex** (OpenAI Codex CLI): the runtimes Clawboo starts for each run.
+- **Hermes** (`hermes-agent`): runs its agents through its own gateway, which Clawboo starts. See [Hermes](/runtimes/hermes).
+- **Claude Code** (Anthropic Claude Agent SDK) and **Codex** (OpenAI Codex CLI): the runtimes Clawboo starts for each run.
 
 It also credits prior art in the agent-orchestration space (Paperclip, vibe-kanban, Nous Research's `hermes-paperclip-adapter`, and Graphify) as design inspiration.
 

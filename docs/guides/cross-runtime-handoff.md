@@ -34,7 +34,7 @@ A handoff needs a git worktree, a separate checkout Clawboo makes for one task. 
 
 <Warning>
 
-A worktree keeps a task's file changes apart from your own checkout. It is not a sandbox. Claude Code, Codex and Hermes run with their approval prompts turned off and can read and change any file your user account can. See [What agents can do](/concepts/permissions).
+A worktree keeps a task's file changes apart from your own checkout. It is not a sandbox. Claude Code and Codex run with their approval prompts turned off, Hermes asks only before the commands its own policy flags, and all three can read and change any file your user account can. See [What agents can do](/concepts/permissions).
 
 </Warning>
 

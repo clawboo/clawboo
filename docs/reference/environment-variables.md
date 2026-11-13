@@ -41,6 +41,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_API_PORT`                     | unset (scan from 18790)           | Exact port for the dashboard                                           |
 | `CLAWBOO_API_PORT_START`               | `18790`                           | First port of the 20-port scan                                         |
 | `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset           |
+| `CLAWBOO_HERMES_GATEWAY_PORT`          | `8642`                            | First port the Hermes gateway tries, on `127.0.0.1`                    |
 | **Folders**                            |                                   |                                                                        |
 | `CLAWBOO_HOME`                         | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
 | `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
@@ -74,7 +75,6 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | **Runs and verification**              |                                   |                                                                        |
 | `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn              |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                                   |
-| `CLAWBOO_HERMES_TRANSPORT`             | unset (ACP, else quiet)           | How Hermes runs are driven: `acp` or `quiet`                           |
 | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                                 |
 | `CLAWBOO_MAX_FIX_CYCLES`               | `1`                               | Retries after a failed verification                                    |
 | `CLAWBOO_REVIEWER_MODEL`               | the builder's model               | Model for the verification reviewer                                    |
@@ -247,6 +247,16 @@ A port set by a hosting platform.
 
 Honored only when `CLAWBOO_API_PORT` is unset and the server is not running in development mode (`--dev`). Like `CLAWBOO_API_PORT` it has no fallback: a taken port stops the server with `PORT=N is already in use (set by hosting platform).`
 
+### CLAWBOO_HERMES_GATEWAY_PORT
+
+The port the Hermes gateway's API server listens on, on `127.0.0.1` only.
+
+- Type: whole number, 1 to 65535
+- Default: `8642`, Hermes's own default
+- Example: `CLAWBOO_HERMES_GATEWAY_PORT=9642`
+
+Clawboo starts the gateway on the first free port from this one, trying 40 in all, and starts it on the port it used last when it restarts. When none of them is free, the gateway does not start and the **Gateway** section of the Hermes row says so. Any value that is not a whole number from 1 to 65535 means the default. It takes effect the next time the gateway starts. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+
 ## Folders
 
 ### CLAWBOO_HOME
@@ -275,7 +285,7 @@ With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, the default is `<agent home>
 
 ### CLAWBOO_RUNTIMES_DIR
 
-The runtimes folder, where Clawboo installs the runtimes it manages: OpenClaw, Claude Code's Agent SDK and Codex.
+The runtimes folder, where Clawboo installs the runtimes it manages: OpenClaw, Claude Code's Agent SDK, Codex and Hermes.
 
 - Type: path; a leading `~` is expanded and a relative path is resolved
 - Default: `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes` (`%USERPROFILE%\clawboo-runtimes` on Windows)
@@ -674,14 +684,6 @@ How many agent runs Clawboo executes at once, across every team and chat on the 
 
 How long a run may go without producing any event before Clawboo stops it. Every event restarts the clock, so a run that keeps working is never cut off. It applies to team chat runs (including delegated tasks and team Routines), to agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and to one-to-one chat with those agents. A delegated task in team chat also has its own fixed 8-minute idle watchdog; see [Limits and defaults](/reference/limits-and-defaults). Time the computer spends asleep does not count, except a sleep of under about a minute.
 
-### CLAWBOO_HERMES_TRANSPORT
-
-- Type: `acp` or `quiet`
-- Default: unset
-- Example: `CLAWBOO_HERMES_TRANSPORT=quiet`
-
-How Clawboo drives Hermes runs. Unset, it uses `hermes acp`, Hermes's Agent Client Protocol mode, and falls back to the quiet one-shot `hermes chat` for a run where `hermes acp` cannot start or its handshake fails or times out (a run that stalls after the handshake does not fall back); after such a fallback it skips ACP for ten minutes. `quiet` always uses `hermes chat`. `acp` always tries ACP first, even right after a fallback. See [Hermes](/runtimes/hermes).
-
 ### CLAWBOO_HOME_MUTEX_ACQUIRE_MS
 
 - Type: milliseconds
@@ -886,7 +888,7 @@ Where Clawboo looks for the sign-in your `codex login` saved (`auth.json`). Each
 - Default: `~/.hermes`
 - Example: `HERMES_HOME=/srv/hermes`
 
-Where Clawboo looks for your Hermes sign-in (`auth.json`). Each Hermes agent runs with its own Hermes home under `~/.clawboo/runtimes/`.
+Where Clawboo looks for your Hermes sign-in (`auth.json`). Each Hermes agent runs as a Hermes profile in the Hermes gateway's own home, `~/.clawboo/runtimes/hermes/_gateway`, which Clawboo sets as the gateway's `HERMES_HOME`.
 
 ### CLAUDE_CODE_USE_BEDROCK
 
@@ -920,10 +922,11 @@ Clawboo sets these on processes it starts. Do not set them yourself.
 | `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`                                      | A restarted server                                    | The port to keep; the new server waits up to 15 seconds for it to free. The new server also gets the old one's node options, such as `--max-old-space-size`, except the inspector's.                                                   |
 | `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS`, `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` | The Chrome DevTools connector                         | `1`, which turns off its usage statistics and its daily check for a newer version. If the server's own environment sets either variable, that value is passed on instead.                                                              |
 | `NODE_ENV`                                                                        | The server the CLI starts                             | `production`                                                                                                                                                                                                                           |
-| `CODEX_HOME`, `HERMES_HOME`                                                       | Each Codex or Hermes run                              | That agent's own home folder under `~/.clawboo/runtimes/`, or under `<agent home>/runtimes/` with `CLAWBOO_AGENT_USER` set                                                                                                             |
+| `CODEX_HOME`                                                                      | Each Codex run                                        | That agent's own home folder under `~/.clawboo/runtimes/`, or under `<agent home>/runtimes/` with `CLAWBOO_AGENT_USER` set                                                                                                             |
+| `HERMES_HOME`, `HERMES_GATEWAY_LOCK_DIR`                                          | The Hermes gateway                                    | Its home, `~/.clawboo/runtimes/hermes/_gateway` (`<agent home>/runtimes/hermes/_gateway` with `CLAWBOO_AGENT_USER` set), and a lock folder inside it, so a Hermes gateway you run yourself is left alone                               |
 | `CLAUDE_CONFIG_DIR`                                                               | Each Claude Code run, with `CLAWBOO_AGENT_USER` set   | That agent's own home folder under `<agent home>/runtimes/`                                                                                                                                                                            |
 | `CLAWBOO_AGENT_HOST_SOCKET`                                                       | The server and the agent host `clawboo-launch` starts | The agent host's socket in `CLAWBOO_RUN_DIR`. The launcher also passes the server your `CLAWBOO_AGENT_USER`, and gives the agent host only `PATH`, `HOME`, the locale and the socket path                                              |
-| The runtime's provider key, such as `ANTHROPIC_API_KEY`                           | Each runtime run                                      | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                       |
+| The runtime's provider key, such as `ANTHROPIC_API_KEY`                           | Each runtime run                                      | The key found in the environment, the vault or OpenClaw's `.env`. A Hermes run gets it in its Hermes profile's `.env` instead                                                                                                          |
 | `NO_PROXY`, `no_proxy`                                                            | Each runtime run, when a proxy is set                 | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                               |
 | `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`                                      | The `openclaw doctor --fix` repair run                | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                            |
 | `CLAWBOO_DB_PATH`                                                                 | Stdio attach snippets                                 | The dashboard's database file                                                                                                                                                                                                          |

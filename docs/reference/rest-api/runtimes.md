@@ -5,7 +5,7 @@ keywords:
   ['runtimes', 'providers', 'api keys', 'vault', 'disconnect', 'healthcheck', 'cli login', 'ollama']
 ---
 
-Use these routes to manage the runtimes Clawboo runs agents on, other than OpenClaw: Clawboo Native (built in), Claude Code, Codex and Hermes. They list each runtime's state, install a runtime's CLI, connect or disconnect its credentials, check a provider key, and run a board task on a runtime. The page also covers the provider-key routes behind **Settings > Providers**, the first-run onboarding routes, and the in-app ChatGPT sign-in.
+Use these routes to manage the runtimes Clawboo runs agents on, other than OpenClaw: Clawboo Native (built in), Claude Code, Codex and Hermes. They list each runtime's state, install a runtime, connect or disconnect its credentials, check a provider key, run a board task on a runtime, and read or control the Hermes gateway. The page also covers the provider-key routes behind **Settings > Providers**, the first-run onboarding routes, and the in-app ChatGPT sign-in.
 
 <Note>
 
@@ -28,6 +28,8 @@ An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Reques
 | POST   | `/api/runtimes/:id/run`               | Run a board task on the runtime and wait for the result                            | general   | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog                                                        | general   | No      |
 | GET    | `/api/runtimes/codex/models`          | The models your ChatGPT plan can run, read from your Codex CLI                     | general   | No      |
+| GET    | `/api/runtimes/hermes/gateway`        | The Hermes gateway's state, address and version                                    | general   | No      |
+| POST   | `/api/runtimes/hermes/gateway`        | Start, restart or stop the Hermes gateway                                          | sensitive | No      |
 | POST   | `/api/onboarding/native-leader-model` | Record the default native provider and model                                       | general   | No      |
 | GET    | `/api/onboarding/native-leader-model` | The recorded pick and what a new native agent would get                            | general   | No      |
 | GET    | `/api/onboarding/state`               | First-run signals in one call                                                      | general   | No      |
@@ -89,9 +91,10 @@ Lists every runtime with its capabilities, live health, and install and credenti
     hasCredential: boolean
     hasVaultCredential: boolean
     loggedIn: boolean // Codex only
-    updateRequired?: boolean // Codex only, once its model list has been read
+    updateRequired?: boolean // Codex, once its model list has been read; Hermes, when Clawboo's own install is missing or older
     cliVersion?: string | null // Codex only, once its model list has been read
-    acpMissing?: boolean // Hermes only, once Hermes has been asked
+    hermesGateway?: HermesGatewayStatus // Hermes only (see the gateway route below)
+    hermesVersion?: string | null // Hermes only: the version of Clawboo's own install
     codexAuth: boolean // Hermes only
     ollamaConnected: boolean // Clawboo Native only
     installCommand: string | null
@@ -102,7 +105,7 @@ Lists every runtime with its capabilities, live health, and install and credenti
     id: string
     name: string
     healthBin: string | null
-    packageManager: 'npm' | 'pip' | null
+    packageManager: 'npm' | 'pip' | 'release' | null
     installCommand: string | null
     builtIn: boolean
     authKind: 'api-key' | 'oauth' | 'none'
@@ -113,27 +116,28 @@ Lists every runtime with its capabilities, live health, and install and credenti
 }
 ```
 
-`steering` is `live` for Claude Code, Codex and Clawboo Native (a comment joins the running turn). Hermes's follows the way its runs go now: `live` over its ACP mode, `interrupt-resume` (the run is stopped and resumed with the comment) when Hermes has no ACP mode or runs are pinned to `hermes chat`, and `streaming` goes with it. `toolApproval: true` does not mean Clawboo asks before a tool runs: the coding runtimes run with their own approval prompts off (see [What agents can do](/concepts/permissions)).
+`steering` is `live` for Claude Code, Codex, Hermes and Clawboo Native (a comment joins the running turn), and `streaming` is `true` for all four. `toolApproval: true` does not mean Clawboo asks before a tool runs: Claude Code and Codex run with their own approval prompts off, and Hermes asks only before the commands its own policy flags (see [What agents can do](/concepts/permissions)).
 
 The status fields:
 
-| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `installed`          | all            | Always `true` for the built-in Clawboo Native. Claude Code is installed when the Claude Agent SDK is found, in Clawboo's runtimes folder first, else next to the server, and its own `claude` binary is present, found the way the SDK finds it: its platform package (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, the musl build first on a Linux without glibc). A run starts that binary and never a `claude` CLI, so a CLI on `PATH` does not count. Otherwise, whether the CLI resolves in Clawboo's runtimes folder (its launcher), on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes), in that order. |
-| `binPath`            | CLI runtimes   | The resolved CLI path (for a runtime Clawboo installed, its launcher in the runtimes folder), for Claude Code the Agent SDK's binary, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `terminalCommand`    | CLI runtimes   | How a person types the runtime's command in a terminal: the launcher's full path (quoted when needed) for a copy in the runtimes folder, else the bare name. `null` for Claude Code and Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `installProblem`     | CLI runtimes   | Why Clawboo's own copy cannot be used although one is on record, such as the Node.js it runs on having been removed, or `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `binSource`          | CLI runtimes   | Where `binPath` came from: `agent-sdk` for Claude Code, `cli` for the others. `null` with no binary, and for Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                                                                                                                                                                                                                                                                                                                                                                                        |
-| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `updateRequired`     | Codex          | The installed Codex CLI cannot read your ChatGPT plan's current model list, so its runs fail until it is updated. Present on a signed-in Codex once a model list read has run; the list request starts that read and does not wait for it. Reinstalling with `POST /api/runtimes/codex/install` updates it.                                                                                                                                                                                                                                                                                                                                              |
-| `cliVersion`         | Codex          | The installed Codex CLI's version, from the same read, or `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `acpMissing`         | Hermes         | Hermes was installed without its ACP mode (the `acp` extra), so its runs use `hermes chat`: no live output, and a comment stops and resumes the run. Read from `hermes acp --check`, run in a throwaway home at most once every ten minutes (after a minute when the last check could not tell); the list request starts it and does not wait for it. Absent until Hermes has been asked, when Hermes is not installed, and with `CLAWBOO_HERMES_TRANSPORT=quiet`. Reinstalling with `POST /api/runtimes/hermes/install` adds the mode.                                                                                                                  |
-| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value.                                                                                                                                                                                                                                                                                                                                                            |
-| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `installed`          | all            | Always `true` for the built-in Clawboo Native. Claude Code is installed when the Claude Agent SDK is found, in Clawboo's runtimes folder first, else next to the server, and its own `claude` binary is present, found the way the SDK finds it: its platform package (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, the musl build first on a Linux without glibc). A run starts that binary and never a `claude` CLI, so a CLI on `PATH` does not count. Hermes is installed when Clawboo's own install of it is in the runtimes folder; a `hermes` elsewhere, such as one pip or pipx installed, does not count. Otherwise, whether the CLI resolves in Clawboo's runtimes folder (its launcher), on `PATH` or in a known user install folder, in that order. |
+| `binPath`            | CLI runtimes   | The resolved CLI path (for a runtime Clawboo installed, its launcher in the runtimes folder), for Claude Code the Agent SDK's binary, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `terminalCommand`    | CLI runtimes   | How a person types the runtime's command in a terminal: the launcher's full path (quoted when needed) for a copy in the runtimes folder, else the bare name. `null` for Claude Code and Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `installProblem`     | CLI runtimes   | Why Clawboo's own copy cannot be used although one is on record, such as the Node.js it runs on having been removed, or `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `binSource`          | CLI runtimes   | Where `binPath` came from: `agent-sdk` for Claude Code, `cli` for the others. `null` with no binary, and for Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `updateRequired`     | Codex, Hermes  | Codex: the installed Codex CLI cannot read your ChatGPT plan's current model list, so its runs fail until it is updated. Present on a signed-in Codex once a model list read has run; the list request starts that read and does not wait for it. Reinstalling with `POST /api/runtimes/codex/install` updates it. Hermes: `true` when Clawboo's own install is not the release it pins, or is missing while a `hermes` is on `PATH` (one installed with pip or pipx, for example); its runs need that install. `POST /api/runtimes/hermes/install` installs it.                                                                                                                                                                                                       |
+| `cliVersion`         | Codex          | The installed Codex CLI's version, from the same read, or `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `hermesGateway`      | Hermes         | The Hermes gateway's status, the same object `GET /api/runtimes/hermes/gateway` answers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `hermesVersion`      | Hermes         | The version of Clawboo's own Hermes install, or `null` when there is none.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 `connectionState` is derived like this:
 
@@ -162,15 +166,15 @@ curl http://localhost:18790/api/runtimes
 
 ## `POST /api/runtimes/:id/install`
 
-Installs the runtime, pinned to a major version (for Claude Code, a 0.x minor line). Claude Code and Codex go into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), never npm's global folder:
+Installs the runtime. Claude Code and Codex are pinned to a major version (for Claude Code, a 0.x minor line), and Hermes to one exact release. Each goes into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), never npm's global folder:
 
 - Claude Code: `@anthropic-ai/claude-agent-sdk@0.3`, the SDK every Claude Code run loads, not the `claude` CLI. A run loads it from the runtimes folder first, so this works whether the server runs from a global install, `npx` or a source checkout.
 - Codex: `@openai/codex@0`, with a `codex` launcher in the runtimes folder's `bin/` that runs it on the server's Node.js.
-- Hermes: `pipx install --force 'hermes-agent[anthropic,acp]<1'`, with pipx pointed at the newest Python from 3.11 to 3.13 it finds (a newer Python such as 3.14 is passed over). With none in that range, pipx uses its own default Python. Without pipx it runs `python -m pip install --upgrade --user` with that Python, and retries once with `--break-system-packages` when pip reports an externally managed environment. Without pipx and without a Python in the range, it stops with one of the Python codes below. `--force` and `--upgrade` make the same request update an installed Hermes. After a Hermes install succeeds, the server forgets what it knew about Hermes's ACP mode and asks again with `hermes acp --check` before it sends `complete`, so a status read after `complete` already reports the new `acpMissing`.
+- Hermes: release 0.23.1 from its GitHub tag, at `hermes/v0.23.1` in the runtimes folder. The server downloads the tag's source and the uv (0.13.5) and CPython (3.14.9) builds that release pins for itself, checks each against its sha256, installs Hermes's locked dependencies with `uv sync --frozen`, and checks that the new install reports 0.23.1 before it switches to it. No system Python, pip or pipx is used. When the Hermes gateway is running, starting, restarting or failed, the server restarts it on the new install before it sends `complete`; otherwise it starts it when you have Hermes agents. See [Hermes](/runtimes/hermes#set-up-hermes).
 
-For Claude Code and Codex, npm runs on the Node.js the server runs on, as `npm install --prefix <new install folder> --include=optional --no-global --location=project --no-fund --no-audit <spec>`, under umask 022 and without `npm_config_global`, `npm_config_location` and `npm_config_prefix`. On success the new install becomes current and the previous one is kept. A failed or stopped install is removed, and the current one is untouched.
+For Claude Code and Codex, npm runs on the Node.js the server runs on, as `npm install --prefix <new install folder> --include=optional --no-global --location=project --no-fund --no-audit <spec>`, under umask 022 and without `npm_config_global`, `npm_config_location` and `npm_config_prefix`. On success the new install becomes current and the previous one is kept. A failed or stopped install is removed, and the current one is untouched. A Hermes install does the same with its own new folder.
 
-Clawboo Native is built in, so it answers **400** before any stream opens. If the client closes the connection, a first install is stopped. An install over one that is already there (an update) runs to the end instead, since stopping it part way can leave the runtime half replaced. One install of a runtime runs at a time: a request while one is running answers with an `INSTALL_RUNNING` error. When Claude Code already has an Agent SDK with its own binary (in the runtimes folder or next to Clawboo), the stream sends one `output` line naming the binary and `complete`, and installs nothing.
+Clawboo Native is built in, so it answers **400** before any stream opens. If the client closes the connection, a first install of Claude Code or Codex is stopped; a Hermes install always runs to the end. An install over one that is already there (an update) runs to the end instead, since stopping it part way can leave the runtime half replaced. One install of a runtime runs at a time: a request while one is running answers with an `INSTALL_RUNNING` error. When Claude Code already has an Agent SDK with its own binary (in the runtimes folder or next to Clawboo), the stream sends one `output` line naming the binary and `complete`, and installs nothing.
 
 - **Path params**: `id`.
 - **Request body**: none.
@@ -187,12 +191,12 @@ Clawboo Native is built in, so it answers **400** before any stream opens. If th
 
 #### Event catalog
 
-| `type`     | When                                                                                                                         | Payload fields                                     |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `progress` | Install start, the pipx path, and the externally managed retry                                                               | `step` (`'installing'` \| `'retrying'`), `message` |
-| `output`   | Each non-empty stdout or stderr line                                                                                         | `line`                                             |
-| `error`    | Tooling missing, the runtimes folder refused, permission denied, spawn failure, a failed install, an install already running | `code`, `message`                                  |
-| `complete` | The process exits 0                                                                                                          | `success: true`, optional `warning`                |
+| `type`     | When                                                                                                                         | Payload fields                                                                                                                |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `progress` | Install start; for Hermes, each stage                                                                                        | `step` (`'installing'`; for Hermes `'download'` \| `'toolchain'` \| `'dependencies'` \| `'switch'` \| `'restart'`), `message` |
+| `output`   | Each non-empty stdout or stderr line                                                                                         | `line`                                                                                                                        |
+| `error`    | Tooling missing, the runtimes folder refused, permission denied, spawn failure, a failed install, an install already running | `code`, `message`                                                                                                             |
+| `complete` | The process exits 0                                                                                                          | `success: true`, optional `warning`                                                                                           |
 
 The `error` codes:
 
@@ -206,16 +210,19 @@ The `error` codes:
 | `NO_COMMAND`           | Codex: the installed package has no `codex` command                                                                                                                                                                                        |
 | `COMMIT_FAILED`        | Claude Code, Codex: the install could not be made current, for example because an item in it belongs to another user or a link in it points outside it                                                                                     |
 | npm's own code         | Claude Code, Codex: npm failed and named a code, such as `EACCES` or `ETARGET`                                                                                                                                                             |
-| `PYTHON_MISSING`       | No Python with pip or pipx found (Hermes)                                                                                                                                                                                                  |
-| `PYTHON_TOO_OLD`       | Every Python found is older than 3.11, and no pipx (Hermes)                                                                                                                                                                                |
-| `PYTHON_UNSUPPORTED`   | No Python from 3.11 to 3.13 found, at least one is newer, and no pipx (Hermes)                                                                                                                                                             |
-| `EACCES`               | Hermes: the pipx or pip error output mentioned `EACCES` or "permission denied" (the stream goes on). For Claude Code and Codex, `EACCES` arrives as npm's own code                                                                         |
+| `UNSUPPORTED_PLATFORM` | Hermes only: the release has no build for this system and processor                                                                                                                                                                        |
+| `RUNTIMES_DIR`         | Hermes only: the runtimes folder could not be used; the message says why                                                                                                                                                                   |
+| `DOWNLOAD_FAILED`      | Hermes only: a download did not answer with its file                                                                                                                                                                                       |
+| `DIGEST_MISMATCH`      | Hermes only: a download did not match the sha256 Clawboo pins for it, so nothing was installed                                                                                                                                             |
+| `STEP_FAILED`          | Hermes only: unpacking, installing the dependencies or recording the version exited with an error                                                                                                                                          |
+| `VERIFY_FAILED`        | Hermes only: the new install did not report the pinned version                                                                                                                                                                             |
+| `INSTALL_FAILED`       | Hermes only: any other failure                                                                                                                                                                                                             |
 | `SPAWN_THROW`          | The spawn call threw                                                                                                                                                                                                                       |
 | `SPAWN_ERROR`          | The child process emitted an error                                                                                                                                                                                                         |
 | `EXIT_<code>`          | The process exited with a non-zero code (for example `EXIT_1`), and for npm, npm named no code of its own                                                                                                                                  |
 | `INSTALL_RUNNING`      | An install of this runtime is still running; nothing new was started                                                                                                                                                                       |
 
-For Claude Code and Codex, a failed npm run ends the stream with one `error` whose `code` is npm's own (else `EXIT_<n>`) and whose message reads `Installation failed with exit code <n>.` followed by npm's reason. No install here suggests `sudo`. On the pip path, an `EACCES` frame does not end the stream: the exit code still decides the outcome, and its message reads `Permission denied while installing <name>. Check that this user can write where it installs, then try again.` When the install succeeds but the runtime still reads not installed, `complete` carries a `warning`. For Claude Code it says the Agent SDK's own `<platform>-<arch>` binary is missing from the install, so Claude Code cannot run, and to check that npm may install optional dependencies, then install again. For the other runtimes it says the CLI is not on `PATH` or in the known user-install folders yet, and suggests restarting the server.
+For Claude Code and Codex, a failed npm run ends the stream with one `error` whose `code` is npm's own (else `EXIT_<n>`) and whose message reads `Installation failed with exit code <n>.` followed by npm's reason. No install here suggests `sudo`. When the install succeeds but the runtime still reads not installed, `complete` carries a `warning`. For Claude Code it says the Agent SDK's own `<platform>-<arch>` binary is missing from the install, so Claude Code cannot run, and to check that npm may install optional dependencies, then install again. For Hermes it says Clawboo will not run the new install from its runtimes folder, and to check that folder's owner and permissions or set `CLAWBOO_RUNTIMES_DIR` to a folder of its own. For Codex it says the CLI is not on `PATH` or in the known user-install folders yet, and suggests restarting the server.
 
 Example frames:
 
@@ -689,6 +696,105 @@ curl http://localhost:18790/api/runtimes/codex/models
 
 ---
 
+## `GET /api/runtimes/hermes/gateway`
+
+The state of the Hermes gateway: the one long-lived Hermes process every Hermes agent runs through, which Clawboo starts, restarts after a crash and stops with itself. The Runtimes card's **Gateway** section for Hermes reads it. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: the status. It never carries a key:
+
+```ts
+type HermesGatewayStatus = {
+  state: 'stopped' | 'starting' | 'running' | 'restarting' | 'failed' | 'not-installed'
+  port: number | null // its API server's port on 127.0.0.1
+  pid: number | null // while running
+  startedAt: number | null // epoch ms, while running
+  restarts: number // restarts after it exited on its own
+  lastError: string | null // why it is not running, in words a person can act on
+  version: string | null
+}
+```
+
+`not-installed` means Clawboo has no install of Hermes of its own. `failed` means it could not start, or exited and is not being restarted (a config Hermes refuses, or ten restarts in a row); the next Hermes run or a `start` tries again.
+
+### Example
+
+```bash
+curl http://localhost:18790/api/runtimes/hermes/gateway
+```
+
+---
+
+## `POST /api/runtimes/hermes/gateway`
+
+Starts, restarts or stops the Hermes gateway. Clawboo starts it by itself when a Hermes agent runs, and at launch when there are Hermes agents, so these are manual controls. A stopped gateway runs no Hermes agent and fires none of their own jobs until something starts it again.
+
+- **Path params**: none.
+- **Request body**:
+
+```ts
+{
+  action: 'start' | 'restart' | 'stop' // required; start does nothing to a gateway already running
+}
+```
+
+### Responses
+
+**`200 OK`**: done, with the new status:
+
+```json
+{
+  "ok": true,
+  "status": {
+    "state": "running",
+    "port": 8642,
+    "pid": 41237,
+    "startedAt": 1762851600000,
+    "restarts": 0,
+    "lastError": null,
+    "version": "0.23.1"
+  }
+}
+```
+
+**`400 Bad Request`**: `action` is missing or not one of the three:
+
+```json
+{ "error": "action must be 'start', 'restart' or 'stop'" }
+```
+
+**`502 Bad Gateway`**: the gateway could not start, with the reason and the status:
+
+```json
+{
+  "ok": false,
+  "error": "<reason>",
+  "status": {
+    "state": "failed",
+    "port": 8642,
+    "pid": null,
+    "startedAt": null,
+    "restarts": 0,
+    "lastError": "<reason>",
+    "version": "0.23.1"
+  }
+}
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/runtimes/hermes/gateway \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"restart"}'
+```
+
+---
+
 ## Onboarding
 
 The three `/api/onboarding/*` routes take no `:id`. They are grouped here because they are Clawboo Native's first-run routes. Onboarding creates no team of its own: you pick one in the marketplace and deploy it through the [Teams API](/reference/rest-api/teams).
@@ -864,7 +970,7 @@ curl -N -X POST http://localhost:18790/api/auth/cli-login/codex
 
 Errors use the standard `{ "error": string }` body, with three exceptions: `healthcheck` answers `{ "ok": false, "error": string }` (its success body is `{ "ok": true }`), a refused `run` answers `{ "ok": false, "reason": string }`, and the two SSE routes report failures as `error` frames once the stream is open. Going over a rate limit answers **429** with `{ "error": "Too many requests. Wait a moment and retry." }` (general) or `{ "error": "Too many requests for this operation. Wait a moment and retry." }` (sensitive), plus a `Retry-After` header.
 
-**Source of truth:** `apps/web/server/api/runtimes.ts`, `providers.ts`, `onboardingSeed.ts`, `onboardingState.ts` and `cliLogin.ts`; key storage in `apps/web/server/lib/secretsVault.ts`, `providerKeys.ts` and `openclawEnv.ts`; runtime definitions in `apps/web/server/lib/runtimes/descriptor.ts`.
+**Source of truth:** `apps/web/server/api/runtimes.ts`, `hermesGateway.ts`, `providers.ts`, `onboardingSeed.ts`, `onboardingState.ts` and `cliLogin.ts`; key storage in `apps/web/server/lib/secretsVault.ts`, `providerKeys.ts` and `openclawEnv.ts`; runtime definitions in `apps/web/server/lib/runtimes/descriptor.ts`; the Hermes install and gateway in `apps/web/server/lib/runtimes/hermes/`.
 
 ## Related
 

@@ -114,13 +114,13 @@ Embeddings are what let memory match on meaning. Clawboo picks a provider in thi
 
 ## Each runtime's own memory
 
-| Runtime        | Its own memory                                                                                                | Shared with teammates?        |
-| -------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| Clawboo Native | Its saved conversations, in its own folder under `~/.clawboo/runtimes/clawboo-native/`                        | No                            |
-| Hermes         | `MEMORY.md`, `state.db` and the skills it creates, in its own Hermes home under `~/.clawboo/runtimes/hermes/` | No. Clawboo never edits them. |
-| Codex          | None that Clawboo keeps. Its folder under `~/.clawboo/runtimes/codex/` holds its login and session files.     | Not applicable                |
-| OpenClaw       | Kept in your OpenClaw Gateway's own state                                                                     | No                            |
-| Claude Code    | None of yours: Claude Code's auto memory is off. It reads the `CLAUDE.md` of the folder it works in           | Only through that folder      |
+| Runtime        | Its own memory                                                                                                                 | Shared with teammates?        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| Clawboo Native | Its saved conversations, in its own folder under `~/.clawboo/runtimes/clawboo-native/`                                         | No                            |
+| Hermes         | `MEMORY.md`, `state.db` and the skills it creates, in its Hermes profile under `~/.clawboo/runtimes/hermes/_gateway/profiles/` | No. Clawboo never edits them. |
+| Codex          | None that Clawboo keeps. Its folder under `~/.clawboo/runtimes/codex/` holds its login and session files.                      | Not applicable                |
+| OpenClaw       | Kept in your OpenClaw Gateway's own state                                                                                      | No                            |
+| Claude Code    | None of yours: Claude Code's auto memory is off. It reads the `CLAUDE.md` of the folder it works in                            | Only through that folder      |
 
 <Note>
 

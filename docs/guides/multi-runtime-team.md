@@ -26,13 +26,13 @@ Every agent on a team has its own runtime, the engine that does its thinking and
 
 Clawboo is installed and onboarding is done. At least two runtimes must read **Connected** in **Settings** > **Runtimes**. Each one needs:
 
-| Runtime        | What it needs                                                                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clawboo Native | Built in. An API key from a supported provider, or a local Ollama model.                                                                          |
-| OpenClaw       | A local OpenClaw Gateway. **Set up OpenClaw** installs and starts one for you.                                                                    |
-| Claude Code    | The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`, which **Install** on its row adds), and an Anthropic API key. A `claude` CLI is not used. |
-| Codex          | The `codex` CLI, which Clawboo installs, and **Sign in with ChatGPT**.                                                                            |
-| Hermes         | Python 3.11 to 3.13 (Clawboo installs Hermes with pipx or pip), plus an OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in.                |
+| Runtime        | What it needs                                                                                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clawboo Native | Built in. An API key from a supported provider, or a local Ollama model.                                                                                         |
+| OpenClaw       | A local OpenClaw Gateway. **Set up OpenClaw** installs and starts one for you.                                                                                   |
+| Claude Code    | The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`, which **Install** on its row adds), and an Anthropic API key. A `claude` CLI is not used.                |
+| Codex          | The `codex` CLI, which Clawboo installs, and **Sign in with ChatGPT**.                                                                                           |
+| Hermes         | Nothing to install yourself: Clawboo installs the current Hermes release with its own Python. Plus an OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in. |
 
 For the click path per runtime, see [Providers and runtimes](/using/providers-and-runtimes).
 
@@ -86,7 +86,7 @@ Boo Zero splits the request into tasks. Each task runs on its teammate's own run
 
 <Warning>
 
-In team chat, Claude Code, Codex and Hermes run with their own approval prompts turned off. On a task they start in the task's own folder inside the team's folder (`~/clawboo-work/teams/<team id>/tasks/<task id>`), and otherwise in the team's folder (`~/clawboo-work/teams/<team id>`). Either way they can still read and change any file your user account can. There is no isolated checkout on this path. Point them only at work you have committed or backed up, and read [What agents can do](/concepts/permissions). For a separate git checkout per task, see [Hand a task from one runtime to another](/guides/cross-runtime-handoff).
+In team chat, Claude Code and Codex run with their own approval prompts turned off, and Hermes asks only before the commands its own policy flags. On a task they start in the task's own folder inside the team's folder (`~/clawboo-work/teams/<team id>/tasks/<task id>`), and otherwise in the team's folder (`~/clawboo-work/teams/<team id>`). Either way they can still read and change any file your user account can. There is no isolated checkout on this path. Point them only at work you have committed or backed up, and read [What agents can do](/concepts/permissions). For a separate git checkout per task, see [Hand a task from one runtime to another](/guides/cross-runtime-handoff).
 
 </Warning>
 
@@ -102,13 +102,13 @@ In team chat, Claude Code, Codex and Hermes run with their own approval prompts 
 
 ## What each runtime brings
 
-| Runtime        | Good for                                      | Tools of its own                                                     | A comment on a running task          | Spend shown                                 |
-| -------------- | --------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------- |
-| Clawboo Native | Writing, planning, coordinating               | None in team chat beyond memory, the board, hand-offs and connectors | Reaches it before its next step      | Exact or estimated; free on your own Ollama |
-| OpenClaw       | Agents that use your OpenClaw setup           | Whatever your Gateway gives its agents                               | Reaches it before its next step      | Estimated from text length                  |
-| Claude Code    | Code changes                                  | Commands, file edits and more, with prompts off                      | Reaches it before its next step      | Reported by Claude Code                     |
-| Codex          | Code changes on a ChatGPT plan                | Commands and file edits, with its sandbox off                        | Reaches it before its next step      | Estimated from tokens                       |
-| Hermes         | A helper that grows its own memory and skills | Its own tools, every call approved automatically                     | It pauses, reads it, then carries on | Estimated from text length                  |
+| Runtime        | Good for                                      | Tools of its own                                                     | A comment on a running task             | Spend shown                                 |
+| -------------- | --------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------- | ------------------------------------------- |
+| Clawboo Native | Writing, planning, coordinating               | None in team chat beyond memory, the board, hand-offs and connectors | Reaches it before its next step         | Exact or estimated; free on your own Ollama |
+| OpenClaw       | Agents that use your OpenClaw setup           | Whatever your Gateway gives its agents                               | Reaches it before its next step         | Estimated from text length                  |
+| Claude Code    | Code changes                                  | Commands, file edits and more, with prompts off                      | Reaches it before its next step         | Reported by Claude Code                     |
+| Codex          | Code changes on a ChatGPT plan                | Commands and file edits, with its sandbox off                        | Reaches it before its next step         | Estimated from tokens                       |
+| Hermes         | A helper that grows its own memory and skills | Its own tools; asks before the commands its own policy flags         | Reaches it after its current tool calls | Estimated from tokens                       |
 
 The [runtime overview](/runtimes/index) compares them in full, and [Budgets and spend](/using/budgets-and-spend) explains estimated costs.
 
@@ -116,13 +116,13 @@ The [runtime overview](/runtimes/index) compares them in full, and [Budgets and 
 
 Clawboo keeps one shared memory, and every team member uses it through memory tools. What a member sees depends on its runtime:
 
-| Runtime        | Clawboo's team memory                                                                                  | Memory of its own                                                                           |
-| -------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Clawboo Native | Reads the team's, its own and global facts. Saves go to the team.                                      | Its conversation history, kept per agent.                                                   |
-| Claude Code    | Same as Clawboo Native.                                                                                | None. Your own `~/.claude` setup and Claude Code's auto memory are left out.                |
-| Codex          | Same as Clawboo Native.                                                                                | A separate Codex home for each agent.                                                       |
-| Hermes         | Same as Clawboo Native.                                                                                | Its own memory and skills, kept across runs in its home under `~/.clawboo/runtimes/hermes`. |
-| OpenClaw       | Global facts only. It never sees facts saved for the team, and what it saves is visible to every team. | Whatever OpenClaw keeps for the agent.                                                      |
+| Runtime        | Clawboo's team memory                                                                                  | Memory of its own                                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Clawboo Native | Reads the team's, its own and global facts. Saves go to the team.                                      | Its conversation history, kept per agent.                                                                               |
+| Claude Code    | Same as Clawboo Native.                                                                                | None. Your own `~/.claude` setup and Claude Code's auto memory are left out.                                            |
+| Codex          | Same as Clawboo Native.                                                                                | A separate Codex home for each agent.                                                                                   |
+| Hermes         | Same as Clawboo Native.                                                                                | Its own memory and skills, kept across runs in its Hermes profile under `~/.clawboo/runtimes/hermes/_gateway/profiles`. |
+| OpenClaw       | Global facts only. It never sees facts saved for the team, and what it saves is visible to every team. | Whatever OpenClaw keeps for the agent.                                                                                  |
 
 In team chat, agents look things up in memory when they decide to. Clawboo adds relevant facts to an agent's prompt by itself only for task runs started through the REST API or an agent routine. See [Memory](/using/memory).
 
@@ -185,7 +185,7 @@ Boo Zero leads every team, whatever runtimes the members use. After an onboardin
 
 <Accordion title="A Hermes member forgot what it learned">
 
-**What it means:** each Hermes agent's memory lives in a home named after the agent's id. An agent you deploy again is a new agent with a new, empty home.
+**What it means:** each Hermes agent's memory lives in a Hermes profile named after the agent's id. An agent you deploy again is a new agent with a new, empty profile.
 
 **Fix:** keep the original agent. Deleting it and deploying again starts its memory from scratch.
 

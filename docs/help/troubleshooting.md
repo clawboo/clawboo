@@ -343,17 +343,13 @@ Clawboo checks a key before it saves one, with a single request to the provider'
 
 **Fix:** in **Settings > Runtimes**, click **Install** on the **Claude Code** row. It installs the SDK into Clawboo's own runtimes folder, however you run Clawboo, `npx` included. Then send the message or start the task again. See [Claude Code](/runtimes/claude-code).
 
-### The Hermes install fails with (from versions: none)
+### The Hermes install fails with a hash that does not match
 
-**What it means:** pip found no Hermes release for the Python it used. Hermes needs Python 3.11, 3.12 or 3.13. Clawboo passes pipx the newest Python from 3.11 to 3.13 that it finds. When it finds none in that range, pipx falls back to its own default Python, which can be 3.14, and the install fails.
+**What it means:** a download did not match the sha256 hash Clawboo pins for it, so nothing was installed. Clawboo installs Hermes from its GitHub release, with the uv and Python builds that release names, and checks every download. A proxy that rewrites downloads, or a download cut short, does this.
 
-**Fix:** install Python 3.13 (for example `brew install python@3.13`) and click **Retry**, or install Hermes yourself with a supported Python, then click **Refresh** at the top of **Settings > Runtimes**:
+**Fix:** click **Retry**. If it keeps failing, check that this computer reaches `github.com` and `objects.githubusercontent.com` directly.
 
-```bash
-pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
-```
-
-**Prevent it:** keep a Python from 3.11 to 3.13 for Hermes. See [Hermes](/runtimes/hermes).
+**Prevent it:** let downloads from GitHub through unchanged. You do not need Python of your own for Hermes. See [Hermes](/runtimes/hermes).
 
 ### More runtime messages
 
@@ -375,19 +371,27 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 
 </Accordion>
 
-<Accordion title="Hermes needs Python 3.11 to 3.13, but Clawboo found only Python 3.9">
+<Accordion title="Hermes has no build for this computer">
 
-**What it means:** pipx is not installed, and every Python Clawboo found is outside 3.11 to 3.13. The message lists each version it found, too old or too new. On a Mac, Apple's own Python is often 3.9, and the message marks it "(Xcode Command Line Tools)".
+**What it means:** the Hermes release Clawboo installs has builds for macOS, Linux and Windows on x64 and arm64 only. Other systems, such as a 32-bit one, cannot run it.
 
-**Fix:** install Python 3.13 (for example `brew install python@3.13`), then click **Retry**. If Clawboo finds no Python at all, the message reads "Python 3.11 to 3.13 (with pip or pipx) not found."; the fix is the same.
+**Fix:** run Clawboo on one of those systems to use Hermes, or put those agents on another runtime.
 
 </Accordion>
 
-<Accordion title="Hermes reads Update available">
+<Accordion title="Hermes reads Update needed">
 
-**What it means:** this Hermes was installed without its live mode (the `acp` extra). Its agents still run, but a run shows its work only when it finishes, and a comment sent mid-run stops the run and resumes it.
+**What it means:** the Hermes Clawboo found is not its own install of the current release: one installed with pip or pipx, for example, which Clawboo does not run.
 
-**Fix:** click **Update** on the **Hermes** row, then **Update Hermes**. When the row reads **Connected**, the next run is live. More in [Hermes](/runtimes/hermes).
+**Fix:** click **Update** on the **Hermes** row, then **Update Hermes**. Your Hermes agents' memory and skills move into their Hermes profiles on their next run. More in [Hermes](/runtimes/hermes).
+
+</Accordion>
+
+<Accordion title="The Hermes Gateway section reads Not running">
+
+**What it means:** the Hermes gateway, the one Hermes process every Hermes agent runs in, could not start or stopped, and the section shows the reason Hermes gave.
+
+**Fix:** when port 8642 is taken, Clawboo moves to the next free port by itself; if none up to 8681 is free, set `CLAWBOO_HERMES_GATEWAY_PORT` to a free port and run `clawboo restart`. For anything else, read `logs/gateway.log` and `logs/errors.log` in `~/.clawboo/runtimes/hermes/_gateway`, then click **Start** in the section. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
 
 </Accordion>
 

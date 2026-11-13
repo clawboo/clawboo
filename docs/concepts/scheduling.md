@@ -14,6 +14,7 @@ keywords:
     'missed runs',
     'error halts',
     'Gateway cron',
+    'Hermes jobs',
   ]
 ---
 
@@ -101,7 +102,15 @@ Every Board task has one scheduler on record: you (a task made by hand), Clawboo
 
 The OpenClaw Gateway has its own scheduler, which an OpenClaw agent can use to wake itself. The Routines view lists those jobs in a separate section, **OpenClaw's own cron jobs**, so everything scheduled is in one place. You can enable, disable, run or delete a Gateway job there, but not edit it. While the Gateway is disconnected, the section shows the last list it sent, or hides the jobs until it reconnects. Your own routines are not affected.
 
-Clawboo never uses the Gateway's scheduler for routines, and refuses to schedule team work through it. Claude Code, Codex, Hermes and Clawboo Native have no scheduler of their own that Clawboo drives, so a routine is how you schedule them. The Board's calendar shows the upcoming runs of your routines, but not of Gateway jobs.
+Clawboo never uses the Gateway's scheduler for routines, and refuses to schedule team work through it.
+
+## Hermes's own jobs
+
+Hermes has its own scheduler too, in the Hermes gateway Clawboo runs, and a Hermes agent can use it to schedule jobs of its own. The Routines view lists them in a section of their own, **Hermes's own jobs**. As with OpenClaw's, you can enable, disable, run or delete a Hermes job there, but not edit it. They are the agent's own life, not team work: they run in the agent's own Hermes sessions, not in a team chat, and their output stays in Hermes. Clawboo refuses to schedule team work through Hermes's scheduler.
+
+Hermes runs a job only while its gateway runs. Clawboo starts the gateway at launch when you have Hermes agents, so their jobs keep firing; while it is not running, the section shows the last list it sent, or hides the jobs until it runs again. **Run now** runs a job at Hermes's next scheduler tick, within a minute. See [Hermes's own jobs](/runtimes/hermes#jobs-hermes-runs-on-its-own).
+
+Claude Code, Codex and Clawboo Native have no scheduler of their own, so a routine is how you schedule them, and how you schedule team work on any runtime. The Board's calendar shows the upcoming runs of your routines, but not of OpenClaw's or Hermes's own jobs.
 
 <AccordionGroup>
 

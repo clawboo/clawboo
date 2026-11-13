@@ -221,7 +221,7 @@ curl -X DELETE "http://localhost:18790/api/skills?id=web-search&agentId=<agent-i
 
 Each agent's command-execution choice, stored on the agent row (`exec_config`) as `{ execAsk, execSecurity? }`. Only OpenClaw enforces it: for an OpenClaw agent, `POST` also writes the choice into the OpenClaw Gateway's exec-approval policy, the copy OpenClaw checks before it runs a command. The dashboard shows this control, **Command Execution** on the agent's **Permissions** tab, for OpenClaw agents only.
 
-On every other runtime the value is stored and nothing enforces it. Claude Code, Codex and Hermes run with their own approval prompts turned off; see [What agents can do](/concepts/permissions).
+On every other runtime the value is stored and nothing enforces it. Claude Code and Codex run with their own approval prompts turned off, and Hermes follows its own approval policy (`approvals.mode`, set in the agent's Hermes profile before every run from your own `~/.hermes/config.yaml`, else `manual`); see [What agents can do](/concepts/permissions).
 
 | `execAsk` | Dashboard label     | What `POST` writes into OpenClaw's policy for this agent                                                                                                      |
 | --------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |

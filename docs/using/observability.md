@@ -53,11 +53,12 @@ To open **Settings**, click **Settings** at the bottom of the left sidebar, or p
 
 Every runtime gets a tile, even one with no agents. The dot beside its name is green when the runtime is ready and red when it is not:
 
-- **Claude Code**, **Codex** and **Hermes**: green when the runtime's program is installed. It does not tell you whether the runtime is signed in or has a key.
+- **Claude Code** and **Codex**: green when the runtime's program is installed. It does not tell you whether the runtime is signed in or has a key.
+- **Hermes**: green when Clawboo's own install of Hermes is there and its gateway has not failed. It does not tell you whether Hermes has a key.
 - **Clawboo Native**: green when it has a provider it can use, such as an API key or a local Ollama.
 - **OpenClaw**: green while Clawboo is connected to the OpenClaw Gateway.
 
-The badge under the name says how Clawboo drives the runtime: **Native peer** (Clawboo Native runs inside Clawboo), **Wrapped one-shot** (Clawboo starts the runtime's program to do each piece of work) or **Connected substrate** (OpenClaw, a separate Gateway that Clawboo connects to). The chips count the runtime's agents by state: **healthy** (idle or working), **degraded** (in an error state) and **down** (any other state, such as asleep).
+The badge under the name says how Clawboo drives the runtime: **Native peer** (Clawboo Native runs inside Clawboo), **Wrapped one-shot** (Clawboo drives the runtime one piece of work at a time: Claude Code and Codex start their program for each, and Hermes runs each in its gateway) or **Connected substrate** (OpenClaw, a separate Gateway that Clawboo connects to). The chips count the runtime's agents by state: **healthy** (idle or working), **degraded** (in an error state) and **down** (any other state, such as asleep).
 
 Fleet refreshes every 8 seconds while its tab is visible. **Refresh** reloads it at once.
 

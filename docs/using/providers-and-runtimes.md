@@ -184,7 +184,7 @@ The built-in model for each provider is listed in [Clawboo Native](/runtimes/nat
 
 ## Add Claude Code, Codex or Hermes
 
-Each of these is a separate program. Clawboo installs it for you from **Settings** > **Runtimes**; click **Install** on its row, then **Install** in the panel that opens. Claude Code's Agent SDK and Codex go into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), with no `sudo`. Then connect it:
+Each of these is a separate program. Clawboo installs it for you from **Settings** > **Runtimes**; click **Install** on its row, then **Install** in the panel that opens. Claude Code's Agent SDK, Codex and Hermes go into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), with no `sudo`. Then connect it:
 
 <Tabs>
 
@@ -202,7 +202,7 @@ Needs a ChatGPT plan. Click **Sign in** on the row, then **Sign in with ChatGPT*
 
 <Tab title="Hermes">
 
-Needs Python 3.11 to 3.13 and one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. A Hermes installed without its live mode reads **Update available**; click **Update**, then **Update Hermes**. See [Hermes](/runtimes/hermes).
+Click **Install** on the row: Clawboo installs the current Hermes release with its own Python, so you need no Python of your own. Hermes then needs one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. A Hermes that is not Clawboo's own install of the current release, such as one installed earlier with pip or pipx, reads **Update needed**; click **Update**, then **Update Hermes**. **Manage** on a connected Hermes row shows its gateway, the one Hermes process all Hermes agents run in, with **Restart**. See [Hermes](/runtimes/hermes).
 
 </Tab>
 
