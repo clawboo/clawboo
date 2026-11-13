@@ -134,6 +134,12 @@ function isAlive(pid: number): boolean {
  */
 let shuttingDown = false
 
+/** Whether the server has begun shutting down: a supervisor must not restart a
+ *  child that shutdown is about to stop. */
+export function isSubprocessShutdown(): boolean {
+  return shuttingDown
+}
+
 /**
  * Kill every still-running runtime child. Called from the server's shutdown path
  * so a graceful stop doesn't orphan agent processes. Best-effort and synchronous:

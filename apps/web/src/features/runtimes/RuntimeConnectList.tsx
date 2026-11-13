@@ -38,6 +38,7 @@ import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CodexUpdateNotice } from './CodexUpdateNotice'
+import { HermesGatewaySection } from './HermesGatewaySection'
 import { HermesUpdateNotice } from './HermesUpdateNotice'
 import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { OpenClawGatewaySection } from './OpenClawGatewaySection'
@@ -275,12 +276,12 @@ function RuntimeRow({
   // expands the inline management body (subscription + Re-check + Disconnect +
   // Details). The ChatGPT-subscription option lives inside Manage now. A Codex
   // signed in but too old for the plan's models is not really connected: every
-  // run fails, so the row says so and leads with the update. A Hermes without its
-  // ACP mode still runs, only not live, so its row offers the update and keeps
-  // its providers beside it.
+  // run fails, so the row says so and leads with the update. A Hermes that is
+  // not Clawboo's install of the pinned release leads with the install, which
+  // its runs need; its providers and its gateway sit beside it.
   if (shown === 'ready') {
     const codexUpdate = entry.id === 'codex' && status?.updateRequired === true
-    const hermesUpdate = entry.id === 'hermes' && status?.acpMissing === true
+    const hermesUpdate = entry.id === 'hermes' && status?.updateRequired === true
     const needsUpdate = codexUpdate || hermesUpdate
     return (
       <AccordionRow
@@ -289,7 +290,7 @@ function RuntimeRow({
           codexUpdate ? (
             <AmberStatusChip label="Update needed" />
           ) : hermesUpdate ? (
-            <AmberStatusChip label="Update available" />
+            <AmberStatusChip label="Update needed" />
           ) : (
             <StatusChip state="ready" />
           )
@@ -329,6 +330,7 @@ function RuntimeRow({
             ) : entry.id === 'hermes' ? (
               <>
                 {hermesUpdate && <HermesUpdateNotice onChanged={onChanged} />}
+                {!hermesUpdate && <HermesGatewaySection onChanged={onChanged} />}
                 <RuntimeProvidersBody
                   runtime="hermes"
                   onChanged={onChanged}
@@ -341,6 +343,30 @@ function RuntimeRow({
             ) : undefined
           }
         />
+      </AccordionRow>
+    )
+  }
+
+  // A Hermes found only on PATH (one installed with pip or pipx): its agents now
+  // need Clawboo's own install, so the row says so instead of "Not installed".
+  if (shown === 'not-installed' && entry.id === 'hermes' && status?.updateRequired === true) {
+    return (
+      <AccordionRow
+        {...rowProps}
+        status={<AmberStatusChip label="Update needed" />}
+        footer={
+          <CtaToggle
+            expanded={userExpanded}
+            onToggle={() => setUserExpanded((v) => !v)}
+            bodyId={`${testId}-body`}
+            cta={UPDATE_CTA}
+            name={entry.name}
+            testId={testId}
+          />
+        }
+        expanded={userExpanded}
+      >
+        <HermesUpdateNotice onChanged={onChanged} />
       </AccordionRow>
     )
   }
@@ -520,8 +546,8 @@ function OpenClawRow({
 /** An amber dot + a calm label: a runtime that was set up but cannot run right
  *  now, or not fully. OpenClaw's "set up before, gateway offline" reads
  *  "Disconnected" (distinct from a pristine, never-configured row); a Codex CLI
- *  too old for the plan reads "Update needed"; a Hermes without its ACP mode
- *  reads "Update available". */
+ *  too old for the plan, or a Hermes that is not Clawboo's install of its
+ *  pinned release, reads "Update needed". */
 function AmberStatusChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -605,9 +631,9 @@ function InProgressChip({ label }: { label: string }) {
  *  body: subscription + Re-check + Disconnect + Details). */
 const MANAGE_CTA = { label: 'Manage', icon: <Settings2 size={13} /> }
 
-/** The same toggle for a connected runtime with an update to make (a Codex CLI
- *  that cannot run, a Hermes without its ACP mode): the body leads with the
- *  update notice and its action. */
+/** The same toggle for a runtime with an update to make (a Codex CLI that
+ *  cannot run, a Hermes that is not Clawboo's install of its pinned release):
+ *  the body leads with the update notice and its action. */
 const UPDATE_CTA = { label: 'Update', icon: <Download size={13} /> }
 
 /** Small muted labels for the top-right status of an UNCONNECTED runtime (the

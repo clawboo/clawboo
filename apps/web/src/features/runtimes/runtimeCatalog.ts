@@ -93,8 +93,7 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     // a fresh device-code login in the user's terminal (never the codex-CLI
     // import: separate grant lineages avoid refresh-token conflicts).
     altLoginCommand: 'hermes auth add openai-codex',
-    installCommand: "pipx install 'hermes-agent[anthropic,acp]'",
-    docsUrl: 'https://pypi.org/project/hermes-agent/',
+    docsUrl: 'https://hermes-agent.nousresearch.com/docs',
     keyUrl: 'https://openrouter.ai/keys',
     capabilityHint: { streaming: true, mcp: true, worktrees: true, resume: true },
   },

@@ -57,6 +57,15 @@ export interface AttachScope {
    */
   chatRunTeamId?: string | null
   /**
+   * A URL that names only the agent and asks the server to bind each call to the
+   * run that agent has in progress. For a runtime that connects to Clawboo's
+   * servers once and keeps the connection across runs (Hermes's gateway), where
+   * a URL cannot carry any one run. Signed (`live` is inside the signature), so a
+   * runtime cannot turn a per-run URL into one, or the reverse. The URL carries
+   * no team and no run: everything else in this scope is ignored.
+   */
+  live?: boolean
+  /**
    * Per-install signing secret (see `attachAuth.ts`). When present, the attach
    * URL carries an `attachToken` (the access gate refuses a cookieless
    * `/api/mcp/*` request without one) and, when it claims a scope, a `scopeSig`
@@ -125,6 +134,18 @@ export function mcpHttpUrl(
   const base = `${httpBaseUrl.replace(/\/$/, '')}/api/mcp/${server}`
   if (!scope) return base
   const p = new URLSearchParams()
+  if (scope.live) {
+    // The agent and the mark, under one signature; the rest is bound per call.
+    if (scope.agentId) p.set('scopeAgentId', scope.agentId)
+    p.set('live', '1')
+    if (scope.attachSecret && scope.agentId)
+      p.set(
+        'scopeSig',
+        signAttachScope(scope.attachSecret, { server, agentId: scope.agentId, live: true }),
+      )
+    if (scope.attachSecret) p.set('attachToken', signAttachAccess(scope.attachSecret))
+    return `${base}?${p.toString()}`
+  }
   // A scope signature covers a CLAIM. An unscoped URL (OpenClaw's process-wide
   // one, the verification critic's) has none, so it carries the access token
   // alone rather than a signature over nothing.

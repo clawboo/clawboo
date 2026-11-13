@@ -5,7 +5,7 @@
 
 import type { RoutineTarget } from './template'
 
-export type ScheduleSourceId = 'clawboo-routine' | 'openclaw-gateway-cron'
+export type ScheduleSourceId = 'clawboo-routine' | 'openclaw-gateway-cron' | 'hermes-gateway-jobs'
 
 export type ScheduleDomain = 'team-task' | 'runtime-own-life'
 
@@ -61,7 +61,8 @@ export interface ScheduleRecord {
   lastError?: string
   status: ScheduleStatus
   manageability: ScheduleManageability
-  /** Gateway-cron rows = the agent's own life; Routine rows = team work. */
+  /** Gateway rows (OpenClaw's cron, Hermes's jobs) = the agent's own life;
+   *  Routine rows = team work. */
   domain: ScheduleDomain
   /** Dormant multi-tenant seam — always null today. */
   tenantId: string | null

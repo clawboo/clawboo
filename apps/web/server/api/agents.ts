@@ -43,6 +43,7 @@ import { ensureNativeBooZero, resolveBooZero } from '../lib/teamChat/booZero'
 import { nativeTeamSessionKeysForAgentLike } from '../lib/teamChat/nativeTeamSession'
 import { getRoutinesTicker } from '../lib/routines/ticker'
 import { moveAgentToTeam } from '../lib/agentMove'
+import { pauseDeletedHermesAgentJobs } from '../lib/runtimes/hermes'
 
 // The source throws Error('gateway_disconnected') when a write/file/session op
 // needs a live Gateway but the server-side connection is down.
@@ -576,6 +577,8 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
     try {
       await source.archiveAgent(agentId)
       deleteAgentRoutines([agentId])
+      // A Hermes agent's own jobs stop with it (its profile is set aside later).
+      if (source.id === 'hermes') void pauseDeletedHermesAgentJobs(agentId)
       res.json({ ok: true, upstreamDeleted: true })
     } catch (err) {
       if (isDisconnected(err)) {

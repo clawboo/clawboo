@@ -352,6 +352,8 @@ const PINNED_ROUTES = [
   'POST /api/runtimes/:id/logout',
   'POST /api/runtimes/:id/healthcheck',
   'POST /api/runtimes/:id/run',
+  'GET /api/runtimes/hermes/gateway',
+  'POST /api/runtimes/hermes/gateway',
   'POST /api/onboarding/native-leader-model',
   'GET /api/onboarding/native-leader-model',
   'GET /api/onboarding/state',

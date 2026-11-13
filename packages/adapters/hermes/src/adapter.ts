@@ -14,20 +14,15 @@ import {
 } from '@clawboo/executor'
 
 import { hermesNativeId, mapHermesEvent, type MapContext } from './mapHermesEvent'
-import type {
-  HermesAdapterOptions,
-  HermesDriver,
-  HermesDriverFactory,
-  HermesNativeEvent,
-} from './types'
+import type { HermesDriver, HermesDriverFactory, HermesNativeEvent } from './types'
 
 /**
- * Hermes RuntimeAdapter. Same trait surface as the Claude Code / Codex adapters,
- * driving the Hermes CLI headless, over its ACP mode when the host has it (streamed
- * events, a steer read mid-turn) and its quiet one-shot mode otherwise (one result
- * at exit, steering by stop-and-resume); `options.transport` says which. Hermes is
- * a single-task worker on clawboo's one board of record; clawboo never syncs
- * Hermes's internal kanban.
+ * Hermes RuntimeAdapter. Same trait surface as the Claude Code / Codex adapters.
+ * The host drives Hermes through the long-lived Hermes gateway it supervises:
+ * each agent is a Hermes profile there, a run streams its text and tool calls,
+ * takes a steer mid-turn, and asks before the commands Hermes's own policy
+ * flags. Hermes is a single-task worker on clawboo's one board of record;
+ * clawboo never syncs Hermes's internal kanban.
  */
 export class HermesAdapter implements RuntimeAdapter {
   readonly id = 'hermes'
@@ -35,31 +30,28 @@ export class HermesAdapter implements RuntimeAdapter {
 
   private readonly drivers = new Map<string, HermesDriver>()
   /** Native Hermes session id captured per run (from session/result frames) —
-   *  the resumable handle the `sessionCodec` serializes for `--resume`. */
+   *  the resumable handle the `sessionCodec` serializes for a resume. */
   private readonly sessionIds = new Map<string, string>()
 
   constructor(
     private readonly driverFactory: HermesDriverFactory,
     private readonly healthCheck: () => Promise<HealthResult> = async () => ({ ok: true }),
-    private readonly options: HermesAdapterOptions = {},
   ) {}
 
   capabilities(): Capabilities {
-    // Over ACP Hermes streams its run and takes a steer mid-turn; the quiet
-    // one-shot path prints only at the end and steers by stop-and-resume.
-    const acp = this.options.transport?.() === 'acp'
     return {
-      streaming: acp,
+      streaming: true,
       mcp: true,
       worktrees: true,
       resume: true,
       toolApproval: true,
-      steering: acp ? 'live' : 'interrupt-resume',
+      steering: 'live',
       models: [], // provider-defined — Hermes resolves models via its own provider config
       runtimeClass: 'wrapped-oneshot',
       nativeHome: { scope: 'per-identity', persist: true },
       nativeSkills: 'preserve',
       nativeMemory: 'preserve',
+      // Hermes's own chat channels stay off: the gateway runs only its API server.
       nativeChannels: 'none',
       nativeScheduler: true,
     }
@@ -158,13 +150,9 @@ export class HermesAdapter implements RuntimeAdapter {
     await this.drivers.get(run.sessionKey)?.writeContext(key, value)
   }
 
-  /** The run's own driver decides: the process-wide transport can change while
-   *  a run started on the other one is still going. */
+  /** The run's own driver decides; a driver that makes no claim is live. */
   runSteering(run: RunHandle): 'live' | 'interrupt-resume' {
-    return (
-      this.drivers.get(run.sessionKey)?.steering?.() ??
-      (this.capabilities().steering === 'live' ? 'live' : 'interrupt-resume')
-    )
+    return this.drivers.get(run.sessionKey)?.steering?.() ?? 'live'
   }
 
   async steer(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult> {

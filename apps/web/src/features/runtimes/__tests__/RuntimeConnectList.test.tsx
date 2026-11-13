@@ -195,7 +195,7 @@ describe('RuntimeConnectList: a Codex CLI too old for the plan', () => {
   })
 })
 
-describe('RuntimeConnectList: a Hermes without its live mode', () => {
+describe('RuntimeConnectList: a Hermes that is not Clawboo’s current install', () => {
   function renderHermes(status: RuntimeStatus, onChanged = vi.fn()) {
     return render(
       <RuntimeConnectList
@@ -209,19 +209,32 @@ describe('RuntimeConnectList: a Hermes without its live mode', () => {
     )
   }
 
-  it('reads "Update available", and its toggle reveals the notice beside the providers', async () => {
-    renderHermes({ id: 'hermes', connectionState: 'ready', codexAuth: false, acpMissing: true })
-    expect(screen.getByText('Update available')).toBeInTheDocument()
+  it('reads "Update needed", and its toggle reveals the notice beside the providers', async () => {
+    renderHermes({ id: 'hermes', connectionState: 'ready', codexAuth: false, updateRequired: true })
+    expect(screen.getByText('Update needed')).toBeInTheDocument()
     expect(screen.queryByText('Connected')).not.toBeInTheDocument()
     const toggle = screen.getByTestId('runtime-list-row-hermes-toggle')
     expect(toggle).toHaveTextContent(/Update/i)
     await userEvent.click(toggle)
     expect(screen.getByTestId('runtime-hermes-update-required')).toHaveTextContent(
-      /installed without its live mode/,
+      /installs its own copy of Hermes/,
     )
-    // Hermes still runs, so its keys and sign-in stay managed here too.
+    // Its keys and sign-in stay managed here too.
     expect(await screen.findByTestId('runtime-hermes-subscription-needs-codex')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-hermes-disconnect')).toBeInTheDocument()
+  })
+
+  it('reads "Update needed" for a Hermes found only on PATH, not "Not installed"', async () => {
+    renderHermes({ id: 'hermes', connectionState: 'not-installed', updateRequired: true })
+    expect(screen.getByText('Update needed')).toBeInTheDocument()
+    expect(screen.queryByText('Not installed')).not.toBeInTheDocument()
+    const toggle = screen.getByTestId('runtime-list-row-hermes-toggle')
+    expect(toggle).toHaveTextContent(/Update/i)
+    await userEvent.click(toggle)
+    expect(screen.getByTestId('runtime-hermes-update-required')).toHaveTextContent(
+      /memory and skills carry over/,
+    )
+    expect(screen.getByTestId('runtime-hermes-update')).toBeEnabled()
   })
 
   it('Update Hermes runs the install stream, then re-reads the status', async () => {
@@ -242,7 +255,7 @@ describe('RuntimeConnectList: a Hermes without its live mode', () => {
           releaseRefetch = r
         }),
     )
-    renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: true }, onChanged)
+    renderHermes({ id: 'hermes', connectionState: 'ready', updateRequired: true }, onChanged)
     await userEvent.click(screen.getByTestId('runtime-list-row-hermes-toggle'))
     await userEvent.click(screen.getByTestId('runtime-hermes-update'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
@@ -266,7 +279,7 @@ describe('RuntimeConnectList: a Hermes without its live mode', () => {
       ),
     )
     const onChanged = vi.fn()
-    renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: true }, onChanged)
+    renderHermes({ id: 'hermes', connectionState: 'ready', updateRequired: true }, onChanged)
     await userEvent.click(screen.getByTestId('runtime-list-row-hermes-toggle'))
     await userEvent.click(screen.getByTestId('runtime-hermes-update'))
     expect(await screen.findByText('Installation failed with exit code 1')).toBeInTheDocument()
@@ -274,11 +287,57 @@ describe('RuntimeConnectList: a Hermes without its live mode', () => {
     expect(onChanged).not.toHaveBeenCalled()
   })
 
-  it('a Hermes with its live mode reads Connected with Manage and no notice', () => {
-    renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: false })
+  it('a current Hermes reads Connected, and Manage shows its gateway', async () => {
+    server.use(
+      http.get('/api/runtimes/hermes/gateway', () =>
+        HttpResponse.json({
+          state: 'running',
+          port: 8642,
+          pid: 1,
+          startedAt: Date.now() - 120_000,
+          restarts: 0,
+          lastError: null,
+          version: '0.23.1',
+        }),
+      ),
+    )
+    renderHermes({ id: 'hermes', connectionState: 'ready' })
     expect(screen.getByText('Connected')).toBeInTheDocument()
-    expect(screen.getByTestId('runtime-list-row-hermes-toggle')).toHaveTextContent(/Manage/i)
+    const toggle = screen.getByTestId('runtime-list-row-hermes-toggle')
+    expect(toggle).toHaveTextContent(/Manage/i)
     expect(screen.queryByTestId('runtime-hermes-update-required')).not.toBeInTheDocument()
+    await userEvent.click(toggle)
+    const section = await screen.findByTestId('hermes-gateway-section')
+    await waitFor(() => expect(section).toHaveTextContent('Running'))
+    expect(section).toHaveTextContent('127.0.0.1:8642')
+    expect(section).toHaveTextContent('v0.23.1')
+    expect(screen.getByTestId('hermes-gateway-restart')).toBeInTheDocument()
+  })
+
+  it('a gateway that could not start says why and offers Start', async () => {
+    let started = 0
+    server.use(
+      http.get('/api/runtimes/hermes/gateway', () =>
+        HttpResponse.json({
+          state: 'failed',
+          port: null,
+          pid: null,
+          startedAt: null,
+          restarts: 3,
+          lastError: 'Hermes did not answer on its port: [ERROR] api_server_port_in_use',
+          version: null,
+        }),
+      ),
+      http.post('/api/runtimes/hermes/gateway', () => {
+        started += 1
+        return HttpResponse.json({ ok: true, status: { state: 'running', port: 8643 } })
+      }),
+    )
+    renderHermes({ id: 'hermes', connectionState: 'ready' })
+    await userEvent.click(screen.getByTestId('runtime-list-row-hermes-toggle'))
+    expect(await screen.findByText(/api_server_port_in_use/)).toBeInTheDocument()
+    await userEvent.click(screen.getByTestId('hermes-gateway-start'))
+    await waitFor(() => expect(started).toBe(1))
   })
 })
 

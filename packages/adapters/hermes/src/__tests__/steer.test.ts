@@ -21,16 +21,16 @@ async function started(): Promise<{
 }
 
 describe('HermesAdapter.steer', () => {
-  it('declares interrupt-resume steering', () => {
+  it('declares live steering: the gateway takes a steer into the running turn', () => {
     const adapter = new HermesAdapter(() => new FakeHermesDriver())
-    expect(adapter.capabilities().steering).toBe('interrupt-resume')
+    expect(adapter.capabilities().steering).toBe('live')
   })
 
   it('hands the message to the run’s driver and reports it delivered', async () => {
     const { adapter, driver, run } = await started()
     await expect(adapter.steer(run, 'keep it short')).resolves.toEqual({
       delivered: true,
-      mode: 'interrupt-resume',
+      mode: 'live',
     })
     expect(driver.calls).toContainEqual({ method: 'steer', params: { text: 'keep it short' } })
   })
@@ -63,12 +63,24 @@ describe('HermesAdapter.steer', () => {
     expect(result).toEqual({ delivered: false, reason: 'no-run' })
   })
 
-  it('refuses a passive steer: stopping a run is never worth it for an FYI', async () => {
+  it('hands a passive steer to the driver, which decides whether it can ride along', async () => {
     const { adapter, driver, run } = await started()
+    await expect(adapter.steer(run, 'FYI', { passive: true })).resolves.toEqual({
+      delivered: true,
+      mode: 'live',
+    })
+    expect(driver.calls.some((c) => c.method === 'steer')).toBe(true)
+  })
+
+  it('a run whose driver steers by stop-and-resume refuses an FYI', async () => {
+    const driver = Object.assign(new FakeHermesDriver(), {
+      steering: () => 'interrupt-resume' as const,
+    })
+    const adapter = new HermesAdapter(() => driver)
+    const run = await adapter.start({}, { agentId: 'a1', sessionKey: SK, message: 'go' })
     await expect(adapter.steer(run, 'FYI', { passive: true })).resolves.toEqual({
       delivered: false,
       reason: 'unsupported',
     })
-    expect(driver.calls.some((c) => c.method === 'steer')).toBe(false)
   })
 })

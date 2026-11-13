@@ -24,7 +24,11 @@ export {
 export { formatPeerPost, type PeerPostLike } from './teamchat/format'
 
 export { runStdioServer } from './stdio'
-export { createStreamableHttpHandlers, type McpHttpHandlers } from './http'
+export {
+  createStatelessHttpHandler,
+  createStreamableHttpHandlers,
+  type McpHttpHandlers,
+} from './http'
 export { probeServer } from './probe'
 export {
   connectInMemoryClient,

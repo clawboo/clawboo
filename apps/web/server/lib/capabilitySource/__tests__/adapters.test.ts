@@ -209,6 +209,25 @@ describe('HermesCapabilitySource', () => {
     expect(agentIds.has('h-dead')).toBe(false)
   })
 
+  it("reads an agent whose home moved into its profile in the Hermes gateway's home", async () => {
+    const home = path.join(dir, 'hermes-home-moved')
+    const profile = path.join(home, 'runtimes', 'hermes', '_gateway', 'profiles', 'cb-h-moved')
+    mkdirSync(path.join(profile, 'skills', 'deploy'), { recursive: true })
+    writeFileSync(
+      path.join(profile, 'skills', 'deploy', 'SKILL.md'),
+      '---\nname: Deploy\ndescription: Ship it\n---\n# body',
+    )
+    seedAgent('h-moved', 'hermes', 'hermes')
+    const env = { ...process.env, CLAWBOO_HOME: home }
+    const { records } = await new HermesCapabilitySource({ getDb: () => db, env }).read()
+    expect(records.find((r) => r.source === 'filesystem-skill-md')).toMatchObject({
+      name: 'Deploy',
+      agentId: 'h-moved',
+    })
+    // The gateway's own home is never read as an agent.
+    expect(records.some((r) => r.agentId === '_gateway')).toBe(false)
+  })
+
   it('write() throws unsupported (every Hermes capability is observe-only)', async () => {
     await expect(
       new HermesCapabilitySource().write({ kind: 'disable', id: 'hermes:x' }),

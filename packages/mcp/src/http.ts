@@ -83,3 +83,45 @@ export function createStreamableHttpHandlers(
 
   return { handlePost, handleSessionRequest }
 }
+
+/**
+ * A POST handler with no MCP session: every request gets a fresh server and
+ * transport, built for that request (`createServer` sees the request and its
+ * parsed body), and both are closed when the response ends. For a client that
+ * holds one connection for a long time while what each call may do changes
+ * from call to call: a session would freeze the binding it was opened with.
+ * GET and DELETE have nothing to attach to in this mode (405).
+ */
+export function createStatelessHttpHandler(
+  createServer: (req: IncomingMessage, body: unknown) => Server,
+): McpHttpHandlers {
+  async function handlePost(
+    req: IncomingMessage,
+    res: ServerResponse,
+    body: unknown,
+  ): Promise<void> {
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
+    const server = createServer(req, body)
+    res.on('close', () => {
+      void transport.close().catch(() => undefined)
+      void server.close().catch(() => undefined)
+    })
+    await server.connect(transport)
+    await transport.handleRequest(req, res, body)
+  }
+
+  async function handleSessionRequest(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    res.statusCode = 405
+    res.setHeader('allow', 'POST')
+    res.setHeader('content-type', 'application/json')
+    res.end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'This connection has no session: POST only.' },
+        id: null,
+      }),
+    )
+  }
+
+  return { handlePost, handleSessionRequest }
+}

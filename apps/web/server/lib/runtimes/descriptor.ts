@@ -44,25 +44,16 @@ export interface RuntimeDescriptor {
   /** A runtime whose runs load an SDK and start that SDK's own platform binary:
    *  it is installed exactly when both are there, whatever CLI is on PATH. */
   sdkBinary?: 'claude-agent-sdk'
-  /** How the runtime is installed. null = nothing to install (built-in). */
-  packageManager: 'npm' | 'pip' | null
-  /** Package to install. An npm runtime installs it into a folder of its own
-   *  under Clawboo's runtimes folder (`npmRuntimeInstall.ts`), never with
-   *  `npm install -g`; any other runtime's installer says how it uses it. */
+  /** How the runtime is installed. null = nothing to install (built-in).
+   *  `release`: a pinned release Clawboo downloads and installs itself (Hermes). */
+  packageManager: 'npm' | 'release' | null
+  /** What is installed. An npm runtime installs this package into a folder of its
+   *  own under Clawboo's runtimes folder (`npmRuntimeInstall.ts`), never with
+   *  `npm install -g`; a release runtime names it as `owner/repo@tag`. */
   pkg: string | null
   /** For an npm runtime: the package's commands to put in the runtimes folder's
    *  `bin/` (each runs on the Node that installed it). Empty for a library. */
   npmBins?: readonly string[]
-  /** For a `pip` runtime: the lowest Python 3 MINOR version the package installs
-   *  on (e.g. 11 for `>=3.11`). The installer resolves an interpreter inside
-   *  `pythonMinMinor`..`pythonMaxMinor`, preferring version-specific binaries
-   *  over the bare `python3` (which on a fresh macOS is the Xcode Command Line
-   *  Tools Python 3.9, too old). */
-  pythonMinMinor?: number
-  /** For a `pip` runtime: the highest Python 3 MINOR version the package installs
-   *  on (e.g. 13 for `<3.14`). Omitted = no upper bound. Without it the installer
-   *  would take the newest Python it finds, so a 3.14 would win over a 3.12. */
-  pythonMaxMinor?: number
   /** Human-readable install command, for a person installing it by hand (UI +
    *  error remediation). Null when only Clawboo's own install will do. */
   installCommand: string | null
@@ -128,34 +119,22 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     id: 'hermes',
     name: 'Hermes',
     healthBin: 'hermes',
-    packageManager: 'pip',
-    // Pinned below the next major (blocks an auto-install of a future 1.0); the
-    // installer passes this as a single argv element (no shell), so `<1` is safe.
-    // The `[anthropic]` extra bundles the Anthropic provider SDK — OpenAI +
-    // OpenRouter ship with hermes core, but the Anthropic provider needs this
-    // extra, so a REUSED Anthropic key (the native default) routes without a
-    // separate install. Confirmed against the installed CLI (`--provider
-    // anthropic` errors "the 'anthropic' package is required" without it).
-    // The `[acp]` extra is Hermes's Agent Client Protocol mode (`hermes acp`), which
-    // clawboo drives so a run streams and takes a steer; without it runs fall back
-    // to the quiet one-shot mode (`hermes acp --check` reports the missing deps).
-    pkg: 'hermes-agent[anthropic,acp]<1',
-    // hermes-agent requires Python >=3.11,<3.14. An interpreter outside that range
-    // (a fresh macOS `python3` is the Xcode CLT Python 3.9; Homebrew's newest is
-    // 3.14) makes pip report "(from versions: none)", so the installer resolves a
-    // 3.11 to 3.13 interpreter first.
-    pythonMinMinor: 11,
-    pythonMaxMinor: 13,
-    installCommand: "pipx install 'hermes-agent[anthropic,acp]<1'",
+    // Installed from its GitHub release, pinned (lib/runtimes/hermes/release.ts),
+    // into Clawboo's runtimes folder with the uv and Python 3.14 that release
+    // pins for itself: PyPI's hermes-agent lags the releases. Clawboo then runs
+    // Hermes's own gateway and drives every Hermes agent through it.
+    packageManager: 'release',
+    pkg: 'NousResearch/hermes-agent@v0.23.1',
+    installCommand: null,
     builtIn: false,
     authKind: 'api-key',
     envVar: 'OPENROUTER_API_KEY',
-    // Hermes routes across providers (config.yaml `model.provider` / `--provider`),
-    // so a native-onboarded Anthropic or OpenAI key ALSO makes it usable — any of
-    // these satisfies the credential check, mirroring the native runtime. The
-    // driver maps whichever key is present to the matching `--provider` flag.
+    // Hermes routes across providers (config.yaml `model.provider`, or the
+    // provider a run asks for), so a native-onboarded Anthropic or OpenAI key
+    // ALSO makes it usable: any of these satisfies the credential check,
+    // mirroring the native runtime.
     altEnvVars: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
-    docsUrl: 'https://pypi.org/project/hermes-agent/',
+    docsUrl: 'https://hermes-agent.nousresearch.com/docs',
     headlessAuth: true,
   },
   'clawboo-mock': {

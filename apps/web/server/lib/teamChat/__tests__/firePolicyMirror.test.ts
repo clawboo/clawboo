@@ -146,14 +146,12 @@ describe('steering is declared honestly', () => {
       new CodexAdapter(noDriver),
       new ClaudeCodeAdapter(noDriver),
       new OpenClawAdapter({} as never),
+      // Hermes's gateway takes a steer into the running turn.
+      new HermesAdapter(noDriver),
     ]
     for (const a of live) {
       expect(a.capabilities().steering, a.id).toBe('live')
       expect(typeof a.steer, a.id).toBe('function')
     }
-    // One-shot `hermes chat -q` takes no input once started.
-    const hermes = new HermesAdapter(noDriver)
-    expect(hermes.capabilities().steering).toBe('interrupt-resume')
-    expect(typeof hermes.steer).toBe('function')
   })
 })

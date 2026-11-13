@@ -1,6 +1,9 @@
-// hermes CapabilitySource — read-only OBSERVE of each Hermes per-identity home
-// under `~/.clawboo/runtimes/hermes/<agentId>/` (with agents on their own OS user,
-// under that user's runtime homes instead). Hermes owns its native
+// hermes CapabilitySource: read-only OBSERVE of each Hermes agent's home: its
+// profile in the Hermes gateway's home (`<runtime homes>/hermes/_gateway/
+// profiles/<profile>/`), or its old per-identity home `<runtime homes>/hermes/
+// <agentId>/` until it first runs through the gateway. The runtime homes are
+// `~/.clawboo/runtimes`, or the agent user's own with agents on their own OS
+// user. Hermes owns its native
 // self-model; the invariant (hermesSkills.ts) is that clawboo NEVER writes a
 // Hermes skills dir — so its SKILL.md skills are surfaced `observe-only` rather
 // than the default `external-write` manageability (the runtime keeps its native
@@ -21,10 +24,11 @@ import {
 } from '@clawboo/capability-registry'
 import { agents, type ClawbooDb } from '@clawboo/db'
 
-import { agentList, agentReadFile } from '../agentUser/agentFs'
+import { agentList, agentReadFile, agentStat } from '../agentUser/agentFs'
+import { HERMES_GATEWAY_HOME_ID, hermesProfileName } from '../runtimes/hermes/profiles'
 import { listHermesMcpServerNames } from '../runtimes/hermesHome'
 import { listNativeSkills } from '../runtimes/hermesSkills'
-import { runtimeHomesRoot } from '../runtimes/identityHome'
+import { runtimeHomesRoot, sanitizeAgentId } from '../runtimes/identityHome'
 import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
 
 /** Where the Hermes homes are: the runs' own root, which is under the agent
@@ -117,23 +121,35 @@ export class HermesCapabilitySource implements CapabilitySource {
     try {
       root = hermesHomesRoot(this.deps.env ?? process.env)
       const { entries } = await agentList(root)
-      homes = entries.filter((e) => e.type === 'dir' && !e.name.startsWith('.')).map((e) => e.name)
+      homes = entries
+        .filter(
+          (e) => e.type === 'dir' && !e.name.startsWith('.') && e.name !== HERMES_GATEWAY_HOME_ID,
+        )
+        .map((e) => e.name)
     } catch {
       // No Hermes homes yet (no runs), or with agents on their own OS user no
       // agent host to read them through: not an error; report empty + ok.
       return { records: [builtinRollup('hermes', 'hermes', 'Hermes')], status: okStatus('hermes') }
     }
 
-    // Scope to LIVE hermes agents so a DELETED agent's leftover home dir under
-    // ~/.clawboo/runtimes/hermes/<id>/ doesn't surface as a ghost capability
-    // record for a non-existent agent (the reported orphan). Null = no db wired
-    // → keep all homes (unchanged behaviour).
+    // Scoped to LIVE hermes agents, so a deleted agent's leftover home is no
+    // ghost record. With a db, every live agent is read even with no old home
+    // left: its state lives in its profile in the Hermes gateway's home now.
+    // Null = no db wired: the homes on disk.
     const liveIds = this.liveHermesAgentIds()
-    const scopedHomes = liveIds ? homes.filter((id) => liveIds.has(id)) : homes
+    const scopedHomes = liveIds ? [...liveIds].sort() : homes
 
     try {
       for (const agentId of scopedHomes) {
-        const home = path.join(root, agentId)
+        // The agent's profile in the gateway's home, once its old home moved in.
+        const legacy = path.join(root, sanitizeAgentId(agentId))
+        const profile = path.join(
+          root,
+          HERMES_GATEWAY_HOME_ID,
+          'profiles',
+          hermesProfileName(legacy),
+        )
+        const home = (await agentStat(profile))?.type === 'dir' ? profile : legacy
 
         const skillNames = await listNativeSkills(home)
         for (const skillName of skillNames) {

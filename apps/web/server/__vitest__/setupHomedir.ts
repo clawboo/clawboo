@@ -12,10 +12,10 @@
 // WHY A SHIM RATHER THAN PER-SUITE ENV. The alternative was adding a second
 // override (USERPROFILE, or a per-resolver variable like CLAWBOO_HOME) to ~45
 // beforeEach blocks. That is 45 chances to get a save/restore pair wrong, it has
-// to be repeated in every suite added later, and it cannot fix
-// `hermesDriver.test.ts` at all: that suite DELIBERATELY deletes `HERMES_HOME`
-// (see its beforeEach) so it exercises the `~/.hermes` fallback, so the only way
-// to sandbox it is to move `os.homedir()` itself. One seam, applied uniformly,
+// to be repeated in every suite added later, and it cannot fix a
+// suite that DELIBERATELY deletes `HERMES_HOME` to exercise the `~/.hermes`
+// fallback (the Hermes home tests do), so the only way to sandbox it is to move
+// `os.homedir()` itself. One seam, applied uniformly,
 // is both smaller and harder to get wrong.
 //
 // SCOPE. This is a Vitest setup file. It is never bundled and never ships: the

@@ -3,7 +3,7 @@
 // `node:child_process` spawn (assert install argv + drive close),
 // `../../lib/platform` (control which bins "exist"), and
 // `../../lib/executorRunner` (spy the run path for the apiKeyEnv-wiring proof).
-// Asserts: npm/pip install argv + PEP-668 retry, connect writes the vault and
+// Asserts: npm install argv, the Hermes release install, connect writes the vault and
 // NEVER echoes the key, codex's no-op needs-login, disconnect, the status shape +
 // connectionState matrix, and that a connected key reaches the run ctx.
 
@@ -99,19 +99,61 @@ vi.mock('../../lib/runtimes/codexModels', () => ({
   },
 }))
 
-// ── Mock `hermes acp --check` (real impl spawns Hermes in a throwaway home). ──
-const acpCheckState = vi.hoisted(() => ({
-  answer: null as boolean | null,
-  calls: 0,
-  /** When set, a check waits for this before it answers. */
+// ── Mock Clawboo's own Hermes install and its gateway. ──
+// `bins['hermes']` stands for Clawboo's install of the pinned release, so the
+// connect and status cases read Hermes as installed exactly as before.
+const hermesState = vi.hoisted(() => ({
+  version: null as string | null,
+  installs: 0,
+  /** When set, an install waits for this before it finishes. */
   gate: null as Promise<void> | null,
+  fail: null as string | null,
+  gatewayState: 'stopped' as string,
+  restarts: 0,
+  keySyncs: 0,
+  wantedStarts: 0,
 }))
-vi.mock('../../lib/runtimes/hermesAcpCheck', () => ({
-  runHermesAcpCheck: async () => {
-    acpCheckState.calls += 1
-    const answer = acpCheckState.answer
-    if (acpCheckState.gate) await acpCheckState.gate
-    return answer
+vi.mock('../../lib/runtimes/hermes/install', () => ({
+  managedHermesCommand: () => platformState.bins['hermes'] ?? null,
+  managedHermesVersion: () =>
+    platformState.bins['hermes'] ? (hermesState.version ?? '0.23.1') : null,
+  managedHermesCurrent: () =>
+    Boolean(platformState.bins['hermes']) && (hermesState.version ?? '0.23.1') === '0.23.1',
+  installHermesRelease: async (onEvent: (ev: Record<string, unknown>) => void) => {
+    hermesState.installs += 1
+    onEvent({ type: 'progress', step: 'download', message: 'Downloading Hermes 0.23.1…' })
+    if (hermesState.gate) await hermesState.gate
+    if (hermesState.fail) {
+      throw Object.assign(new Error(hermesState.fail), { code: 'DIGEST_MISMATCH' })
+    }
+    platformState.bins['hermes'] = '/rt/hermes/v0.23.1/venv/bin/hermes'
+    hermesState.version = '0.23.1'
+    return { version: '0.23.1', command: platformState.bins['hermes'] }
+  },
+}))
+vi.mock('../../lib/runtimes/hermes', () => ({
+  hermesGateway: () => ({
+    status: () => ({
+      state: hermesState.gatewayState,
+      port: hermesState.gatewayState === 'running' ? 8642 : null,
+      pid: null,
+      startedAt: null,
+      restarts: 0,
+      lastError: null,
+      version: null,
+    }),
+    restart: async () => {
+      hermesState.restarts += 1
+    },
+  }),
+  createHermesRunDriver: () => {
+    throw new Error('no Hermes runs in this suite')
+  },
+  syncHermesProfileKeys: async () => {
+    hermesState.keySyncs += 1
+  },
+  startHermesIfWanted: async () => {
+    hermesState.wantedStarts += 1
   },
 }))
 
@@ -200,12 +242,6 @@ import {
   canRunNativeProvider,
   isNativeOllamaRemoved,
 } from '../../lib/runtimes/native/nativeProviderDefaults'
-import {
-  checkHermesAcp,
-  hermesTransport,
-  peekHermesAcp,
-  resetHermesTransport,
-} from '../../lib/runtimes/hermesTransport'
 
 interface Mock {
   res: Response
@@ -312,10 +348,14 @@ describe('runtimes install/connect REST', () => {
     spawnState.children = []
     runnerState.lastInput = null
     codexAuthState.loggedIn = false
-    acpCheckState.answer = null
-    acpCheckState.calls = 0
-    acpCheckState.gate = null
-    resetHermesTransport()
+    hermesState.version = null
+    hermesState.installs = 0
+    hermesState.gate = null
+    hermesState.fail = null
+    hermesState.gatewayState = 'stopped'
+    hermesState.restarts = 0
+    hermesState.keySyncs = 0
+    hermesState.wantedStarts = 0
     // Keep the hermes ChatGPT-login probe sandboxed (userHermesHome honours it).
     process.env['HERMES_HOME'] = path.join(home, '.hermes')
   })
@@ -344,8 +384,8 @@ describe('runtimes install/connect REST', () => {
     const { RUNTIME_DESCRIPTORS } = await import('../../lib/runtimes/descriptor')
     for (const d of Object.values(RUNTIME_DESCRIPTORS)) {
       if (d.builtIn || d.pkg == null) continue
-      // npm `name@<spec>` or pip `name<spec>` / `name==spec` — never a bare name.
-      expect(d.pkg, `${d.id} pkg must be version-pinned`).toMatch(/(@[\^~]?\d|[<>=!~]=?\d)/)
+      // npm `name@<spec>`, or a release `owner/repo@v<version>`: never a bare name.
+      expect(d.pkg, `${d.id} pkg must be version-pinned`).toMatch(/@[\^~]?v?\d/)
     }
   })
 
@@ -563,189 +603,76 @@ describe('runtimes install/connect REST', () => {
     }
   })
 
-  // ── install (pip / hermes) ──────────────────────────────────────────────────
-  it('installs hermes via pipx when available', async () => {
-    platformState.bins['pipx'] = '/usr/bin/pipx'
-    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+  // ── install (hermes: the pinned release into Clawboo's own folder) ──────────
+  it('installs the pinned Hermes release and reports it installed', async () => {
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    expect(spawnState.calls[0]).toEqual({
-      cmd: '/usr/bin/pipx',
-      args: ['install', '--force', 'hermes-agent[anthropic,acp]<1'],
+    await m.ended
+    expect(hermesState.installs).toBe(1)
+    // No pip, no pipx: Clawboo brings its own toolchain.
+    expect(spawnState.calls).toHaveLength(0)
+    // No gateway was running: one starts if Hermes agents are waiting for it.
+    expect(hermesState.wantedStarts).toBe(1)
+    expect(hermesState.restarts).toBe(0)
+    expect(m.events()).toContainEqual(
+      expect.objectContaining({ type: 'progress', step: 'download' }),
+    )
+    expect(m.events().at(-1)).toMatchObject({ type: 'complete', success: true })
+  })
+
+  it('restarts a running Hermes gateway onto the new install', async () => {
+    platformState.bins['hermes'] = '/rt/hermes/v0.22.0/venv/bin/hermes'
+    hermesState.version = '0.22.0'
+    hermesState.gatewayState = 'running'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    await m.ended
+    expect(hermesState.restarts).toBe(1)
+    expect(m.events().at(-1)).toMatchObject({ type: 'complete', success: true })
+  })
+
+  it('restarts a gateway still starting on the old install too', async () => {
+    hermesState.gatewayState = 'starting'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    await m.ended
+    expect(hermesState.restarts).toBe(1)
+    expect(hermesState.wantedStarts).toBe(0)
+  })
+
+  it('a failed Hermes install reports its reason and code', async () => {
+    hermesState.fail = 'The download does not match its pinned hash.'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    await m.ended
+    expect(m.events().at(-1)).toMatchObject({
+      type: 'error',
+      code: 'DIGEST_MISMATCH',
+      message: 'The download does not match its pinned hash.',
     })
-    ;(spawnState.children[0] as FakeChild).emitClose(0)
-    await m.ended
-    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
   })
 
-  it('hermes pip path retries with --break-system-packages on a PEP-668 env', async () => {
-    platformState.bins['python3'] = '/usr/bin/python3' // no pipx; python present
-    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    expect(spawnState.calls[0]).toEqual({
-      cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--upgrade', '--user', 'hermes-agent[anthropic,acp]<1'],
-    })
-    const first = spawnState.children[0] as FakeChild
-    first.emitStderr('error: externally-managed-environment')
-    first.emitClose(1)
-    expect(spawnState.calls[1]).toEqual({
-      cmd: '/usr/bin/python3',
-      args: [
-        '-m',
-        'pip',
-        'install',
-        '--upgrade',
-        '--user',
-        '--break-system-packages',
-        'hermes-agent[anthropic,acp]<1',
-      ],
-    })
-    ;(spawnState.children[1] as FakeChild).emitClose(0)
-    await m.ended
-    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
-  })
-
-  it('a Hermes install (also how it is updated) checks for ACP afresh before it reports done', async () => {
-    platformState.bins['pipx'] = '/usr/bin/pipx'
-    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-    acpCheckState.answer = false
-    await checkHermesAcp()
-    expect(hermesTransport()).toBe('quiet')
-
-    acpCheckState.answer = true
-    let release!: () => void
-    acpCheckState.gate = new Promise<void>((r) => (release = r))
-    const before = acpCheckState.calls
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    ;(spawnState.children[0] as FakeChild).emitClose(0)
-    // The old answer is gone at once, and the new one is read before `complete`.
-    expect(hermesTransport()).toBe('acp')
-    await vi.waitFor(() => expect(acpCheckState.calls).toBe(before + 1))
-    expect(m.events().some((e) => e['type'] === 'complete')).toBe(false)
-    release()
-    await m.ended
-    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
-    expect(peekHermesAcp()).toBe(true)
-  })
-
-  it('an update keeps running when its client goes away, then checks Hermes again', async () => {
-    platformState.bins['pipx'] = '/usr/bin/pipx'
-    platformState.bins['hermes'] = '/home/u/.local/bin/hermes' // installed: an update
-    acpCheckState.answer = true
-    const before = acpCheckState.calls
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    const child = spawnState.children[0] as FakeChild
-    // The notice unmounted, or the tab closed: a reinstall cut short here could
-    // leave Hermes half replaced, so it is not stopped.
-    m.close()
-    expect(child.killed).toBe(false)
-    child.emitClose(0)
-    await m.ended
-    expect(acpCheckState.calls).toBe(before + 1)
-    expect(peekHermesAcp()).toBe(true)
-  })
-
-  it('a first install still stops when its client goes away', () => {
-    platformState.bins['pipx'] = '/usr/bin/pipx' // no hermes yet
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    m.close()
-    expect((spawnState.children[0] as FakeChild).killed).toBe(true)
-  })
-
-  it('refuses a second install of a runtime while one is still running', async () => {
-    platformState.bins['pipx'] = '/usr/bin/pipx'
-    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+  it('refuses a second Hermes install while one is still running, and keeps it going when its client leaves', async () => {
+    let release: () => void = () => undefined
+    hermesState.gate = new Promise<void>((r) => (release = r))
     const first = mockRes()
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), first.res)
-    const child = spawnState.children[0] as FakeChild
-    child.exitCode = null
-    child.signalCode = null
     first.close()
-
     const second = mockRes()
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), second.res)
     expect(second.events()).toContainEqual(
       expect.objectContaining({ type: 'error', code: 'INSTALL_RUNNING' }),
     )
-    expect(spawnState.calls).toHaveLength(1)
-
-    // Once it ends, the next install goes ahead.
-    child.exitCode = 0
-    child.emitClose(0)
-    await first.ended
+    release()
+    await vi.waitFor(() => expect(platformState.bins['hermes']).toBeTruthy())
+    expect(hermesState.installs).toBe(1)
+    hermesState.gate = null
     const third = mockRes()
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), third.res)
-    expect(spawnState.calls).toHaveLength(2)
+    await third.ended
+    expect(hermesState.installs).toBe(2)
   })
 
-  it('a failed Hermes install keeps what was known about ACP', async () => {
-    platformState.bins['pipx'] = '/usr/bin/pipx'
-    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-    acpCheckState.answer = false
-    await checkHermesAcp()
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    ;(spawnState.children[0] as FakeChild).emitClose(1)
-    await m.ended
-    expect(peekHermesAcp()).toBe(false)
-    expect(hermesTransport()).toBe('quiet')
-  })
-
-  it('hermes install reports PYTHON_MISSING when neither pipx nor python exist', async () => {
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    await m.ended
-    expect(m.events().some((e) => e['code'] === 'PYTHON_MISSING')).toBe(true)
-    expect(spawnState.calls.length).toBe(0)
-  })
-
-  it('hermes install reports PYTHON_TOO_OLD (not pip gibberish) when only the Xcode Python 3.9 exists', async () => {
-    // The exact fresh-macOS case: no pipx, and the only Python is the Xcode CLT
-    // 3.9 — below hermes-agent's requires-python >=3.11. Must be a clear error,
-    // never a doomed pip spawn that returns "(from versions: none)".
-    platformState.pythonOverride = {
-      compatible: null,
-      found: [
-        {
-          bin: '/Applications/Xcode.app/Contents/Developer/usr/bin/python3',
-          minor: 9,
-          version: '3.9',
-        },
-      ],
-    }
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    await m.ended
-    const err = m.events().find((e) => e['code'] === 'PYTHON_TOO_OLD')
-    expect(err).toBeTruthy()
-    expect(String(err?.['message'])).toMatch(/3\.11/)
-    expect(String(err?.['message'])).toMatch(/Xcode/)
-    expect(spawnState.calls.length).toBe(0)
-  })
-
-  it('hermes install names the 3.11 to 3.13 range when only a Python 3.14 exists', async () => {
-    // hermes-agent requires >=3.11,<3.14, so a machine whose only Python is 3.14
-    // needs an error that names the range, not "too old" and not a doomed pip run.
-    platformState.pythonOverride = {
-      compatible: null,
-      found: [{ bin: '/opt/homebrew/bin/python3.14', minor: 14, version: '3.14' }],
-    }
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
-    await m.ended
-    const err = m.events().find((e) => e['type'] === 'error')
-    expect(err?.['code']).toBe('PYTHON_UNSUPPORTED')
-    expect(String(err?.['message'])).toContain('Python 3.11 to 3.13')
-    expect(String(err?.['message'])).toContain('found only Python 3.14')
-    expect(spawnState.calls.length).toBe(0)
-  })
-
-  // ── connect / disconnect ────────────────────────────────────────────────────
   it('connect writes the vault and NEVER echoes the key', () => {
     sdkState.binary = SDK_BIN // Claude Code is installed
     const m = mockRes()
@@ -822,7 +749,7 @@ describe('runtimes install/connect REST', () => {
     codexModelsState.peeked = false
   })
 
-  describe('Hermes without its ACP mode', () => {
+  describe('Hermes status', () => {
     const hermesStatus = async (): Promise<Record<string, unknown>> => {
       const list = mockRes()
       await runtimesListGET(req(), list.res)
@@ -831,34 +758,29 @@ describe('runtimes install/connect REST', () => {
       )!
     }
 
-    it('reads acpMissing once checked, and its steering stops and resumes the run', async () => {
-      platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-      acpCheckState.answer = false
-      // The list starts the check and does not wait for it: nothing claimed yet.
-      expect('acpMissing' in (await hermesStatus())).toBe(false)
-      expect(acpCheckState.calls).toBe(1)
-      await checkHermesAcp()
+    it("streams and steers live through Clawboo's own install, with its gateway's state", async () => {
+      platformState.bins['hermes'] = '/rt/hermes/v0.23.1/venv/bin/hermes'
+      hermesState.gatewayState = 'running'
       const hermes = await hermesStatus()
-      expect(hermes['acpMissing']).toBe(true)
-      expect(hermes['capabilities']).toMatchObject({
-        streaming: false,
-        steering: 'interrupt-resume',
-      })
-    })
-
-    it('a Hermes with ACP reads acpMissing false and live steering', async () => {
-      platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-      acpCheckState.answer = true
-      await checkHermesAcp()
-      const hermes = await hermesStatus()
-      expect(hermes['acpMissing']).toBe(false)
+      expect(hermes['installed']).toBe(true)
+      expect('updateRequired' in hermes).toBe(false)
+      expect(hermes['hermesVersion']).toBe('0.23.1')
+      expect(hermes['hermesGateway']).toMatchObject({ state: 'running', port: 8642 })
       expect(hermes['capabilities']).toMatchObject({ streaming: true, steering: 'live' })
+      expect('acpMissing' in hermes).toBe(false)
     })
 
-    it('a Hermes that is not installed is never checked', async () => {
+    it('an older install of Clawboo’s own needs an update', async () => {
+      platformState.bins['hermes'] = '/rt/hermes/v0.22.0/venv/bin/hermes'
+      hermesState.version = '0.22.0'
+      expect((await hermesStatus())['updateRequired']).toBe(true)
+    })
+
+    it('a not-installed Hermes reads not installed, with no gateway to show running', async () => {
       const hermes = await hermesStatus()
-      expect('acpMissing' in hermes).toBe(false)
-      expect(acpCheckState.calls).toBe(0)
+      expect(hermes['installed']).toBe(false)
+      expect(hermes['connectionState']).toBe('not-installed')
+      expect((hermes['hermesGateway'] as { state: string }).state).toBe('stopped')
     })
   })
 
@@ -897,6 +819,8 @@ describe('runtimes install/connect REST', () => {
       removed: [],
       kept: [{ envVar: 'OPENROUTER_API_KEY', sharedWith: ['Clawboo Native'] }],
     })
+    // Hermes's profiles keep keys for the jobs it runs on its own: they follow.
+    expect(hermesState.keySyncs).toBe(1)
   })
 
   it('disconnect deletes an ALT-slot key no other runtime reads (native connected via Groq)', () => {

@@ -427,7 +427,7 @@ export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): 
       if (state.sawResult) return []
       // Idempotent across the subprocess substrate's 'error'+'close' double-fire
       // (createSpawnDriver invokes onClose from BOTH): mark the terminal as
-      // synthesized so a second call returns [] (mirrors hermesDriver), never two
+      // synthesized so a second call returns [], never two
       // `result` terminals.
       state.sawResult = true
       // A deliberate abort kills the process with SIGTERM/SIGKILL (code null) —

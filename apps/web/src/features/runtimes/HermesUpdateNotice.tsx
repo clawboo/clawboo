@@ -1,9 +1,8 @@
-// Shown in a connected Hermes row when Hermes was installed without its ACP mode
-// (`RuntimeStatus.acpMissing`): its runs still work, but report only when they
-// finish, and a comment sent mid-run stops the run and resumes it. Updating is
-// reinstalling with the extra, so the action is the runtime's own install stream.
-// The server asks Hermes again before the stream completes, so the refetch after
-// it already reads the new answer.
+// Shown in a connected Hermes row when Clawboo's own install of the pinned
+// Hermes release is missing or older (`RuntimeStatus.updateRequired`), as on a
+// Hermes installed with pip or pipx before Clawboo installed its own. Clawboo
+// runs every Hermes agent through its own install's gateway, so its runs need
+// it. The action is the runtime's own install stream.
 
 import { useEffect, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
@@ -44,9 +43,8 @@ export function HermesUpdateNotice({ onChanged }: { onChanged: () => void | Prom
   return (
     <div className="flex flex-col gap-2.5" data-testid="runtime-hermes-update-required">
       <FormattedAlert tone="warning">
-        This Hermes was installed without its live mode, so a run shows its work only when it
-        finishes, and a comment sent mid-run pauses the run to read it. Update Hermes to watch runs
-        as they work and steer them without a pause.
+        Clawboo now installs its own copy of Hermes, the current release, and runs your Hermes
+        agents through it. Install it to keep using them: their memory and skills carry over.
       </FormattedAlert>
       {error && <FormattedAlert tone="error">{error}</FormattedAlert>}
       <div>

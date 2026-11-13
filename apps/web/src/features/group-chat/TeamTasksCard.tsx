@@ -346,8 +346,8 @@ const asSteering = (v: unknown): Steering | null =>
   v === 'live' || v === 'interrupt-resume' || v === 'none' ? v : null
 
 /** Each runtime's usual way, until the live answer is in (and for OpenClaw, which
- *  the Runtimes status does not list). Hermes is `live` over its ACP mode, which
- *  Clawboo installs it with. */
+ *  the Runtimes status does not list). Hermes is `live` through its own gateway,
+ *  which Clawboo runs it with. */
 const MID_RUN_DELIVERY: Record<string, MidRunDelivery> = {
   'clawboo-native': 'live',
   'claude-code': 'live',
@@ -356,8 +356,8 @@ const MID_RUN_DELIVERY: Record<string, MidRunDelivery> = {
   hermes: 'live',
 }
 
-/** The run on the task decides when there is one (a Hermes run that fell back to
- *  its quiet path pauses, whatever new runs would do), then the way the runtime
+/** The run on the task decides when there is one (a run that steers by stopping
+ *  and resuming pauses, whatever new runs would do), then the way the runtime
  *  takes a comment now, then its usual way. */
 function midRunDelivery(
   runtime: string | null,

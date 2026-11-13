@@ -28,7 +28,9 @@ const ALLOWED: Record<string, string> = {
   'api/systemUpdate.ts': 'updates the installed clawboo package (the server, not agent work)',
   'api/runtimes.ts': "installs runtimes, and signs out the operator's own Codex login",
   'lib/runtimes/npmRuntimeInstall.ts':
-    'npm installs runtimes into the runtimes folder, which the server user owns and agents may only run',
+    'npm installs a runtime into the runtimes folder, which is kept apart from agent space',
+  'lib/runtimes/hermes/install.ts':
+    'downloads, unpacks and version-checks Hermes in the runtimes folder, kept apart from agent space',
   'lib/runtimes/codexAuth.ts': "codex login status of the operator's own login",
   'api/cliLogin.ts':
     "OpenClaw's login, whose Gateway runs as the server user (Codex and Hermes logins go through the seam)",
