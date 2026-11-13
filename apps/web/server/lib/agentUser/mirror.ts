@@ -134,6 +134,25 @@ function serverBundleDir(): string {
 
 const SHA_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
 
+/**
+ * A path handed to git as a positional argument. Every such argument goes after
+ * `--` as well, so nothing in one can be read as an option (`--upload-pack=` names
+ * a program for git to run). These paths are built from the data and work
+ * folders and are absolute; refusing anything else keeps them so.
+ */
+function pathArg(p: string): string {
+  if (!path.isAbsolute(p) || p.startsWith('-')) {
+    throw new MirrorError(`not an absolute path: ${p}`)
+  }
+  return p
+}
+
+/**
+ * For a fetch that reads a bundle file: every other transport is turned off, so
+ * a name that read as a URL (`ext::` runs a command) is refused by git itself.
+ */
+const BUNDLE_FETCH_ONLY = ['-c', 'protocol.allow=never', '-c', 'protocol.file.allow=always']
+
 /** Copy a file of the server's into agent space, in chunks, through the host. */
 async function copyToAgent(from: string, to: string): Promise<void> {
   const fd = fs.openSync(from, 'r')
@@ -185,7 +204,7 @@ export async function ensureMirror(repoPath: string): Promise<string> {
   if (st && st.type !== 'dir') throw new MirrorError(`${mirror} is not a folder`)
   if (!st) {
     await agentMkdir(path.dirname(mirror))
-    await runAgentGit(['init', '--bare', '--quiet', mirror])
+    await runAgentGit(['init', '--bare', '--quiet', '--', pathArg(mirror)])
   }
   return mirror
 }
@@ -230,18 +249,28 @@ export async function syncMirror(repoPath: string, baseSha: string): Promise<str
   try {
     await execGit(repoPath, ['update-ref', ref, baseSha])
     try {
-      await execGit(repoPath, ['bundle', 'create', '--quiet', bundle, ref, ...excludes])
+      await execGit(repoPath, [
+        'bundle',
+        'create',
+        '--quiet',
+        '--',
+        pathArg(bundle),
+        ref,
+        ...excludes,
+      ])
     } finally {
       await execGit(repoPath, ['update-ref', '-d', ref]).catch(() => undefined)
     }
     await copyToAgent(bundle, incoming)
-    await runAgentGit(['-C', mirror, 'bundle', 'verify', '--quiet', incoming])
+    await runAgentGit(['-C', mirror, 'bundle', 'verify', '--quiet', '--', pathArg(incoming)])
     await runAgentGit([
       '-C',
       mirror,
+      ...BUNDLE_FETCH_ONLY,
       'fetch',
       '--quiet',
-      incoming,
+      '--',
+      pathArg(incoming),
       `+${ref}:refs/clawboo/base/${baseSha}`,
     ])
   } finally {
@@ -265,7 +294,8 @@ async function pruneBaseRefs(mirror: string): Promise<void> {
   )
     .split('\n')
     .map((s) => s.trim())
-    .filter(Boolean)
+    // The mirror is the agent's, so only names under the prefix asked for.
+    .filter((s) => s.startsWith('refs/clawboo/base/'))
   for (const ref of refs.slice(KEEP_BASE_REFS)) {
     await runAgentGit(['-C', mirror, 'update-ref', '-d', ref]).catch(() => undefined)
   }
@@ -303,20 +333,31 @@ export async function exportTaskBranch(
       'bundle',
       'create',
       '--quiet',
-      outgoing,
+      '--',
+      pathArg(outgoing),
       `refs/heads/${branch}`,
       `^${baseSha}`,
     ])
     await copyFromAgent(outgoing, bundle)
     // Checked by the server, in its own repository: the bundle must apply on
     // top of what the user's repository has, and carry exactly the branch.
-    await execGit(repoPath, ['bundle', 'verify', '--quiet', bundle])
-    const heads = (await execGit(repoPath, ['bundle', 'list-heads', bundle])).trim().split('\n')
+    await execGit(repoPath, ['bundle', 'verify', '--quiet', '--', pathArg(bundle)])
+    const heads = (await execGit(repoPath, ['bundle', 'list-heads', '--', pathArg(bundle)]))
+      .trim()
+      .split('\n')
     const want = `refs/heads/${branch}`
     if (heads.length !== 1 || !heads[0]!.endsWith(` ${want}`) || heads[0]!.split(' ')[0] !== tip) {
       throw new MirrorError(`the bundle from the mirror does not hold exactly ${want}`)
     }
-    await execGit(repoPath, ['fetch', '--quiet', '--no-tags', bundle, `+${want}:${want}`])
+    await execGit(repoPath, [
+      ...BUNDLE_FETCH_ONLY,
+      'fetch',
+      '--quiet',
+      '--no-tags',
+      '--',
+      pathArg(bundle),
+      `+${want}:${want}`,
+    ])
   } finally {
     fs.rmSync(bundle, { force: true })
     await agentRemove(outgoing).catch(() => undefined)

@@ -18,6 +18,26 @@ const posix = process.platform !== 'win32'
 const me = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 }
 const config: AgentUserConfig = { user: 'clawboo-agent', switch: 'sudo', socket: null }
 
+// What a separate, unprivileged agent user gets back from the two ops whose
+// answers depend on who runs the host rather than on the files under test. The
+// host here runs as this test's own user, so left to the machine these would
+// describe that user: on Linux it can read its own /proc/<pid>/environ, and a CI
+// runner's user has passwordless sudo. Each refusal below replaces one of them,
+// and the step 8 tests near the end run the real host against a stand-in sudo.
+const SEPARATE_USER_ANSWERS: Record<string, Record<string, unknown>> = {
+  procView: {
+    environ: { ok: false, code: 'EACCES' },
+    cmdline: { ok: true, text: 'node server.js' },
+    psEnv: { ok: false, code: 'ENOTSUP' },
+  },
+  sudoList: {
+    ran: true,
+    exitCode: 1,
+    stdout: '',
+    stderr: 'Sorry, user clawboo-agent may not run sudo on this host.',
+  },
+}
+
 // The fixture serves the agent user from this process, so the agent user here
 // has this test's uid. As root that is uid 0, which the check refuses at step 2
 // before any later step can be reached; a faked non-root uid would then not
@@ -28,6 +48,8 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
   let hosts: InProcessHost[]
   let deps: CheckDeps
   let stopped: AgentHostClient[]
+  /** Ops answered here instead of by the host, by op name. */
+  let answers: Map<string, Record<string, unknown>>
 
   beforeEach(() => {
     dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-check-')))
@@ -35,6 +57,7 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
     fs.mkdirSync(path.join(dir, 'work'))
     hosts = []
     stopped = []
+    answers = new Map(Object.entries(SEPARATE_USER_ANSWERS))
     deps = {
       platform: 'linux',
       // The host below runs as this test's user, so "the server" is someone else.
@@ -55,6 +78,14 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
       startHost: async () => {
         const h = startInProcessHost()
         hosts.push(h)
+        const orig = h.client.request.bind(h.client)
+        vi.spyOn(h.client, 'request').mockImplementation(((
+          req: { op: string },
+          o?: { timeoutMs?: number },
+        ) => {
+          const answer = answers.get(req.op)
+          return answer ? Promise.resolve(answer) : orig(req as never, o)
+        }) as never)
         return h.client
       },
       socketProblem: () => null,
@@ -69,23 +100,15 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllEnvs()
     for (const h of hosts) h.client.close()
     fs.chmodSync(path.join(dir, 'data'), 0o700)
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  /** The host's answers to one op, replaced; every other op goes to the real host. */
+  /** The host's answer to one op, replaced; every other op goes to the real host. */
   function override(op: string, answer: Record<string, unknown>): void {
-    const realStart = deps.startHost
-    deps.startHost = async (c) => {
-      const client = await realStart(c)
-      const orig = client.request.bind(client)
-      vi.spyOn(client, 'request').mockImplementation(((
-        req: { op: string },
-        o?: { timeoutMs?: number },
-      ) => (req.op === op ? Promise.resolve(answer) : orig(req as never, o))) as never)
-      return client
-    }
+    answers.set(op, answer)
   }
 
   const failed = (r: { steps: { level: string; step: number; message: string }[] }) =>
@@ -98,6 +121,7 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
     expect(r.client).not.toBeNull()
     expect(r.workDir).toBe(path.join(dir, 'work'))
     expect(r.steps.map((s) => s.step)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(r.steps.find((s) => s.step === 8)).toMatchObject({ level: 'ok', name: 'agent sudo' })
   })
 
   it('refuses on Windows', async () => {
@@ -264,7 +288,43 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
       stderr: '',
     })
     const r = await runAgentUserCheck(config, deps)
-    expect(failed(r)).toMatchObject({ step: 8 })
+    expect(failed(r)).toMatchObject({ step: 8, name: 'agent sudo' })
+    expect(failed(r)?.message).toMatch(/clawboo-agent may run commands with sudo/)
+    expect(r.ok).toBe(false)
+    expect(stopped).toHaveLength(1)
+  })
+
+  // Step 8 through the real host, with the host's `sudo -n -l` answered by a
+  // stand-in on PATH rather than by whatever rights this machine's user has.
+  function sudoOnPath(script: string | null): void {
+    const bin = path.join(dir, 'bin')
+    fs.mkdirSync(bin, { recursive: true })
+    if (script !== null) fs.writeFileSync(path.join(bin, 'sudo'), script, { mode: 0o755 })
+    vi.stubEnv(
+      'PATH',
+      script === null ? bin : `${bin}${path.delimiter}${process.env['PATH'] ?? ''}`,
+    )
+    answers.delete('sudoList')
+  }
+
+  it('refuses at step 8 when the host finds sudo rights for the agent user', async () => {
+    sudoOnPath('#!/bin/sh\necho "User clawboo-agent may run the following commands:"\nexit 0\n')
+    const r = await runAgentUserCheck(config, deps)
+    expect(failed(r)).toMatchObject({ step: 8, name: 'agent sudo' })
+    expect(stopped).toHaveLength(1)
+  })
+
+  it('passes step 8 when sudo refuses the agent user, or is not installed', async () => {
+    sudoOnPath('#!/bin/sh\necho "Sorry, user clawboo-agent may not run sudo." >&2\nexit 1\n')
+    let r = await runAgentUserCheck(config, deps)
+    expect(r.ok).toBe(true)
+    expect(r.steps.find((s) => s.step === 8)).toMatchObject({ level: 'ok' })
+
+    sudoOnPath(null)
+    fs.rmSync(path.join(dir, 'bin', 'sudo'))
+    r = await runAgentUserCheck(config, deps)
+    expect(r.ok).toBe(true)
+    expect(r.steps.find((s) => s.step === 8)).toMatchObject({ level: 'ok' })
   })
 
   it('shows a runtime the agent user cannot run, without refusing', async () => {
