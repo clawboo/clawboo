@@ -69,7 +69,7 @@ Clawboo runs Claude Code and Codex with their own approval prompts and sandboxes
 
 - **Claude Code** runs in permission mode `bypassPermissions`.
 - **Codex** runs with approval policy `never` and sandbox `danger-full-access`.
-- **Hermes** follows its own approval policy (`approvals.mode`, which Clawboo sets in the agent's profile before every run: the mode your own `~/.hermes/config.yaml` chooses, else `manual`). Before a command that policy flags, such as a recursive delete, the run waits and a card asks you: **Run it** or **Don't allow**. Everything else, including file edits and network access, runs without asking. See [Hermes](/runtimes/hermes#permissions-and-safety).
+- **Hermes** follows its own approval policy (`approvals.mode`, which Clawboo sets in the agent's profile before every run: the mode your own `~/.hermes/config.yaml` chooses, else `manual`). Before a command that policy flags, such as a recursive delete, the run waits and a card asks you: **Run it** or **Don't allow**. Everything else, including file edits and network access, runs without asking. The pin does not stop a Hermes agent changing its own approvals: its commands can edit your `~/.hermes/config.yaml`, where the mode comes from, unless [agents run as their own user](/operating/agent-isolation), and either way it can add commands to its profile's `command_allowlist` and change its profile between runs. See [Hermes](/runtimes/hermes#permissions-and-safety).
 
 They can run any command, edit any file and reach any address your user account can. Apart from those Hermes cards, nothing asks before their own tools act.
 
