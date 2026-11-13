@@ -3,7 +3,7 @@
 // clawboo home, its secrets/ dir, or anywhere outside the team folders' root.
 
 import { realpathSync } from 'node:fs'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -147,6 +147,23 @@ describe('team-chat working folder', () => {
       expect((await stat(path.dirname(dir))).mode & 0o777).toBe(0o700)
       // Idempotent on the next run.
       await expect(ensureTeamWorkdir(dir)).resolves.toBeUndefined()
+    },
+  )
+
+  it.skipIf(isWindows)(
+    'ensureTeamWorkdir refuses a task folder that was swapped for a link',
+    async () => {
+      // A teammate in the same team folder can replace a task's folder with a
+      // link elsewhere. The run must not start there: its write jail is the
+      // folder's real path, which would then be the link's target.
+      const team = teamWorkdirPath('team-1')
+      await ensureTeamWorkdir(team)
+      const elsewhere = path.join(home, 'elsewhere')
+      await mkdir(elsewhere)
+      const taskDir = path.join(team, 'tasks', 'task-1')
+      await mkdir(path.dirname(taskDir), { recursive: true })
+      await symlink(elsewhere, taskDir)
+      await expect(ensureTeamWorkdir(taskDir)).rejects.toMatchObject({ code: 'ENOTDIR' })
     },
   )
 })
