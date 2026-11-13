@@ -106,6 +106,24 @@ async function openHost(config: AgentUserConfig, env: NodeJS.ProcessEnv): Promis
   return new AgentHostClient(transport)
 }
 
+function serverUid(): number {
+  return typeof process.getuid === 'function' ? process.getuid() : -1
+}
+
+/**
+ * Whether every process of `user` may be stopped: it exists, and it is neither
+ * root nor the user this server runs as (the startup check refuses both, at
+ * step 2, but the stop runs before the check).
+ */
+export function mayReapAsAgent(
+  user: string,
+  lookup: (name: string) => { uid: number } | null,
+  server: number,
+): boolean {
+  const rec = lookup(user)
+  return rec !== null && rec.uid !== 0 && rec.uid !== server
+}
+
 /** The startup check's dependencies, for the server and for `clawboo agent-user check`. */
 export function checkDepsFor(
   config: AgentUserConfig,
@@ -148,8 +166,12 @@ export async function startAgentUser(opts: StartAgentUserOptions): Promise<Check
   if (!config) throw new Error('startAgentUser called with CLAWBOO_AGENT_USER unset')
 
   // Before the host starts: anything the agent user still runs belongs to a
-  // server that is gone (design 4.8).
-  if (!config.socket) killAllAgentProcesses(config)
+  // server that is gone (design 4.8). Only for a user the check would accept:
+  // a setting that names root or the user Clawboo runs as would otherwise stop
+  // the server's own processes before step 2 refused it.
+  if (!config.socket && mayReapAsAgent(config.user, lookupUser, serverUid())) {
+    killAllAgentProcesses(config)
+  }
 
   const explicitWork = env['CLAWBOO_WORK_DIR']?.trim()
   const report = await runAgentUserCheck(config, checkDepsFor(config, env, opts), {

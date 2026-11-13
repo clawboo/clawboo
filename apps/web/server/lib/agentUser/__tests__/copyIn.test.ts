@@ -131,8 +131,79 @@ describe.runIf(posix)('copying agent state into agent space', () => {
     }) as never)
     const report = await copyIntoAgentSpace(plan.slice(0, 1))
     expect(report.copied).toEqual([])
-    expect(report.skipped.some((s) => /disk full/.test(s.reason))).toBe(true)
+    // A whole item that failed is reported apart from the files left out on
+    // purpose, so the boot can warn about it.
+    expect(report.failed).toEqual([
+      { path: path.join(dir, 'data', 'runtimes', 'hermes', 'a1'), reason: 'disk full' },
+    ])
+    expect(report.skipped.some((s) => /disk full/.test(s.reason))).toBe(false)
     expect(fs.existsSync(path.join(agentRt, 'hermes', 'a1'))).toBe(false)
+  })
+
+  it('never lists through a source root that is a link', () => {
+    const data = path.join(dir, 'data')
+    const secret = path.join(dir, 'private')
+    fs.mkdirSync(path.join(secret, 'team-x'), { recursive: true })
+    fs.writeFileSync(path.join(secret, 'team-x', 'master.key'), 'KEY')
+    fs.mkdirSync(data, { recursive: true })
+    fs.symlinkSync(secret, path.join(data, 'workspaces'))
+    fs.symlinkSync(secret, path.join(data, 'runtimes'))
+    const plan = planCopyIn({
+      dataDir: data,
+      agentRuntimesRoot: path.join(dir, 'agent', 'runtimes'),
+      workDir: path.join(dir, 'agent', 'work'),
+      teamRoots: [path.join(data, 'workspaces')],
+    })
+    expect(plan).toEqual([])
+  })
+
+  it('refuses an item reached through a parent swapped for a link after planning', async () => {
+    const { data, work, plan } = layout()
+    // Another folder that also holds a `team-1`, private.
+    const other = path.join(dir, 'other')
+    fs.mkdirSync(path.join(other, 'team-1'), { recursive: true })
+    fs.writeFileSync(path.join(other, 'team-1', 'master.key'), 'KEY')
+    fs.renameSync(path.join(data, 'workspaces'), path.join(data, 'workspaces-was'))
+    fs.symlinkSync(other, path.join(data, 'workspaces'))
+    const report = await copyIntoAgentSpace(plan)
+    expect(report.failed.map((f) => path.relative(dir, f.path))).toEqual(['data/workspaces/team-1'])
+    expect(report.failed[0]?.reason).toMatch(/changed while it was being copied/)
+    expect(fs.existsSync(path.join(work, 'teams', 'team-1'))).toBe(false)
+  })
+
+  it('does not follow a folder swapped for a link while the host made its copy', async () => {
+    const { work } = layout()
+    const team = path.join(dir, 'data', 'workspaces', 'team-1')
+    fs.mkdirSync(path.join(team, 'notes'))
+    fs.writeFileSync(path.join(team, 'notes', 'a.md'), 'a')
+    const secret = path.join(dir, 'private')
+    fs.mkdirSync(secret)
+    fs.writeFileSync(path.join(secret, 'master.key'), 'KEY')
+    const orig = h.client.request.bind(h.client)
+    vi.spyOn(h.client, 'request').mockImplementation(((req: { op: string; path?: string }) => {
+      if (req.op === 'fs.mkdir' && req.path?.endsWith(`${path.sep}notes`)) {
+        // While the host makes the copy's folder, the source folder becomes
+        // a link to a private one.
+        fs.renameSync(path.join(team, 'notes'), path.join(team, 'notes-was'))
+        fs.symlinkSync(secret, path.join(team, 'notes'))
+      }
+      return orig(req as never)
+    }) as never)
+    const report = await copyIntoAgentSpace([
+      { from: team, to: path.join(work, 'teams', 'team-1') },
+    ])
+    expect(report.copied).toEqual([])
+    expect(report.failed).toHaveLength(1)
+    expect(report.failed[0]?.reason).toMatch(/changed while it was being copied/)
+    const found: string[] = []
+    const walk = (d: string): void => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.isDirectory()) walk(path.join(d, e.name))
+        else found.push(e.name)
+      }
+    }
+    walk(path.join(dir, 'agent'))
+    expect(found).not.toContain('master.key')
   })
 })
 

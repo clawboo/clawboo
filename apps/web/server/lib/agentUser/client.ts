@@ -80,10 +80,12 @@ export class RemoteAgentProcess extends EventEmitter {
   /** Set by the client when the process is done, so late frames are dropped. */
   closed = false
   private readonly client: AgentHostClient
+  private readonly group: boolean
 
   constructor(client: AgentHostClient, opts: RemoteSpawnOptions) {
     super()
     this.client = client
+    this.group = opts.group
     this.id = `p${++procSeq}`
     this.spawnfile = opts.command
     this.spawnargs = [opts.command, ...opts.args]
@@ -119,8 +121,13 @@ export class RemoteAgentProcess extends EventEmitter {
 
   /** Stop the process and everything it started (SIGTERM, then SIGKILL after `graceMs`). */
   killTree(graceMs = 3_000): void {
-    if (this.closed) return
-    this.killed = true
+    // A group outlives its leader: a member with output of its own (a browser's
+    // helper) can still run after this process closed, and the host keeps such
+    // a group until it is empty. So ask even then, as `killProcessTree` signals
+    // a local group whether or not its leader is gone. A process that never
+    // started has no group.
+    if (this.closed && (!this.group || this.pid === undefined)) return
+    if (!this.closed) this.killed = true
     this.client.request({ op: 'killTree', proc: this.id, graceMs }).catch(() => {
       /* the host is gone, and the process with it */
     })

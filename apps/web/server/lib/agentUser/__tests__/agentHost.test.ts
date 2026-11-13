@@ -8,6 +8,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { childEnvFor } from '../../../agentHost/host'
+import { killProcessTree } from '../../runtimes/killTree'
 import { AgentHostError } from '../client'
 import { encodeFrame } from '../protocol'
 import {
@@ -129,6 +130,90 @@ describe.runIf(posix)('agent host protocol', () => {
       }
     }
     expect(alive).toBe(false)
+  })
+
+  /** A group whose leader has closed while a member with output of its own
+   *  (none of the leader's pipes) runs on; the member's pid. */
+  async function groupWithClosedLeader(command = 'sleep 30'): Promise<{
+    p: ReturnType<InProcessHost['client']['spawn']>
+    member: number
+  }> {
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: ['-c', `${command} </dev/null >/dev/null 2>&1 & echo $!`],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group: true,
+    })
+    const out = collect(p.stdout)
+    await closed(p)
+    const member = Number((await out).trim())
+    expect(isAlive(member)).toBe(true)
+    return { p, member }
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function gone(pid: number, withinMs = 2_000): Promise<boolean> {
+    for (let i = 0; i < withinMs / 20; i++) {
+      if (!isAlive(pid)) return true
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    return false
+  }
+
+  it('stops a group after its leader closed, as a connector teardown asks', async () => {
+    // A connector's teardown closes its session first (the leader exits once
+    // its input ends), then stops the tree.
+    const { p, member } = await groupWithClosedLeader()
+    try {
+      killProcessTree(p, { graceMs: 200 })
+      expect(await gone(member)).toBe(true)
+      // The stop is answered under the request's own id.
+      await expect(
+        h.client.request({ op: 'killTree', proc: p.id, graceMs: 0 }, { timeoutMs: 2_000 }),
+      ).resolves.toMatchObject({ ok: true })
+    } finally {
+      if (isAlive(member)) process.kill(member, 'SIGKILL')
+    }
+  })
+
+  it('stops such a group again when the server goes away during a long stop', async () => {
+    // A member that ignores SIGTERM, asked to stop with a grace longer than
+    // the host lives after the server goes: the end of the connection must
+    // still reach it.
+    const ready = path.join(dir, 'ignoring-term')
+    const { p, member } = await groupWithClosedLeader(
+      `sh -c 'trap "" TERM; touch ${ready}; exec sleep 30'`,
+    )
+    try {
+      for (let i = 0; i < 100 && !fs.existsSync(ready); i++)
+        await new Promise((r) => setTimeout(r, 20))
+      killProcessTree(p, { graceMs: 60_000 })
+      await new Promise((r) => setTimeout(r, 200))
+      expect(isAlive(member)).toBe(true)
+      h.client.close()
+      expect(await gone(member, 6_000)).toBe(true)
+    } finally {
+      if (isAlive(member)) process.kill(member, 'SIGKILL')
+    }
+  }, 15_000)
+
+  it('stops a group whose leader closed when the server goes away', async () => {
+    const { member } = await groupWithClosedLeader()
+    try {
+      h.client.close()
+      expect(await gone(member)).toBe(true)
+    } finally {
+      if (isAlive(member)) process.kill(member, 'SIGKILL')
+    }
   })
 
   it('reads and writes files without following a link at the end of the path', async () => {
