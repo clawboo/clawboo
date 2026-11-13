@@ -52,7 +52,7 @@ describe('npmInvocation', () => {
       ...none,
       exists: (p) => p === cli,
     })
-    expect(inv).toEqual({ command: '/opt/node-24/bin/node', prefixArgs: [cli], cmdShim: false })
+    expect(inv).toEqual({ command: '/opt/node-24/bin/node', prefixArgs: [cli] })
   })
 
   it('looks for npm-cli.js beside node.exe on Windows', () => {
@@ -70,7 +70,6 @@ describe('npmInvocation', () => {
     expect(npmInvocation(node, 'darwin', { ...none, exists: (p) => p === cli })).toEqual({
       command: node,
       prefixArgs: [cli],
-      cmdShim: false,
     })
   })
 
@@ -81,7 +80,7 @@ describe('npmInvocation', () => {
       findOnPath: () => '/usr/bin/npm',
       realpath: (p) => (p === '/usr/bin/npm' ? cli : null),
     })
-    expect(inv).toEqual({ command: '/srv/node/bin/node', prefixArgs: [cli], cmdShim: false })
+    expect(inv).toEqual({ command: '/srv/node/bin/node', prefixArgs: [cli] })
   })
 
   it("runs a Windows npm.cmd's own npm-cli.js by this Node when it is there", () => {
@@ -91,16 +90,25 @@ describe('npmInvocation', () => {
       findOnPath: () => 'C:\\Program Files\\nodejs\\npm.cmd',
       exists: (p) => p === cli,
     })
-    expect(inv).toEqual({ command: 'C:\\app\\node.exe', prefixArgs: [cli], cmdShim: false })
+    expect(inv).toEqual({ command: 'C:\\app\\node.exe', prefixArgs: [cli] })
   })
 
-  it('falls back to npm on PATH as it is, through cmd.exe quoting on Windows, and is null with none', () => {
+  it('falls back to npm on PATH as it is, never to a Windows npm.cmd through cmd.exe, and is null with none', () => {
     expect(
       npmInvocation('/x/bin/node', 'linux', { ...none, findOnPath: () => '/usr/bin/npm' }),
-    ).toEqual({ command: '/usr/bin/npm', prefixArgs: [], cmdShim: false })
+    ).toEqual({ command: '/usr/bin/npm', prefixArgs: [] })
+    // Node starts a .cmd only through cmd.exe, which would get the install's
+    // folder and spec as a command line: an npm.cmd without npm-cli.js beside
+    // it is not used at all.
+    for (const shim of ['C:\\n\\npm.cmd', 'C:\\n\\NPM.BAT']) {
+      expect(npmInvocation('C:\\x\\node.exe', 'win32', { ...none, findOnPath: () => shim })).toBe(
+        null,
+      )
+    }
+    // A program, such as a version manager's npm.exe, starts as it is.
     expect(
-      npmInvocation('C:\\x\\node.exe', 'win32', { ...none, findOnPath: () => 'C:\\n\\npm.cmd' }),
-    ).toEqual({ command: 'C:\\n\\npm.cmd', prefixArgs: [], cmdShim: true })
+      npmInvocation('C:\\x\\node.exe', 'win32', { ...none, findOnPath: () => 'C:\\v\\npm.exe' }),
+    ).toEqual({ command: 'C:\\v\\npm.exe', prefixArgs: [] })
     expect(npmInvocation('/x/bin/node', 'linux', none)).toBeNull()
   })
 })
@@ -206,7 +214,7 @@ describe('runNpmRuntimeInstall', () => {
     return path.join(dir, 'bin', 'codex.js')
   }
   const RT = { id: 'codex', spec: '@openai/codex@0', bins: ['codex'] }
-  const INV = { command: process.execPath, prefixArgs: ['/npm-cli.js'], cmdShim: false }
+  const INV = { command: process.execPath, prefixArgs: ['/npm-cli.js'] }
 
   beforeEach(() => {
     base = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'clawboo-npm-run-')))
@@ -260,6 +268,33 @@ describe('runNpmRuntimeInstall', () => {
     expect(readRuntimeInstall('codex', env)?.version).toBe('1.0.0')
     expect(ownedRuntimeLaunch('codex', env)).not.toBeNull()
     await expect.poll(() => existsSync(secondPrefix)).toBe(false)
+  })
+
+  it('makes nothing current when the check after npm finds the new install unusable', async () => {
+    const first = runNpmRuntimeInstall(RT, { env, spawnFn: fakeSpawn, invocation: INV })
+    putPackage(prefixOf(calls[0]!.args), '1.0.0')
+    children[0]!.finish(0)
+    await first.result
+
+    const checked: string[] = []
+    const second = runNpmRuntimeInstall(RT, {
+      env,
+      spawnFn: fakeSpawn,
+      invocation: INV,
+      check: (folder) => (checked.push(folder), 'no binary for this platform'),
+    })
+    const prefix = prefixOf(calls[1]!.args)
+    putPackage(prefix, '2.0.0')
+    children[1]!.finish(0)
+    expect(await second.result).toEqual({
+      ok: false,
+      code: 'UNUSABLE',
+      message: 'no binary for this platform',
+    })
+    expect(checked).toEqual([prefix])
+    expect(readRuntimeInstall('codex', env)?.version).toBe('1.0.0')
+    expect(ownedRuntimeLaunch('codex', env)).not.toBeNull()
+    await expect.poll(() => existsSync(prefix)).toBe(false)
   })
 
   it('a stopped install says so and removes its folder', async () => {

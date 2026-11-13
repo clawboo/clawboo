@@ -35,7 +35,7 @@ import { resolveHermesRunSettings } from '../hermes/runSettings'
 import { detectProvider, provisionHermesHome } from '../hermesHome'
 import { listNativeSkills } from '../hermesSkills'
 import { createNativeDriver } from '../native/nativeDriver'
-import { isHostedAgentProcess } from '../spawner'
+import { isHostedAgentProcess, setUnavailableAgentBinaries } from '../spawner'
 import { createSpawnDriver } from '../subprocess'
 import { ensureTeamWorkdir } from '../teamWorkdir'
 import type { RuntimeRunContext } from '../types'
@@ -150,6 +150,27 @@ describe.runIf(posix)('createSpawnDriver with agents on their own OS user', () =
     await driver.start()
     expect(results).toHaveLength(1)
     expect(results[0]).toMatch(/agent host that starts them is not running/)
+  })
+
+  it('a relaunch to a binary the agent user cannot run says it did not happen', async () => {
+    await agentModeOn()
+    const results: string[] = []
+    const driver = createSpawnDriver<string>({
+      resolve: async () => ({ command: '/bin/sh', args: ['-c', 'sleep 5'], cwd: tmp }),
+      parseLine: () => [],
+      onClose: (_code, _signal, _stdout, stderr) => [stderr],
+    })
+    driver.onEvent((ev) => results.push(ev))
+    await driver.start()
+    setUnavailableAgentBinaries([{ path: '/bin/echo', reason: 'not executable by it' }])
+    try {
+      const replaced = await driver.relaunch(async () => ({ command: '/bin/echo', args: ['x'] }))
+      expect(replaced).toBe(false)
+      await until(() => results.length > 0)
+      expect(results[0]).toMatch(/not available to the agent user: not executable by it/)
+    } finally {
+      setUnavailableAgentBinaries([])
+    }
   })
 
   it('writes run context through the host, replacing a planted link', async () => {
@@ -346,6 +367,34 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
     ops.length = 0
     expect(await detectProvider(home)).toBe('openrouter')
     expect(ops).toEqual(['fs.read'])
+  })
+
+  it('copies the subscription login in for a run that picked it, though the run has a key', async () => {
+    await agentModeOn()
+    const agentsAuth = JSON.stringify({
+      providers: { 'openai-codex': { tokens: { access_token: 'a', refresh_token: 'r' } } },
+    })
+    fs.mkdirSync(path.join(agentHome, '.hermes'))
+    fs.writeFileSync(path.join(agentHome, '.hermes', 'auth.json'), agentsAuth)
+    const keyed = { OPENROUTER_API_KEY: 'sk-or-test' }
+
+    const picked = path.join(agentHome, 'runtimes', 'hermes', 'picked')
+    const out = await provisionHermesHome(picked, {
+      hasApiKey: true,
+      providerHint: 'openai-codex',
+    })
+    expect(out.seededAuth).toBe(true)
+    const run = await resolveHermesRun(
+      OPTS,
+      { providerHint: 'openai-codex', model: 'gpt-x', apiKeyEnv: keyed },
+      out,
+    )
+    expect(run.pickedProvider).toBe('openai-codex')
+
+    // A run on its key gets no login copied in.
+    const onKey = path.join(agentHome, 'runtimes', 'hermes', 'on-key')
+    expect((await provisionHermesHome(onKey, { hasApiKey: true })).seededAuth).toBe(false)
+    expect(fs.existsSync(path.join(onKey, 'auth.json'))).toBe(false)
   })
 
   it("reads the managed home's subscription login through the host", async () => {

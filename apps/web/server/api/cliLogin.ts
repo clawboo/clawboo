@@ -287,7 +287,11 @@ export function cliLoginPOST(req: Request, res: Response): void {
           type: 'complete',
           success: false,
           loggedIn: false,
-          message: `Sign-in did not complete (exit ${String(code)}). Run \`${plan.displayCommand}\` in your terminal, then re-check.`,
+          // With agents on their own OS user the login has to be the agent user's:
+          // the command in the person's own terminal would sign the person in.
+          message: asAgent
+            ? `Sign-in did not complete (exit ${String(code)}). Sign in again from here: agents run as their own user, so a sign-in in your own terminal does not reach them.`
+            : `Sign-in did not complete (exit ${String(code)}). Run \`${plan.displayCommand}\` in your terminal, then re-check.`,
         })
       }
       res.end()
