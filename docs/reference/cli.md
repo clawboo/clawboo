@@ -10,6 +10,7 @@ keywords:
     'clawboo restart',
     'clawboo open',
     'clawboo backup',
+    'clawboo agent-user',
     'server.log',
     'port discovery',
     'clawboo-mcp-tasks',
@@ -18,16 +19,18 @@ keywords:
 
 The `clawboo` command starts the dashboard and manages the server behind it. Use this page to look up a command or flag, what it prints, and when it exits with an error.
 
-| Command                 | What it does                                                        |
-| ----------------------- | ------------------------------------------------------------------- |
-| `clawboo`               | Find or start the dashboard server, then open it in your browser    |
-| `clawboo stop`          | Stop the running dashboard server once its agent runs have finished |
-| `clawboo restart`       | Stop the server the same way and start a fresh one on the same port |
-| `clawboo open`          | Open the running dashboard in your browser, signed in               |
-| `clawboo backup [dest]` | Write a one-file copy of the database, safe while the server runs   |
-| `clawboo --version`     | Print the CLI version (`-V` for short)                              |
-| `clawboo --help`        | Print usage (`-h` for short)                                        |
-| `clawboo-mcp-*`         | Four MCP servers over stdio, for agent programs you set up yourself |
+| Command                    | What it does                                                        |
+| -------------------------- | ------------------------------------------------------------------- |
+| `clawboo`                  | Find or start the dashboard server, then open it in your browser    |
+| `clawboo stop`             | Stop the running dashboard server once its agent runs have finished |
+| `clawboo restart`          | Stop the server the same way and start a fresh one on the same port |
+| `clawboo open`             | Open the running dashboard in your browser, signed in               |
+| `clawboo backup [dest]`    | Write a one-file copy of the database, safe while the server runs   |
+| `clawboo agent-user plan`  | Print the commands that set up a separate user for agents           |
+| `clawboo agent-user check` | Check that setup without starting the dashboard                     |
+| `clawboo --version`        | Print the CLI version (`-V` for short)                              |
+| `clawboo --help`           | Print usage (`-h` for short)                                        |
+| `clawboo-mcp-*`            | Four MCP servers over stdio, for agent programs you set up yourself |
 
 Install once with `npm install -g clawboo`, then run `clawboo`. For a one-off run without installing, use `npx clawboo@latest`. Every command checks your Node version first: on Node older than 22.12 it prints "Clawboo requires Node.js 22.12 or newer", your version and how to switch, then exits with code 1.
 
@@ -51,7 +54,7 @@ The URL is `http://127.0.0.1:<port>`, or `http://127.0.0.1:<port><prefix>/` when
 | `--no-version-check` | Attach to a running server without comparing versions |
 | `-y`, `--yes`        | Restart an older running server without asking        |
 
-`--no-version-check` and `-y` apply to `clawboo` itself. `clawboo stop` takes `--force` and `--wait <seconds>`, `clawboo restart` takes those and `--no-open`, `clawboo open` takes `--print`, and `clawboo backup` takes `-f, --force`. A mistyped subcommand, such as `clawboo stopp`, prints `error: unknown command 'stopp'` with the help text and exits 1 instead of starting anything.
+`--no-version-check` and `-y` apply to `clawboo` itself. `clawboo stop` takes `--force` and `--wait <seconds>`, `clawboo restart` takes those and `--no-open`, `clawboo open` takes `--print`, `clawboo backup` takes `-f, --force`, and `clawboo agent-user plan` takes `--user <name>`. A mistyped subcommand, such as `clawboo stopp`, prints `error: unknown command 'stopp'` with the help text and exits 1 instead of starting anything.
 
 ### Version check
 
@@ -228,17 +231,37 @@ It prints the file's path and size. With no database yet it prints "No Clawboo d
 
 To restore, stop the server (`clawboo stop`) and copy the backup over `clawboo.db`. A database backup does not include `~/.clawboo/secrets/`, where your saved provider keys and the key that decrypts them live. The copy is owner-only (mode `0600`, like the live database) before anything is written to it, and a failed backup removes its partial file. It holds your chats and settings, so keep it private. [Data and state](/operating/data-and-state) covers what a full backup needs.
 
+## clawboo agent-user
+
+```bash
+clawboo agent-user plan
+clawboo agent-user plan --user clawboo-agent
+CLAWBOO_AGENT_USER=clawboo-agent clawboo agent-user check
+```
+
+Sets up [agent isolation](/operating/agent-isolation), where every agent runs as a separate operating system user. Neither action starts the dashboard. Both run inside the server bundle, so `check` is the same check the server runs at every start with `CLAWBOO_AGENT_USER` set.
+
+| Action or flag  | Effect                                                                                                                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `plan`          | Print the commands an administrator runs once to create the agent user, its work folder and one sudoers rule, for Linux or macOS. Clawboo never runs them itself. On Windows it says the setting is not available there.                         |
+| `--user <name>` | The agent user name for `plan`. Default: `CLAWBOO_AGENT_USER`, else `clawboo-agent` on Linux and `_clawboo` on macOS.                                                                                                                            |
+| `check`         | Run the startup check for the user `CLAWBOO_AGENT_USER` names, and print each step as `ok`, `warn` or `FAIL` with its reason. It starts the agent host to check from inside that user's account, then stops it. It does not stop running agents. |
+
+`check` ends with "Agent isolation is ready: agents will run as" the user, and exits 0, with or without warnings. Otherwise it ends with "Agent isolation is not ready. Fix the failed step and run the check again." and exits 1. With `CLAWBOO_AGENT_USER` unset, it prints how to set it and exits 1. Any action other than `plan` or `check` prints `error: unknown agent-user action '<action>' (use plan or check)` and exits 1. [What the startup check proves](/operating/agent-isolation#what-the-startup-check-proves) lists the steps.
+
 ## Exit codes
 
 Every command exits 0 on success and 1 on failure. Any command also exits 1 on Node older than 22.12 or when given an unknown subcommand. `clawboo stop` and `clawboo restart` exit 130 when you cancel their wait for agent runs with Ctrl+C.
 
-| Command                 | Exits 0 when                                                        | Exits 1 when                                                                                                                                                                                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clawboo`               | The browser opened on a found, restarted or newly started dashboard | Only a token-gated dashboard was found and the shell does not have its token; no server to start; the start timed out; an older server was stopped for a restart and not replaced                                                                                                          |
-| `clawboo stop`          | The server stopped, or nothing was running                          | The dashboard is token-gated and the shell does not have its token; the server did not answer the request to hold it, or stopped answering while agent runs were going; the port Clawboo recorded is held by a server that does not answer; the process could not be stopped or identified |
-| `clawboo restart`       | A server is running again (or was started from nothing)             | The dashboard is token-gated and the shell does not have its token; the server did not answer the request to hold it, or stopped answering while agent runs were going; the port Clawboo recorded is still held; the stop failed; the new server did not answer                            |
-| `clawboo open`          | The browser opened signed in, or `--print` printed a link           | No server is running; the dashboard is token-gated and the CLI does not have its token; no browser could be opened                                                                                                                                                                         |
-| `clawboo backup [dest]` | The copy was written                                                | No database exists; the destination exists and `--force` was not given                                                                                                                                                                                                                     |
+| Command                    | Exits 0 when                                                        | Exits 1 when                                                                                                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `clawboo`                  | The browser opened on a found, restarted or newly started dashboard | Only a token-gated dashboard was found and the shell does not have its token; no server to start; the start timed out; an older server was stopped for a restart and not replaced                                                                                                          |
+| `clawboo stop`             | The server stopped, or nothing was running                          | The dashboard is token-gated and the shell does not have its token; the server did not answer the request to hold it, or stopped answering while agent runs were going; the port Clawboo recorded is held by a server that does not answer; the process could not be stopped or identified |
+| `clawboo restart`          | A server is running again (or was started from nothing)             | The dashboard is token-gated and the shell does not have its token; the server did not answer the request to hold it, or stopped answering while agent runs were going; the port Clawboo recorded is still held; the stop failed; the new server did not answer                            |
+| `clawboo open`             | The browser opened signed in, or `--print` printed a link           | No server is running; the dashboard is token-gated and the CLI does not have its token; no browser could be opened                                                                                                                                                                         |
+| `clawboo backup [dest]`    | The copy was written                                                | No database exists; the destination exists and `--force` was not given                                                                                                                                                                                                                     |
+| `clawboo agent-user plan`  | The commands were printed                                           | The server bundle could not be found                                                                                                                                                                                                                                                       |
+| `clawboo agent-user check` | Every step passed, or only warned                                   | A step failed; `CLAWBOO_AGENT_USER` is unset or not a user name; the server bundle could not be found                                                                                                                                                                                      |
 
 ## Environment variables
 
@@ -251,6 +274,7 @@ These are the variables the CLI itself reads or sets. Everything else in your sh
 | `CLAWBOO_HOME`        | read                 | Where `api-port.txt`, `access-token`, `server.log` and (for `backup`) `clawboo.db` live. Default `~/.clawboo`. Also the server's working directory.                                                                               |
 | `CLAWBOO_BASE_PATH`   | read                 | Added to every URL the CLI prints or opens. An invalid value is ignored here; the server itself refuses to start on it.                                                                                                           |
 | `STUDIO_ACCESS_TOKEN` | read                 | The token sent as the access cookie, only to the recorded port and only after the access gate's refusal. Unset: the CLI reads `access-token` instead. Blank: no token. A server the CLI starts gets it like every other variable. |
+| `CLAWBOO_AGENT_USER`  | read                 | For `clawboo agent-user`: the user `check` checks, and the default name for `plan`. A server the CLI starts gets it like every other variable.                                                                                    |
 | `CLAWBOO_SERVER_PATH` | read                 | Repository root to use for a source-checkout start.                                                                                                                                                                               |
 | `CLAWBOO_LAUNCH_DIR`  | set                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" when you set up a connector that needs a folder.                                                                                                        |
 | `CLAWBOO_VERSION`     | set                  | The CLI's version, which the server reports as its own.                                                                                                                                                                           |
@@ -286,6 +310,7 @@ See [MCP servers](/operating/mcp-servers) to attach an outside agent and [MCP to
 - The version is compiled in from `apps/cli/package.json`; running the source directly reports `0.0.0-dev`.
 - The MCP bins are bundled with their dependencies, except `better-sqlite3`, `ws`, `pino` and `pino-pretty`, which resolve from the CLI's own dependencies. The OpenTelemetry packages are left out.
 - The CLI reads the database only for `backup` and never changes settings or the vault. Its own writes are creating `~/.clawboo` when missing, appending to `server.log`, and removing a stale `api-port.txt`.
+- `clawboo agent-user` runs `node dist/server.js --agent-user <action>`, so `check` is the server's own code (`apps/cli/src/agentUser.ts`, `apps/web/server/lib/agentUser/cli.ts`).
 - Source of truth: `apps/cli/src/index.ts`, `apps/cli/src/lifecycle.ts`, `apps/cli/src/server-log.ts`, `apps/cli/src/node-version.ts`, `apps/cli/src/versionCheck.ts`.
 
 </Accordion>

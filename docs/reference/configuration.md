@@ -125,8 +125,9 @@ Your agents' work lives in the work folder: `CLAWBOO_WORK_DIR`, else `<CLAWBOO_H
 | `worktrees/<repo hash>/<task id>/` | Per-task git worktrees, each with a `.<task id>.owner` file beside it holding the id of the install that made it | Holds what agents changed     |
 | `reviews/`                         | Review checkouts for verifying finished work                                                                     | No                            |
 | `README.txt`                       | A note on what the folder holds                                                                                  | No                            |
+| `mirrors/<repo hash>.git`          | With `CLAWBOO_AGENT_USER` set: the agent user's copy of each repository, which task checkouts are made from      | A copy of your repository     |
 
-Everything Clawboo creates in the work folder is owner-only (0700).
+Everything Clawboo creates in the work folder is owner-only (0700). With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set, the work folder defaults to `<agent home>/work` and belongs to the agent user, and so do each agent's runtime home and browser profile, under `<agent home>/runtimes/` and `<agent home>/browser-profiles/` instead of `~/.clawboo`. See [With agents as their own user](/operating/data-and-state#with-agents-as-their-own-user).
 
 ## Files in the runtimes folder
 

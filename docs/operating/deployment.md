@@ -22,7 +22,7 @@ Clawboo runs as one server process. On one port it serves the dashboard, its API
 ## Before you begin
 
 - **Node.js 22.12 or newer.** The `clawboo` command checks this and stops with a message on an older Node.
-- **Clawboo installed** with `npm install -g clawboo` ([Install Clawboo](/getting-started/installation)). The package holds the launcher, the server (`dist/server.js`), the dashboard files (`dist/ui`) and the four MCP programs (`dist/bin`).
+- **Clawboo installed** with `npm install -g clawboo` ([Install Clawboo](/getting-started/installation)). The package holds the launcher, the server (`dist/server.js`), the dashboard files (`dist/ui`), the four MCP programs (`dist/bin`), and the agent host and container launcher for [agent isolation](/operating/agent-isolation) (`dist/agent-host.js`, `dist/clawboo-launch`).
 
 ## Ways to run it
 
@@ -107,7 +107,7 @@ CLAWBOO_ALLOWED_ORIGINS=https://dash.example.com
 
 Generate the token with `openssl rand -hex 24` and save it in your password manager before you start the server. Use only letters, digits, `.`, `_`, `~` and `-`: with any other character the server refuses to start.
 
-The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network and other accounts, not your own account. Leave `STUDIO_ACCESS_TOKEN` out and the server uses its per-install token file instead, with the same limits.
+The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network and other accounts, not your own account. With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set and your home folder closed to other users, agents cannot. Leave `STUDIO_ACCESS_TOKEN` out and the server uses its per-install token file instead, with the same limits.
 
 Then turn the service on, and let it run while you are logged out:
 
@@ -118,6 +118,23 @@ loginctl enable-linger "$USER"
 ```
 
 `journalctl --user -u clawboo` shows its log. On macOS, run the same server command under launchd, with the same working directory and variables. Under launchd there is no journal, so set `StandardOutPath` and `StandardErrorPath` in its plist to a log file (a full path, as launchd does not expand `~`) and read that file.
+
+### Run it in a container with agents on their own user
+
+In a container, `clawboo-launch` runs the server and its agents as two users, so agents cannot read Clawboo's database, vault, key, settings or token. It works under `--security-opt no-new-privileges`, which rules out sudo, because it only drops privileges, once for each process, with `setpriv` or `gosu`. Make it the container's entrypoint, run as root, with an init process (`docker run --init`, or tini):
+
+```bash
+CLAWBOO_SERVER_USER=clawboo CLAWBOO_AGENT_USER=clawboo-agent \
+CLAWBOO_HOME=/data CLAWBOO_WORK_DIR=/work \
+  sh "$(npm root -g)/clawboo/dist/clawboo-launch"
+```
+
+- **Two users in the image.** `CLAWBOO_SERVER_USER` runs the server and `CLAWBOO_AGENT_USER` runs every agent. Neither may be root, and they must differ.
+- **Two folders.** Keep the data folder and the work folder apart: two volumes, or two top-level folders with different owners, such as `/data` and `/work`. On the first start the launcher gives the work folder to the agent user.
+- **Runtimes both users can run.** Install Node and each runtime (Claude Code, Codex, Hermes) outside any one user's home.
+- **One restart policy for both.** When the server or the agent host exits, the launcher stops the other and every agent process, then exits, so the container's restart policy starts both again.
+
+[Set it up in a container](/operating/agent-isolation#set-it-up-in-a-container) covers what the launcher does step by step. On a computer or virtual machine, use the sudo setup that `clawboo agent-user plan` prints instead.
 
 ## Ports
 

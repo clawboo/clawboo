@@ -77,7 +77,7 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** these runtimes start with their own permission prompts and sandboxes turned off, so they can work unattended. They run as your user account and can read and change any file it can. Without a worktree, as in team chat, in an agent's own chat and in agent Routines you create in the app, they start in their team's folder (`teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder), `~/clawboo-work` by default). The work folder sits outside Clawboo's data folder, so a short relative path such as `../..` from a team folder no longer reaches the database, and neither does a tool that walks up parent folders. Work an install keeps in the data folder (see [The work folder](/operating/data-and-state#the-work-folder) for when that happens) does not get that distance. That is not a boundary: the agents still run as the same user account and can open Clawboo's database and saved keys in `~/.clawboo` by their full path. A git worktree keeps one task's file changes apart from another's; it is not a sandbox either.
 
-**What to do:** give coding agents only work you would let them do unattended. For work you do not fully trust, run Clawboo under a separate user account or in a virtual machine. See [What agents can do](/concepts/permissions).
+**What to do:** give coding agents only work you would let them do unattended. For work you do not fully trust, run agents under a separate user account or run Clawboo in a virtual machine. [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to do the first: Claude Code, Codex and Hermes runs, and Clawboo Native's commands, then start as a user that cannot open Clawboo's database, saved keys, settings or access token. Their sandboxes stay off, and they still reach the network. It is not available on Windows. See [What agents can do](/concepts/permissions).
 
 **Status:** open, by design.
 
@@ -87,7 +87,7 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** Clawboo does not limit which settings files Claude Code loads. Every Claude Code agent reads what your own `claude` command reads: your user settings and memory in `~/.claude`, plus any `.claude` settings and `CLAUDE.md` in the folder it works in. All Claude Code agents share them.
 
-**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. See [Claude Code](/runtimes/claude-code).
+**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. In releases after 0.6.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user, each with a Claude Code home of its own. See [Claude Code](/runtimes/claude-code).
 
 **Status:** fixed in 0.6.0. From 0.6.0, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
 
@@ -255,7 +255,7 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** Clawboo has no user accounts and keeps no data apart per person. Anyone with the access token gets the whole install.
 
-**What to do:** run one install per person, each under its own user account on the computer or in its own virtual machine. Separate data folders (`CLAWBOO_HOME`) under one account do not keep people apart: they share `~/.openclaw` and its saved keys, and coding agents can read any file that account can. See [Data and state](/operating/data-and-state).
+**What to do:** run one install per person, each under its own user account on the computer or in its own virtual machine. Separate data folders (`CLAWBOO_HOME`) under one account do not keep people apart: they share `~/.openclaw` and its saved keys, and coding agents can read any file that account can. With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation), give each install an agent user of its own: Clawboo stops every process its agent user runs when it starts and when it stops. See [Data and state](/operating/data-and-state).
 
 **Status:** open, by design.
 

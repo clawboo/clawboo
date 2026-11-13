@@ -150,6 +150,7 @@
               "guides/sso-proxy",
               "operating/deployment",
               "operating/security",
+              "operating/agent-isolation",
               "operating/data-and-state",
               "operating/mcp-servers",
               "operating/production-defaults",
