@@ -356,6 +356,22 @@ export function serveConnection(
   opts: { onEnd?: () => void } = {},
 ): HostConnection {
   const procs = new Map<string, Proc>()
+  // Groups whose leader has closed while other members still run (a member
+  // with output of its own keeps no pipe open). `killTree` and `stopAll` still
+  // reach them, as the server's own `killProcessTree` reaches a local group
+  // after its leader is gone. A group id is not handed out again while any
+  // member lives; an entry is dropped once its group is found empty (every
+  // few seconds, at each spawn and at the end), which bets, as
+  // `killProcessTree` does, that the number is not reissued in between.
+  const survivors = new Map<string, Proc>()
+  const pruneSurvivors = (): void => {
+    for (const [id, s] of survivors) {
+      const pid = s.child.pid
+      if (!pid || !trySignal(-pid, 0)) survivors.delete(id)
+    }
+  }
+  const pruneTimer = setInterval(pruneSurvivors, 5_000)
+  pruneTimer.unref()
   /** Paused because the connection to the server is congested. */
   const paused = new Set<Readable>()
   /** Paused because the server's buffer for that process is full. */
@@ -398,7 +414,9 @@ export function serveConnection(
   }
 
   const stopAll = (): void => {
-    for (const p of procs.values()) void killTree(p, 3_000)
+    pruneSurvivors()
+    for (const p of [...procs.values(), ...survivors.values()]) void killTree(p, 3_000)
+    survivors.clear()
   }
 
   const handleSpawn = (id: number, f: Record<string, unknown>): void => {
@@ -434,6 +452,10 @@ export function serveConnection(
     }
     const entry: Proc = { child, group }
     procs.set(proc, entry)
+    // A pid handed out again means the group it led is gone, though the new
+    // child's own group now answers to it.
+    for (const [k, s] of survivors) if (s.child.pid === child.pid) survivors.delete(k)
+    pruneSurvivors()
     reply(id, { pid: child.pid })
     child.stdout?.on('data', (d: Buffer) =>
       send({ t: 'ev', proc, ev: 'out', data: d.toString('base64') }),
@@ -450,6 +472,7 @@ export function serveConnection(
     child.on('exit', (code, signal) => send({ t: 'ev', proc, ev: 'exit', code, signal }))
     child.on('close', (code, signal) => {
       procs.delete(proc)
+      if (group && child.pid && trySignal(-child.pid, 0)) survivors.set(proc, entry)
       send({ t: 'ev', proc, ev: 'close', code, signal })
     })
   }
@@ -494,7 +517,10 @@ export function serveConnection(
           return reply(id, { delivered: p ? p.child.kill(sig as NodeJS.Signals) : false })
         }
         case 'killTree': {
-          const p = procs.get(String(f['proc'] ?? ''))
+          const procId = String(f['proc'] ?? '')
+          // A survivor stays listed until its group is empty, so the end of
+          // the connection stops it again if this grace outlasts the host.
+          const p = procs.get(procId) ?? survivors.get(procId)
           const grace = Number(f['graceMs'])
           if (p)
             await killTree(
@@ -678,6 +704,7 @@ export function serveConnection(
   input.on('data', (chunk: string) => split(chunk))
   const end = (): void => {
     if (ended) return
+    clearInterval(pruneTimer)
     stopAll()
     ended = true
     opts.onEnd?.()
