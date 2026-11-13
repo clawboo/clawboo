@@ -620,6 +620,7 @@ export function createHermesAcpDriver(
             ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
             : null,
           hasApiKey: Object.keys(ctx.apiKeyEnv ?? {}).length > 0,
+          providerHint: ctx.providerHint ?? null,
         })
         run = await resolveHermesRun(opts, ctx, home)
         runModel = run.model

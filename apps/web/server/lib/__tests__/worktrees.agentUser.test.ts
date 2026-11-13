@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   claimTask,
+  completeExecutionProcess,
+  createExecutionProcess,
   createTask,
   getComments,
   getTask,
@@ -57,8 +59,21 @@ const gitEnv = {
   GIT_COMMITTER_NAME: 't',
   GIT_COMMITTER_EMAIL: 't@example.com',
 }
+/** The environment without variables that would point git at another
+ *  repository or index than the fixture's. */
+const fixtureEnv = (): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([k]) =>
+        !/^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR)$/.test(
+          k,
+        ),
+    ),
+  ),
+  ...gitEnv,
+})
 const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...gitEnv } }).trim()
+  execFileSync('git', args, { cwd, encoding: 'utf8', env: fixtureEnv() }).trim()
 
 const worktreeList = (repo: string): string => git(repo, 'worktree', 'list', '--porcelain')
 
@@ -579,6 +594,149 @@ describe.runIf(posix)('task checkouts under agent isolation', { timeout: 120_000
     expect(git(repo, 'rev-parse', branch)).toBe(theirs)
     const notes = getComments(getDb(), taskId).map((c) => c.body)
     expect(notes.some((b) => b.includes('blocked until a person'))).toBe(true)
+  })
+
+  it('resume carries commits made to the branch in the user repository past the agent copy', async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { worktreePath: wt, branch } = prov.worktree
+    fs.writeFileSync(path.join(wt, 'agent.txt'), 'agent\n')
+    await actOnTaskWorkspace(taskId, 'pause')
+    // Work committed on the branch in the user's repository afterwards, as the
+    // save of a checkout the server made while agents ran as its user does.
+    git(repo, 'checkout', '-q', branch)
+    fs.writeFileSync(path.join(repo, 'theirs.txt'), 'theirs\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'theirs')
+    git(repo, 'checkout', '-q', 'main')
+
+    const resumed = await resumeTaskWorkspace(taskId, { repoPath: repo })
+    expect(resumed.ok).toBe(true)
+    if (!resumed.ok) return
+    const at = resumed.worktree.worktreePath
+    expect(fs.readFileSync(path.join(at, 'theirs.txt'), 'utf8')).toBe('theirs\n')
+    expect(fs.readFileSync(path.join(at, 'agent.txt'), 'utf8')).toBe('agent\n')
+    expect(git(mirrorPathFor(repo), 'rev-parse', branch)).toBe(git(repo, 'rev-parse', branch))
+  })
+
+  it('resume carries those commits in past a stale registration of the checkout', async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { worktreePath: wt, branch } = prov.worktree
+    fs.writeFileSync(path.join(wt, 'agent.txt'), 'agent\n')
+    await actOnTaskWorkspace(taskId, 'pause')
+    // The mirror still lists a checkout of the branch whose folder is gone.
+    if (!fs.existsSync(wt)) git(mirrorPathFor(repo), 'worktree', 'add', '-q', wt, branch)
+    fs.rmSync(wt, { recursive: true, force: true })
+    git(repo, 'checkout', '-q', branch)
+    fs.writeFileSync(path.join(repo, 'theirs.txt'), 'theirs\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'theirs')
+    git(repo, 'checkout', '-q', 'main')
+
+    const resumed = await resumeTaskWorkspace(taskId, { repoPath: repo })
+    expect(resumed).toMatchObject({ ok: true })
+    if (!resumed.ok) return
+    expect(fs.readFileSync(path.join(resumed.worktree.worktreePath, 'theirs.txt'), 'utf8')).toBe(
+      'theirs\n',
+    )
+  })
+
+  it('resume keeps a branch the agent rewrote after an export', async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { branch } = prov.worktree
+    fs.writeFileSync(path.join(prov.worktree.worktreePath, 'agent.txt'), 'agent\n')
+    await actOnTaskWorkspace(taskId, 'pause')
+    const exported = git(repo, 'rev-parse', branch)
+    const first = await resumeTaskWorkspace(taskId, { repoPath: repo })
+    if (!first.ok) throw new Error('resume failed')
+    // The agent rewrites the commit the export brought over.
+    git(first.worktree.worktreePath, 'commit', '-q', '--amend', '-m', 'rewritten')
+    const rewritten = git(mirrorPathFor(repo), 'rev-parse', branch)
+    expect(rewritten).not.toBe(exported)
+
+    // The user's branch is still where the export put it: the task's own.
+    const again = await resumeTaskWorkspace(taskId, { repoPath: repo })
+    expect(again).toMatchObject({ ok: true })
+    expect(git(mirrorPathFor(repo), 'rev-parse', branch)).toBe(rewritten)
+  })
+
+  /** A commit on main in the user's repository that the mirror has as the base
+   *  of another task, but that is no part of `taskId`'s branch. */
+  async function anotherTasksBase(): Promise<string> {
+    fs.writeFileSync(path.join(repo, 'later.txt'), 'later\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'later on main')
+    const later = git(repo, 'rev-parse', 'HEAD')
+    const other = await provisionTaskWorkspace(newTask('Another task'), {
+      repoPath: repo,
+      kind: 'code',
+    })
+    if (!other.ok) throw new Error(other.reason)
+    expect(git(mirrorPathFor(repo), 'cat-file', '-t', later)).toBe('commit')
+    return later
+  }
+
+  it("never replaces a user branch moved to a commit only another task's branch has", async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { worktreePath: wt, branch } = prov.worktree
+    fs.writeFileSync(path.join(wt, 'feature.txt'), 'agent work\n')
+    const later = await anotherTasksBase()
+    git(repo, 'branch', branch, later)
+
+    await actOnTaskWorkspace(taskId, 'pause')
+    expect(git(repo, 'rev-parse', branch)).toBe(later)
+    const notes = getComments(getDb(), taskId).map((c) => c.body)
+    expect(notes.some((b) => b.includes('could not be brought into'))).toBe(true)
+  })
+
+  it('an empty completion keeps a user branch moved to a commit the task did not put there', async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { branch } = prov.worktree
+    await actOnTaskWorkspace(taskId, 'pause')
+    expect((await resumeTaskWorkspace(taskId, { repoPath: repo })).ok).toBe(true)
+    const later = await anotherTasksBase()
+    git(repo, 'branch', '-f', branch, later)
+
+    const done = await actOnTaskWorkspace(taskId, 'complete')
+    expect(done.ok && done.action === 'complete' && done.complete.cleaned).toBe(true)
+    expect(git(repo, 'rev-parse', branch)).toBe(later)
+  })
+
+  it('a completion whose run lost the task while its work was brought over leaves the task be', async () => {
+    const taskId = newTask()
+    setSetting(getDb(), teamVerifyCommandSettingKey('team1'), JSON.stringify({ command: 'exit 0' }))
+    const run = createExecutionProcess(getDb(), { taskId, executorType: 'claude-code' })
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    fs.writeFileSync(path.join(prov.worktree.worktreePath, 'feature.txt'), 'agent work\n')
+    // While the bundle is read from agent space, a person retries the task and
+    // a newer run takes it.
+    const request = h.client.request.bind(h.client)
+    let taken = false
+    vi.spyOn(h.client, 'request').mockImplementation((req, o) => {
+      const p = (req as { path?: string }).path ?? ''
+      if (req.op === 'fs.read' && p.endsWith('.bundle') && !taken) {
+        taken = true
+        completeExecutionProcess(getDb(), run.id, { status: 'cancelled' })
+        createExecutionProcess(getDb(), { taskId, executorType: 'claude-code' })
+      }
+      return request(req, o)
+    })
+
+    const done = await actOnTaskWorkspace(taskId, 'complete', { runId: run.id })
+    expect(taken).toBe(true)
+    expect(done).toMatchObject({ ok: true, action: 'complete', superseded: true })
+    expect(done.ok && done.action === 'complete' && done.verified).toBeUndefined()
+    expect(getTask(getDb(), taskId)?.status).toBe('in_progress')
   })
 
   it('GC never prunes the user repository', async () => {

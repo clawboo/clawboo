@@ -52,6 +52,17 @@ const SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'S
 /** How much of a command's output the host returns from its own checks. */
 const CHECK_OUTPUT_CHARS = 64 * 1024
 
+/** Whether this process runs with no_new_privs (Linux), under which a setuid
+ *  or setgid file gives an agent nothing. */
+function hasNoNewPrivs(): boolean {
+  if (process.platform !== 'linux') return false
+  try {
+    return /^NoNewPrivs:\s*1\s*$/m.test(fs.readFileSync('/proc/self/status', 'utf8'))
+  } catch {
+    return false
+  }
+}
+
 /** Who the host is, as the kernel says. */
 export function hostIdentity(): Omit<HelloFrame, 't' | 'v'> {
   const info = os.userInfo()
@@ -249,6 +260,14 @@ async function findInodes(
   const matches: string[] = []
   const privileged: string[] = []
   const me = typeof process.getuid === 'function' ? BigInt(process.getuid()) : -1n
+  // setgid gives the file's group, whoever owns the file: harmless only for a
+  // group this user is already in.
+  const myGroups = new Set<bigint>(
+    [
+      ...(typeof process.getgid === 'function' ? [process.getgid()] : []),
+      ...(typeof process.getgroups === 'function' ? process.getgroups() : []),
+    ].map((g) => BigInt(g)),
+  )
   let seen = 0
   let rootDev: bigint
   try {
@@ -285,10 +304,11 @@ async function findInodes(
         ) {
           matches.push(p)
         }
-        // setuid (04000) or setgid (02000), owned by anyone but this user.
-        if ((st.mode & 0o6000n) !== 0n && st.uid !== me && privileged.length < MAX_SEARCH_MATCHES) {
-          privileged.push(p)
-        }
+        // setuid (04000) for another owner, or setgid (02000) for a group this
+        // user is not in.
+        const setuid = (st.mode & 0o4000n) !== 0n && st.uid !== me
+        const setgid = (st.mode & 0o2000n) !== 0n && !myGroups.has(st.gid)
+        if ((setuid || setgid) && privileged.length < MAX_SEARCH_MATCHES) privileged.push(p)
       }
     }
   }
@@ -507,7 +527,11 @@ export function serveConnection(
           const data = Buffer.from(String(f['data'] ?? ''), 'base64')
           if (data.length > MAX_WRITE_BYTES)
             throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
-          writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777)
+          // Agent space is the agent user's alone: a private file whose mode
+          // cannot be set is refused, not written readable by others.
+          writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777, {
+            strictOwnerOnly: true,
+          })
           return reply(id, {})
         }
         case 'fs.append': {
@@ -583,7 +607,10 @@ export function serveConnection(
         case 'inodes': {
           const targets = Array.isArray(f['targets']) ? (f['targets'] as InodeRef[]) : []
           const max = Math.max(1, Math.min(Number(f['maxEntries']) || 200_000, 2_000_000))
-          return reply(id, await findInodes(String(f['root']), targets, max))
+          return reply(id, {
+            ...(await findInodes(String(f['root']), targets, max)),
+            noNewPrivs: hasNoNewPrivs(),
+          })
         }
         case 'privCheck': {
           const server = String(f['serverUser'] ?? '')
@@ -600,6 +627,16 @@ export function serveConnection(
             const r = await runCheck(cmd, args)
             attempts.push({ what, ran: r.ran, succeeded: r.ran && r.exitCode === 0 })
           }
+          // A rule for one command (a shell as the server user, say) lets none
+          // of the tries above run. sudo lists the rules without a password
+          // only when one of them needs none, so a listing that succeeds is a
+          // rule that works.
+          const listing = await runCheck('sudo', ['-n', '-l'])
+          attempts.push({
+            what: 'sudo -l',
+            ran: listing.ran,
+            succeeded: listing.ran && listing.exitCode === 0,
+          })
           const cron = await runCheck('crontab', ['-l'])
           const crontab = !cron.ran
             ? 'absent'

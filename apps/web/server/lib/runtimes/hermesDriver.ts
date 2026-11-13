@@ -597,6 +597,7 @@ export function createHermesDriver(
           ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
           : null,
         hasApiKey: Object.keys(ctx.apiKeyEnv ?? {}).length > 0,
+        providerHint: ctx.providerHint ?? null,
       })
       if (ctx.mcpBaseUrl && !home.mcpAttached) {
         // The seeded config declares `mcp_servers` on one line with servers in it,

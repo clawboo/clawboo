@@ -325,6 +325,40 @@ describe.runIf(posix)('agent isolation startup check', () => {
     },
   )
 
+  it.runIf(me.uid !== 0)(
+    'refuses a work folder too large to search for setuid files, without no_new_privs',
+    async () => {
+      override('inodes', { matches: [], privileged: [], truncated: true })
+      const r = await runAgentUserCheck(config, deps)
+      expect(failed(r)).toMatchObject({ step: 7, name: 'setuid files' })
+      expect(failed(r)?.message).toMatch(/too large to search completely/)
+      expect(failed(r)?.message).toMatch(/setpriv/)
+    },
+  )
+
+  it.runIf(me.uid !== 0)(
+    'only warns about a work folder too large to search when the host has no_new_privs',
+    async () => {
+      override('inodes', { matches: [], privileged: [], truncated: true, noNewPrivs: true })
+      const r = await runAgentUserCheck(config, deps)
+      expect(r.ok).toBe(true)
+      expect(r.steps.find((s) => s.name === 'hard links')?.level).toBe('warn')
+    },
+  )
+
+  it.runIf(me.uid !== 0)('refuses an agent user with a sudo rule it can use', async () => {
+    override('privCheck', {
+      attempts: [
+        { what: 'sudo', ran: true, succeeded: false },
+        { what: 'sudo -l', ran: true, succeeded: true },
+      ],
+      crontab: 'denied',
+    })
+    const r = await runAgentUserCheck(config, deps)
+    expect(failed(r)).toMatchObject({ step: 8 })
+    expect(failed(r)?.message).toContain('has sudo rules it can use without a password')
+  })
+
   it('refuses a data folder that is not the server user alone', async () => {
     const r = await runAgentUserCheck(config, {
       ...deps,

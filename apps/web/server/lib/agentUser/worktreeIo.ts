@@ -27,6 +27,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { buildChildEnv } from '../runtimes/childEnv'
+import { killProcessTree } from '../runtimes/killTree'
 import { spawnAgentProcess } from '../runtimes/spawner'
 import { realPathOrSpelling, workDirSpellings } from '../workDir'
 import {
@@ -132,10 +133,16 @@ function hostGit(cwd: string, args: string[]): Promise<string> {
     const err: Buffer[] = []
     let outBytes = 0
     let errBytes = 0
-    let limit: string | null = null
+    let done = false
+    // Past the time or output limit the call fails at once, as the local one
+    // does, and git stops with everything it started: a hook still holding
+    // git's output open would otherwise keep 'close' from ever coming.
     const stop = (why: string): void => {
-      limit ??= why
-      child.kill('SIGTERM')
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      killProcessTree(child, { graceMs: 2_000 })
+      fail(Buffer.concat(err).toString('utf8'), null, why)
     }
     child.stdout?.on('data', (d: Buffer) => {
       outBytes += d.length
@@ -149,7 +156,6 @@ function hostGit(cwd: string, args: string[]): Promise<string> {
     })
     const timer = setTimeout(() => stop(`timed out after ${GIT_TIMEOUT_MS}ms`), GIT_TIMEOUT_MS)
     timer.unref?.()
-    let done = false
     child.on('error', (e: Error) => {
       if (done) return
       done = true
@@ -161,8 +167,7 @@ function hostGit(cwd: string, args: string[]): Promise<string> {
       done = true
       clearTimeout(timer)
       const stderr = Buffer.concat(err).toString('utf8')
-      if (code === 0 && limit === null) resolve(Buffer.concat(out).toString('utf8'))
-      else if (limit !== null) fail(stderr, null, limit)
+      if (code === 0) resolve(Buffer.concat(out).toString('utf8'))
       else fail(stderr, code, `exited ${code ?? 'on a signal'}`)
     })
   })

@@ -285,17 +285,23 @@ async function userBranchTip(repoPath: string, ref: string): Promise<string | nu
   }
 }
 
+/** Where `ref` is checked out in `repoPath` (any of its checkouts, a stale
+ *  registration whose folder is gone included), or null. */
+export async function checkedOutAt(repoPath: string, ref: string): Promise<string | null> {
+  let at: string | null = null
+  for (const line of (await execGit(repoPath, ['worktree', 'list', '--porcelain'])).split('\n')) {
+    if (line.startsWith('worktree ')) at = line.slice('worktree '.length)
+    else if (line === `branch ${ref}`) return at ?? 'a checkout'
+  }
+  return null
+}
+
 /** Throw unless no checkout of `repoPath` has `ref` checked out. A fetch into a
  *  checked-out branch is refused by git; `update-ref` is not, and moving the
  *  branch under someone's working tree would make their files look changed. */
 async function refuseCheckedOut(repoPath: string, ref: string): Promise<void> {
-  let at: string | null = null
-  for (const line of (await execGit(repoPath, ['worktree', 'list', '--porcelain'])).split('\n')) {
-    if (line.startsWith('worktree ')) at = line.slice('worktree '.length)
-    else if (line === `branch ${ref}`) {
-      throw new MirrorError(`${ref} is checked out at ${at ?? 'a checkout'} of ${repoPath}`)
-    }
-  }
+  const at = await checkedOutAt(repoPath, ref)
+  if (at !== null) throw new MirrorError(`${ref} is checked out at ${at} of ${repoPath}`)
 }
 
 /**
@@ -371,6 +377,10 @@ export async function exportTaskBranch(
       bundle,
       `+${want}:${staged}`,
     ])
+    // Checked again here, not only before the bundle: someone may have checked
+    // the branch out (at the same commit) while it was being made and copied.
+    // What is left is the moment between this check and the move.
+    await refuseCheckedOut(repoPath, want)
     try {
       // An empty old value: the branch must not exist yet.
       await execGit(repoPath, ['update-ref', want, tip, theirs ?? ''])

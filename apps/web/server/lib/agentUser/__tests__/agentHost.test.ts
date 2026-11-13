@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { childEnvFor } from '../../../agentHost/host'
 import { AgentHostError } from '../client'
@@ -276,8 +276,97 @@ describe.runIf(posix)('agent host protocol', () => {
       'doas',
       'sudo -u nobody',
       'doas -u nobody',
+      'sudo -l',
     ])
     expect(['allowed', 'denied', 'absent']).toContain(res.crontab)
+  })
+
+  it('counts a sudo rule for one command, which none of the tries can run', async () => {
+    // A sudo that allows one shell as another user: `true` is refused, the
+    // listing works.
+    const bin = path.join(dir, 'bin')
+    fs.mkdirSync(bin)
+    fs.writeFileSync(
+      path.join(bin, 'sudo'),
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "-n" ] && [ "$2" = "-l" ]; then',
+        '  echo "User agent may run the following commands on host:"',
+        '  echo "    (alice) NOPASSWD: /bin/sh"',
+        '  exit 0',
+        'fi',
+        'echo "sudo: a password is required" >&2',
+        'exit 1',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`)
+    try {
+      const res = await h.client.request(
+        { op: 'privCheck', serverUser: 'alice' },
+        { timeoutMs: 60_000 },
+      )
+      expect(res.attempts.filter((a) => a.succeeded).map((a) => a.what)).toEqual(['sudo -l'])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('counts a setgid file for a group the agent user is not in, whoever owns it', async () => {
+    const tree = path.join(dir, 'tree')
+    fs.mkdirSync(tree)
+    const file = path.join(tree, 'tool')
+    fs.writeFileSync(file, '#!/bin/sh\n')
+    fs.chownSync(file, process.getuid?.() ?? 0, process.getgid?.() ?? 0)
+    fs.chmodSync(file, 0o2755)
+    expect(fs.statSync(file).mode & 0o2000).toBe(0o2000)
+    // Its group is this user's: nothing to give.
+    const own = await h.client.request({ op: 'inodes', root: tree, targets: [], maxEntries: 100 })
+    expect(own.privileged).toEqual([])
+    // The same file, for a host whose user is not in that group.
+    // Optional on `process` (POSIX only), so typed here as present.
+    const ids = process as { getgid: () => number; getgroups: () => number[] }
+    const gid = vi.spyOn(ids, 'getgid').mockReturnValue(2_000_000_000)
+    const groups = vi.spyOn(ids, 'getgroups').mockReturnValue([])
+    try {
+      const res = await h.client.request({
+        op: 'inodes',
+        root: tree,
+        targets: [],
+        maxEntries: 100,
+      })
+      expect(res.privileged).toEqual([file])
+    } finally {
+      gid.mockRestore()
+      groups.mockRestore()
+    }
+  })
+
+  it('refuses a private file whose mode cannot be set, and keeps others', async () => {
+    const chmod = vi.spyOn(fs, 'fchmodSync').mockImplementation(() => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    })
+    try {
+      await expect(
+        h.client.request({
+          op: 'fs.write',
+          path: path.join(dir, 'secret'),
+          data: Buffer.from('s').toString('base64'),
+          mode: 0o600,
+        }),
+      ).rejects.toMatchObject({ code: 'EPERM' })
+      expect(fs.readdirSync(dir).filter((n) => n.includes('secret'))).toEqual([])
+      await h.client.request({
+        op: 'fs.write',
+        path: path.join(dir, 'shared'),
+        data: Buffer.from('s').toString('base64'),
+        mode: 0o644,
+      })
+      expect(fs.readFileSync(path.join(dir, 'shared'), 'utf8')).toBe('s')
+    } finally {
+      chmod.mockRestore()
+    }
   })
 
   it('refuses a signal it does not know', async () => {
