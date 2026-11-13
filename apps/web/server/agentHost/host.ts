@@ -244,13 +244,16 @@ function runCheck(
   })
 }
 
-/** Every regular file under `root` (one filesystem, links not followed) that is
- *  one of `targets`: a hard link to the database or the key, for instance. */
 /** Let other requests (a ping above all) run between slices of a long job:
  *  a host that misses pings for 5 seconds is taken for dead, and the server
  *  stops every agent process. */
 const yieldNow = (): Promise<void> => new Promise((r) => setImmediate(r))
 
+/** Every regular file under `root` (links not followed) that is one of
+ *  `targets` (a hard link to the database or the key, for instance), or that is
+ *  setuid or setgid for someone else. Folders on another filesystem mounted
+ *  under `root` are searched too: a setuid file works from any filesystem not
+ *  mounted nosuid, and a bind mount can bring the data folder's own in. */
 async function findInodes(
   root: string,
   targets: InodeRef[],
@@ -281,9 +284,8 @@ async function findInodes(
     if (!unreadable.includes(p) && unreadable.length < MAX_SEARCH_MATCHES) unreadable.push(p)
   }
   let seen = 0
-  let rootDev: bigint
   try {
-    rootDev = (await fs.promises.lstat(root, { bigint: true })).dev
+    await fs.promises.lstat(root, { bigint: true })
   } catch (err) {
     notSearched(root, err)
     return { matches, privileged, truncated: false, unreadable }
@@ -311,7 +313,7 @@ async function findInodes(
         continue
       }
       if (st.isDirectory()) {
-        if (st.dev === rootDev) stack.push(p)
+        stack.push(p)
       } else if (st.isFile()) {
         if (
           st.nlink > 1n &&
@@ -358,6 +360,8 @@ async function listDirAsync(
 export interface HostConnection {
   /** Stop every process this connection started. */
   close(): void
+  /** @internal For tests: how many output streams are held now. */
+  heldStreams(): number
 }
 
 /**
@@ -488,6 +492,12 @@ export function serveConnection(
     child.on('exit', (code, signal) => send({ t: 'ev', proc, ev: 'exit', code, signal }))
     child.on('close', (code, signal) => {
       procs.delete(proc)
+      // Both streams have closed: a later resume could not find them.
+      for (const s of [child.stdout, child.stderr]) {
+        if (!s) continue
+        paused.delete(s)
+        heldByServer.delete(s)
+      }
       if (group && child.pid && trySignal(-child.pid, 0)) survivors.set(proc, entry)
       send({ t: 'ev', proc, ev: 'close', code, signal })
     })
@@ -664,28 +674,32 @@ export function serveConnection(
             tries.push([`sudo -u ${server}`, 'sudo', ['-n', '-u', server, 'true']])
             tries.push([`doas -u ${server}`, 'doas', ['-n', '-u', server, 'true']])
           }
+          // Under no_new_privs sudo refuses to run at all, before it reads any
+          // rule: such a try says nothing either way, and is marked so.
+          const attempt = (
+            what: string,
+            r: Awaited<ReturnType<typeof runCheck>>,
+          ): { what: string; ran: boolean; succeeded: boolean; unchecked?: true } => ({
+            what,
+            ran: r.ran,
+            succeeded: r.ran && r.exitCode === 0,
+            ...(/no new privileges/i.test(r.stderr + r.stdout) ? { unchecked: true as const } : {}),
+          })
           const attempts = []
-          for (const [what, cmd, args] of tries) {
-            const r = await runCheck(cmd, args)
-            attempts.push({ what, ran: r.ran, succeeded: r.ran && r.exitCode === 0 })
-          }
+          for (const [what, cmd, args] of tries)
+            attempts.push(attempt(what, await runCheck(cmd, args)))
           // A rule for one command (a shell as the server user, say) lets none
           // of the tries above run. sudo lists the rules without a password
           // only when one of them needs none, so a listing that succeeds is a
           // rule that works.
-          const listing = await runCheck('sudo', ['-n', '-l'])
-          attempts.push({
-            what: 'sudo -l',
-            ran: listing.ran,
-            succeeded: listing.ran && listing.exitCode === 0,
-          })
+          attempts.push(attempt('sudo -l', await runCheck('sudo', ['-n', '-l'])))
           const cron = await runCheck('crontab', ['-l'])
           const crontab = !cron.ran
             ? 'absent'
             : /not allowed|permission denied|not permitted/i.test(cron.stderr + cron.stdout)
               ? 'denied'
               : 'allowed'
-          return reply(id, { attempts, crontab })
+          return reply(id, { attempts, crontab, noNewPrivs: hasNoNewPrivs() })
         }
         case 'canExec': {
           const paths = Array.isArray(f['paths']) ? f['paths'].map(String) : []
@@ -729,5 +743,5 @@ export function serveConnection(
   input.on('close', end)
   input.on('error', end)
 
-  return { close: end }
+  return { close: end, heldStreams: () => paused.size + heldByServer.size }
 }
