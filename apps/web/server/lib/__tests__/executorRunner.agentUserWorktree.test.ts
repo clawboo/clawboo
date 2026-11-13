@@ -37,8 +37,21 @@ const gitEnv = {
   GIT_COMMITTER_NAME: 't',
   GIT_COMMITTER_EMAIL: 't@example.com',
 }
+/** The environment without variables that would point git at another
+ *  repository or index than the fixture's. */
+const fixtureEnv = (): NodeJS.ProcessEnv => ({
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([k]) =>
+        !/^GIT_(DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|COMMON_DIR)$/.test(
+          k,
+        ),
+    ),
+  ),
+  ...gitEnv,
+})
 const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, ...gitEnv } }).trim()
+  execFileSync('git', args, { cwd, encoding: 'utf8', env: fixtureEnv() }).trim()
 
 const CAPS: Capabilities = {
   streaming: true,
