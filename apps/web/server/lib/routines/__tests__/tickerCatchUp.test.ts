@@ -276,6 +276,25 @@ describe('a due OpenClaw routine waits for the Gateway: the wait itself', () => 
     expect(dispatched).toHaveLength(1)
   })
 
+  it('a restart continues a wait rather than granting a fresh one', async () => {
+    insertAgent('oc', 'openclaw')
+    register({ agentId: 'oc', teamId: null, nextRunAt: MON_9AM })
+    const down = gateway({ configured: true, connected: false })
+    let now = MON_9AM + HOUR
+    const first = makeTicker({ now: () => now, gateway: down })
+    expect((await first.ticker.tick()).fired).toBe(0)
+
+    // Stopped and started again partway through the wait: the new ticker reads when
+    // the wait began, so a host that keeps restarting the engine for this fire
+    // cannot keep it waiting for ever.
+    now += GATEWAY_WAIT_MS - 1
+    const second = makeTicker({ now: () => now, gateway: down })
+    expect((await second.ticker.tick()).fired).toBe(0)
+    now += 1
+    expect((await second.ticker.tick()).fired).toBe(1)
+    expect(second.dispatched).toHaveLength(1)
+  })
+
   it('arms the timer for the moment the wait runs out, not the next minute rescan', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     vi.setSystemTime(MON_9AM + HOUR)

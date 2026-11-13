@@ -10,59 +10,60 @@
 // So the check runs in a worker thread on a read-only connection of its own (the
 // database is in WAL mode, so a reader sees one consistent snapshot while the
 // server writes). At boot it is `quick_check`: the same page and b-tree checks,
-// without the index cross-check, at about a tenth of the cost. A person's "Re-run
-// probe" asks for the full `integrity_check`. If the worker cannot start, the
-// check runs on the given connection as before.
+// without the index cross-check, at about a tenth of the cost. The full
+// `integrity_check` runs when a person re-runs the probe, and in the background
+// once a day (see bootProbe).
+//
+// It never falls back to the main thread. When the worker cannot run the check
+// (the driver does not load, the file cannot be opened, another connection keeps
+// it busy, it runs out of time), the result says the check could not run, which
+// says nothing about the database either way.
 
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
 
-import { type ClawbooDb } from '@clawboo/db'
-import { sql } from 'drizzle-orm'
-
 export type DbCheckKind = 'quick_check' | 'integrity_check'
+
+/** How long each check may take before it counts as not run. Generous: the full
+ *  check reads every page and every index of a large database. */
+export const DB_CHECK_TIMEOUT_MS: Record<DbCheckKind, number> = {
+  quick_check: 2 * 60_000,
+  integrity_check: 15 * 60_000,
+}
+
+/**
+ * `ran`: SQLite gave its verdict, 'ok' when nothing is wrong, else what is (its
+ * first row, or the corruption error that stopped the check). `not-run`: the check
+ * could not run, for `reason`.
+ */
+export type DbCheckResult = { ran: true; verdict: string } | { ran: false; reason: string }
 
 /** The worker's whole program. Eval'd, so the driver comes in by absolute path. */
 const WORKER_SOURCE = `
 const { parentPort, workerData } = require('node:worker_threads')
+// SQLite stops on some damage with an error, and that error is the verdict. Any
+// other error (busy, locked, out of memory, an I/O error, no driver) means the
+// check did not run.
+const damage = (err) => {
+  const code = String((err && err.code) || '')
+  return code.startsWith('SQLITE_CORRUPT') || code === 'SQLITE_NOTADB'
+}
+const text = (err) => String((err && err.message) || err)
 let db = null
+let message = null
 try {
   const Database = require(workerData.driver)
   db = new Database(workerData.file, { readonly: true, fileMustExist: true })
   db.pragma('busy_timeout = 5000')
+  const rows = db.pragma(workerData.kind)
+  message = { ran: true, verdict: rows.length > 0 ? String(Object.values(rows[0])[0]) : 'unknown' }
 } catch (err) {
-  // The check never started, so this says nothing about the database.
-  parentPort.postMessage({ ok: false, error: String((err && err.message) || err) })
-  db = null
+  message = damage(err) ? { ran: true, verdict: text(err) } : { ran: false, reason: text(err) }
 }
-if (db) {
-  let message
-  try {
-    const rows = db.pragma(workerData.kind)
-    message = { ok: true, verdict: rows.length > 0 ? String(Object.values(rows[0])[0]) : 'unknown' }
-  } catch (err) {
-    const code = String((err && err.code) || '')
-    message = code.startsWith('SQLITE_CORRUPT') || code === 'SQLITE_NOTADB'
-      // SQLite stops the check with an error on some damage: that error is the verdict.
-      ? { ok: true, verdict: String((err && err.message) || err) }
-      // Anything else (busy, locked, out of memory, an I/O error) means the check
-      // did not run here, so it says nothing about the database.
-      : { ok: false, error: String((err && err.message) || err) }
-  }
-  try { db.close() } catch (_) {}
-  parentPort.postMessage(message)
-}
+try { if (db) db.close() } catch (_) {}
+parentPort.postMessage(message)
 `
-
-/** The check on the calling thread: SQLite's first row, 'ok' when nothing is wrong. */
-export function checkDatabaseInThread(db: ClawbooDb, kind: DbCheckKind): string {
-  const rows = db.all(sql.raw(`PRAGMA ${kind}`)) as Array<Record<string, unknown>>
-  // The pragma always yields at least one row ('ok' or what is wrong); none means
-  // it did not run normally, which is a failure, not health.
-  if (rows.length === 0) return 'unknown'
-  return String(Object.values(rows[0]!)[0] ?? 'unknown')
-}
 
 function driverPath(): string {
   // Resolved from this module's own folder, which in the published package is
@@ -70,60 +71,47 @@ function driverPath(): string {
   return createRequire(path.join(__dirname, 'noop.js')).resolve('better-sqlite3')
 }
 
-export interface DbCheckResult {
-  /** SQLite's first row: 'ok' when nothing is wrong, else what is. */
-  verdict: string
-  /** False when the worker could not run and the check ran on the calling thread. */
-  offThread: boolean
-}
-
-/**
- * Run `kind` against the database file in a worker thread and resolve with
- * SQLite's verdict. Falls back to the given connection, on this thread, when the
- * worker cannot run.
- */
+/** Run `kind` against the database file in a worker thread. Never throws. */
 export function checkDatabase(
-  db: ClawbooDb,
   file: string,
   kind: DbCheckKind,
+  opts: { timeoutMs?: number } = {},
 ): Promise<DbCheckResult> {
-  const inThread = (): DbCheckResult => ({
-    verdict: checkDatabaseInThread(db, kind),
-    offThread: false,
-  })
   let worker: Worker
   try {
     worker = new Worker(WORKER_SOURCE, {
       eval: true,
       workerData: { driver: driverPath(), file, kind },
     })
-  } catch {
-    return Promise.resolve(inThread())
+  } catch (err) {
+    return Promise.resolve({
+      ran: false,
+      reason: `no worker thread: ${err instanceof Error ? err.message : String(err)}`,
+    })
   }
+  const timeoutMs = opts.timeoutMs ?? DB_CHECK_TIMEOUT_MS[kind]
   return new Promise<DbCheckResult>((resolve) => {
     let settled = false
-    const fallBack = (): void => {
+    const settle = (result: DbCheckResult): void => {
       if (settled) return
       settled = true
-      try {
-        resolve(inThread())
-      } catch (err) {
-        resolve({ verdict: err instanceof Error ? err.message : String(err), offThread: false })
-      }
+      clearTimeout(timer)
+      resolve(result)
     }
-    worker.once('message', (msg: { ok: boolean; verdict?: string }) => {
-      if (settled) return
-      if (msg.ok && typeof msg.verdict === 'string') {
-        settled = true
-        resolve({ verdict: msg.verdict, offThread: true })
-      } else {
-        // The worker could not open the file or load the driver: the check itself
-        // never ran, so it says nothing about the database. Run it here instead.
-        fallBack()
-      }
+    const timer = setTimeout(() => {
+      settle({ ran: false, reason: `timed out after ${Math.round(timeoutMs / 1000)} s` })
+      void worker.terminate().catch(() => undefined)
+    }, timeoutMs)
+    timer.unref?.()
+    worker.once('message', (msg: DbCheckResult) => {
+      settle(
+        msg && msg.ran === true && typeof msg.verdict === 'string'
+          ? { ran: true, verdict: msg.verdict }
+          : { ran: false, reason: msg && msg.ran === false ? msg.reason : 'no answer' },
+      )
     })
-    worker.once('error', fallBack)
-    worker.once('exit', fallBack)
+    worker.once('error', (err: Error) => settle({ ran: false, reason: err.message }))
+    worker.once('exit', (code) => settle({ ran: false, reason: `the worker exited (${code})` }))
     // A worker must never keep the process alive on its own.
     worker.unref()
   })
