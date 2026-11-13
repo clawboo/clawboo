@@ -173,15 +173,16 @@ You can go back to 0.6.x after the move. 0.6.0 already reads checkouts in the wo
 
 With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set, agents run as a separate user, and their folders belong to it, in its home folder. With the commands `clawboo agent-user plan` prints, that home is `/var/lib/clawboo-agent` on Linux and `/var/clawboo-agent` on macOS.
 
-| What                                                                         | Where                                                                                      | Owner                  |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------- |
-| The work folder                                                              | `<agent home>/work`, or the folder `CLAWBOO_WORK_DIR` names, which the agent user must own | The agent user, `0700` |
-| Each agent's runtime home (`CODEX_HOME`, `HERMES_HOME`, `CLAUDE_CONFIG_DIR`) | `<agent home>/runtimes/<runtime>/<agent>`                                                  | The agent user, `0700` |
-| Each agent's browser profile                                                 | `<agent home>/browser-profiles/`                                                           | The agent user, `0700` |
-| The agent user's copy of each repository                                     | `mirrors/<repository hash>.git` in the work folder                                         | The agent user         |
-| The database, the vault, settings, the token, Clawboo Native's history       | The data folder, as before                                                                 | You                    |
+| What                                                                     | Where                                                                                      | Owner                  |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------- |
+| The work folder                                                          | `<agent home>/work`, or the folder `CLAWBOO_WORK_DIR` names, which the agent user must own | The agent user, `0700` |
+| Each Codex and Hermes agent's runtime home (`CODEX_HOME`, `HERMES_HOME`) | `<agent home>/runtimes/<runtime>/<agent>`                                                  | The agent user, `0700` |
+| Claude Code's settings and sessions, shared by every Claude Code agent   | The agent user's own `~/.claude`                                                           | The agent user         |
+| Each agent's browser profile                                             | `<agent home>/browser-profiles/`                                                           | The agent user, `0700` |
+| The agent user's copy of each repository                                 | `mirrors/<repository hash>.git` in the work folder                                         | The agent user         |
+| The database, the vault, settings, the token, Clawboo Native's history   | The data folder, as before                                                                 | You                    |
 
-The move above does not run, since Clawboo cannot write in the agent user's folders as you. Instead, the first start with the setting copies what agents already had into the agent user's space: each runtime home (Hermes memory and skills, Codex sessions) and each team folder, from the data folder's `workspaces/` and from the work folder used before. It never copies a link, or a file with more than one hard link, and names what it skipped in the log. Task checkouts are not copied: they are rebuilt in the new work folder from their branches. The originals stay where they were, so turning the setting off again is the way back.
+The move above does not run, since Clawboo cannot write in the agent user's folders as you. Instead, the first start with the setting copies what agents already had into the agent user's space: each runtime home (Hermes memory and skills, Codex sessions) and each team folder, from the data folder's `workspaces/` and from the work folder used before. It never copies a link, a file with more than one hard link, a sign-in or key file (`auth.json`, `.env`: before, those were copies of your own logins and keys) or Clawboo Native's history, and names what it skipped in the log. Task checkouts are not copied: they are rebuilt in the new work folder from their branches. The originals stay where they were, so turning the setting off again is the way back.
 
 With the setting on, Clawboo never falls back to the old layout: the agent user must be able to write in its work folder, or Clawboo refuses to start (see [What the startup check proves](/operating/agent-isolation#what-the-startup-check-proves)).
 
