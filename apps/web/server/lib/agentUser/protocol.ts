@@ -163,6 +163,9 @@ export interface HostReplies {
     /** The host runs with no_new_privs (Linux), so such files give nothing.
      *  Absent from an older host. */
     noNewPrivs?: boolean
+    /** Folders the agent user could not search, so not searched. Absent from
+     *  an older host. */
+    unreadable?: string[]
   }
   privCheck: {
     /** Each attempt and whether it SUCCEEDED (exit 0). */

@@ -370,6 +370,37 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
     expect(ops).toEqual(['fs.read'])
   })
 
+  it('stops before the write when the config cannot be read, and leaves it as it was', async () => {
+    const { h } = await agentModeOn()
+    const home = path.join(agentHome, 'runtimes', 'hermes', 'a1')
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 })
+    const config = 'model:\n  provider: openrouter\n  default: someone/model\n'
+    fs.writeFileSync(path.join(home, 'config.yaml'), config)
+    const through = vi.mocked(h.client.request).getMockImplementation()!
+    vi.mocked(h.client.request).mockImplementation((req, o) =>
+      req.op === 'fs.read' && (req as { path?: string }).path?.endsWith('config.yaml')
+        ? Promise.reject(new Error('the agent host did not answer'))
+        : through(req, o),
+    )
+    await expect(
+      provisionHermesHome(home, {
+        mcpServers: { 'clawboo-tasks': { url: 'http://127.0.0.1:9/api/mcp/tasks' } },
+      }),
+    ).rejects.toThrow(/did not answer/)
+    expect(fs.readFileSync(path.join(home, 'config.yaml'), 'utf8')).toBe(config)
+  })
+
+  it('refuses a config too large to read whole, rather than rewrite it from a prefix', async () => {
+    await agentModeOn()
+    const home = path.join(agentHome, 'runtimes', 'hermes', 'a1')
+    fs.mkdirSync(home, { recursive: true, mode: 0o700 })
+    // Past the read cap, with something at its end a cut would lose.
+    const config = `model:\n  provider: openrouter\n${'\n'.repeat(8 * 1024 * 1024)}tail: kept\n`
+    fs.writeFileSync(path.join(home, 'config.yaml'), config)
+    await expect(provisionHermesHome(home)).rejects.toThrow(/larger than/)
+    expect(fs.readFileSync(path.join(home, 'config.yaml'), 'utf8')).toBe(config)
+  })
+
   it('copies the subscription login in for a run that picked it, though the run has a key', async () => {
     await agentModeOn()
     const agentsAuth = JSON.stringify({
