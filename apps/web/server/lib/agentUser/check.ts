@@ -71,6 +71,10 @@ export interface CheckDeps {
   narrowDataDir(dataDir: string, files: string[]): string[]
   /** Folders above the data folder that someone other than the server user or root can write. */
   unsafeParents(dataDir: string): string[]
+  /** After narrowing: why the data folder or a private file is not the server's
+   *  alone (not owned by it, not 0700, a private file with another hard link),
+   *  or null. */
+  dataDirProblem(dataDir: string, files: string[]): string | null
   /** Start (sudo, doas) or reach (socket) the host. Throws with the switch's own words on failure. */
   startHost(config: AgentUserConfig): Promise<AgentHostClient>
   /** Socket mode: the folder and socket owner and mode check. Null when fine. */
@@ -162,6 +166,8 @@ export async function runAgentUserCheck(
     )
   }
   const narrowed = deps.narrowDataDir(deps.dataDir, deps.protectedFiles)
+  const ownership = deps.dataDirProblem(deps.dataDir, deps.protectedFiles)
+  if (ownership) return fail(4, 'data folder', ownership)
   pass(4, 'data folder', narrowed.length > 0 ? `narrowed: ${narrowed.join(', ')}` : 'private')
 
   // 5. The switch. 6. Identity.
@@ -189,10 +195,17 @@ export async function runAgentUserCheck(
   try {
     hello = await client.waitForHello()
   } catch (err) {
+    // sudo and doas fail after they start (a missing rule, a password prompt
+    // refused by -n), so their failure shows here rather than at the start.
+    const why = errMsg(err)
+    if (config.socket) {
+      return fail(5, 'host socket', `The agent host did not answer on ${config.socket}: ${why}`)
+    }
     return fail(
       5,
       'switch',
-      `The agent host did not start: ${err instanceof Error ? err.message : String(err)}`,
+      `Could not start the agent host as ${config.user} with ${config.switch} (${why}). ` +
+        `Clawboo needs one ${config.switch} rule, written once by an administrator:\n${sudoersLines(opts.serverUser, config.user)}`,
     )
   }
   pass(5, config.socket ? 'host socket' : 'switch', config.socket ? config.socket : config.switch)
@@ -323,12 +336,15 @@ export async function runAgentUserCheck(
       /* not there: nothing to link to */
     }
   }
-  if (targets.length > 0) {
+  // Always searched, even with no private file yet: besides hard links to the
+  // private files, a setuid or setgid file someone else owns would run as that
+  // someone for an agent (one an agent made while it ran as the server's user).
+  {
     let found
     try {
       found = await client.request(
-        { op: 'inodes', root: work.dir, targets, maxEntries: 500_000 },
-        { timeoutMs: 120_000 },
+        { op: 'inodes', root: work.dir, targets, maxEntries: 2_000_000 },
+        { timeoutMs: 300_000 },
       )
     } catch (err) {
       return fail(
@@ -337,9 +353,9 @@ export async function runAgentUserCheck(
         `The agent host could not search the work folder: ${errMsg(err)}`,
       )
     }
-    const matches = Array.isArray(found.matches)
-      ? found.matches.filter((m) => typeof m === 'string')
-      : []
+    const strings = (v: unknown): string[] =>
+      Array.isArray(v) ? v.filter((m): m is string => typeof m === 'string') : []
+    const matches = strings(found.matches)
     if (matches.length > 0) {
       return fail(
         7,
@@ -347,11 +363,19 @@ export async function runAgentUserCheck(
         `${matches[0]} is a hard link to one of Clawboo's private files. Remove it (as an administrator) and start Clawboo again.`,
       )
     }
+    const privileged = strings(found.privileged)
+    if (privileged.length > 0) {
+      return fail(
+        7,
+        'setuid files',
+        `${privileged[0]} is a setuid or setgid file that ${config.user} does not own, so it would run as another user for an agent. Remove it, or run \`chmod ug-s\` on it as an administrator, and start Clawboo again.`,
+      )
+    }
     if (found.truncated) {
       warn(
         7,
         'hard links',
-        `The work folder ${work.dir} is too large to search completely for hard links.`,
+        `The work folder ${work.dir} is too large to search completely for hard links and setuid files.`,
       )
     }
   }
@@ -361,21 +385,38 @@ export async function runAgentUserCheck(
     'the agent user cannot read the data folder, the vault, the key, settings or the token',
   )
 
-  // 8. No sudo for the agent.
-  let sudo
+  // 8. No way for the agent user to become anyone else: actually tried, as the
+  // agent user, rather than read from `sudo -l` (whose listing a sudoers
+  // default can hide while the rules still work).
+  let priv
   try {
-    sudo = await client.request({ op: 'sudoList' }, { timeoutMs: 20_000 })
+    priv = await client.request(
+      { op: 'privCheck', serverUser: opts.serverUser },
+      { timeoutMs: 60_000 },
+    )
   } catch (err) {
-    return fail(8, 'agent sudo', `The agent host could not run sudo -l: ${errMsg(err)}`)
+    return fail(8, 'agent privileges', `The agent host could not run the checks: ${errMsg(err)}`)
   }
-  if (sudo.ran && sudo.exitCode === 0) {
+  const attempts = Array.isArray(priv.attempts) ? priv.attempts : []
+  if (attempts.length === 0) {
+    return fail(8, 'agent privileges', 'The agent host sent no answer to the checks.')
+  }
+  const escalation = attempts.find((a) => a && a.succeeded === true)
+  if (escalation) {
     return fail(
       8,
-      'agent sudo',
-      `${config.user} may run commands with sudo. The agent user must have no sudo rights at all: remove its rules (sudo -l -U ${config.user} lists them).`,
+      'agent privileges',
+      `${config.user} can run \`${String(escalation.what)}\`. The agent user must not be able to become any other user: remove its sudo and doas rules (\`sudo -l -U ${config.user}\` lists sudo's).`,
     )
   }
-  pass(8, 'agent sudo', 'none')
+  if (priv.crontab === 'allowed') {
+    warn(
+      8,
+      'scheduled jobs',
+      `${config.user} may schedule its own jobs with crontab, which would run after Clawboo stops its agents. Add ${config.user} to /etc/cron.deny and /etc/at.deny.`,
+    )
+  }
+  pass(8, 'agent privileges', 'none')
 
   // 9. Runtime binaries: shown, not refused.
   if (deps.runtimeBinaries.length > 0) {
@@ -414,6 +455,13 @@ function errMsg(err: unknown): string {
  */
 export function narrowDataDir(dataDir: string, files: string[]): string[] {
   const changed: string[] = []
+  // A first start: the folder is made here, private from the start, so the
+  // checks below have the folder the server is about to use.
+  try {
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+  } catch {
+    /* reported by the ownership check that follows */
+  }
   const narrow = (p: string, mode: number): void => {
     try {
       const st = fs.lstatSync(p)
@@ -464,4 +512,40 @@ export function unsafeParents(dataDir: string): string[] {
     }
   }
   return out
+}
+
+/**
+ * The data folder, by its real path, must be a folder owned by this process's
+ * user with mode 0700, and no private file may have a second hard link (a name
+ * elsewhere, possibly in agent space, for the same file). Null when it holds.
+ */
+export function dataDirProblem(dataDir: string, files: string[]): string | null {
+  const me = typeof process.getuid === 'function' ? process.getuid() : -1
+  let real: string
+  try {
+    real = fs.realpathSync(dataDir)
+  } catch {
+    return `The data folder ${dataDir} cannot be read.`
+  }
+  const st = fs.statSync(real)
+  if (!st.isDirectory()) return `The data folder ${dataDir} is not a folder.`
+  if (st.uid !== me) {
+    return `The data folder ${real} belongs to uid ${st.uid}, not the user Clawboo runs as. Give it to that user (\`chown -R\`).`
+  }
+  if ((st.mode & 0o777) !== 0o700) {
+    return `The data folder ${real} has mode ${(st.mode & 0o777).toString(8)}. Run \`chmod 700 ${real}\`.`
+  }
+  for (const f of files) {
+    let fst: fs.Stats
+    try {
+      fst = fs.lstatSync(f)
+    } catch {
+      continue
+    }
+    if (fst.isSymbolicLink()) return `${f} is a link. Clawboo's private files must be plain files.`
+    if (fst.isFile() && fst.nlink > 1) {
+      return `${f} has another hard link somewhere, which could give another user its contents. Find it with \`find / -samefile ${f}\`, remove it, and start Clawboo again.`
+    }
+  }
+  return null
 }

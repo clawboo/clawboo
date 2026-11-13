@@ -32,19 +32,26 @@
 // ("refresh_token_reused"). And a managed run FAILS FAST with an explicit error
 // when no usable credential is provisioned — never an unauthenticated request.
 
-import { copyFile, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 
 import type { CodexDriver, CodexNativeEvent } from '@clawboo/adapter-codex'
 import { buildAttachConfig, mcpHttpUrl, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/mcp'
 import type { StartOpts } from '@clawboo/executor'
 
+import { agentMkdir, agentReadFile, agentStat, agentWriteFile } from '../agentUser/agentFs'
+import { isAgentUserMode } from '../agentUser/config'
 import { resolveRuntimeBin } from '../platform'
-import { userCodexAuthPath } from './codexAuth'
+import {
+  agentCodexHome,
+  hasUsableCodexAuthIn,
+  usableCodexAuthBody,
+  userCodexAuthPath,
+} from './codexAuth'
 import { createCodexAppServerDriver, type CodexAppServerDeps } from './codexAppServerDriver'
 import { backendErrorText, codexFailureMessage } from './codexFailure'
+import { makeThrowawayRuntimeHome } from './identityHome'
 import { isContextOverflowMessage, rateLimitMessage } from './native/providers/types'
 import { createSpawnDriver } from './subprocess'
 import type { RuntimeRunContext } from './types'
@@ -73,16 +80,7 @@ function codexConfigToml(baseUrl: string, scope?: AttachScope): string {
  */
 export function hasUsableCodexAuth(authPath: string): boolean {
   try {
-    const parsed = JSON.parse(readFileSync(authPath, 'utf8')) as {
-      tokens?: { access_token?: unknown; refresh_token?: unknown } | null
-      OPENAI_API_KEY?: unknown
-    }
-    const t = parsed.tokens
-    if (t && typeof t === 'object') {
-      if (typeof t.access_token === 'string' && t.access_token.length > 0) return true
-      if (typeof t.refresh_token === 'string' && t.refresh_token.length > 0) return true
-    }
-    return typeof parsed.OPENAI_API_KEY === 'string' && parsed.OPENAI_API_KEY.length > 0
+    return usableCodexAuthBody(readFileSync(authPath, 'utf8'))
   } catch {
     return false
   }
@@ -100,17 +98,45 @@ export function hasUsableCodexAuth(authPath: string): boolean {
  */
 export async function seedCodexAuth(codexHome: string): Promise<void> {
   try {
-    const src = userCodexAuthPath()
-    if (!existsSync(src)) return
+    const src = await codexSeedSource()
+    if (!src) return
+    // The run home is agent space, so its side is read and written through the
+    // agent-space file verbs.
     const dst = path.join(codexHome, 'auth.json')
-    if (existsSync(dst) && hasUsableCodexAuth(dst)) {
-      const [srcStat, dstStat] = await Promise.all([stat(src), stat(dst)])
-      if (srcStat.mtimeMs <= dstStat.mtimeMs) return // managed token is as fresh or fresher
+    const dstStat = await agentStat(dst)
+    if (dstStat && (await hasUsableCodexAuthIn(codexHome))) {
+      if (src.mtimeMs <= dstStat.mtimeMs) return // managed token is as fresh or fresher
     }
-    await copyFile(src, dst)
+    // Owner-only, as the CLI keeps its own copy.
+    await agentWriteFile(dst, src.data, { mode: 0o600 })
   } catch {
     /* best-effort — auth seeding is not fatal to constructing the plan */
   }
+}
+
+/**
+ * Where a run home's login is copied from: the person's own `codex login`. With
+ * agents on their own OS user, only that user's own login (the in-app sign-in,
+ * run as the agent user, made it), read through the agent host. The person's own
+ * is never copied into agent space then: any agent could read its refresh token
+ * there, which is what running agents as their own user keeps from them. Null
+ * when there is none.
+ */
+async function codexSeedSource(): Promise<{ data: Buffer; mtimeMs: number } | null> {
+  const agentHome = agentCodexHome()
+  if (agentHome) {
+    const file = path.join(agentHome, 'auth.json')
+    const st = await agentStat(file)
+    const data = st?.type === 'file' ? await agentReadFile(file) : null
+    if (st && data && usableCodexAuthBody(data.toString('utf8'))) {
+      return { data, mtimeMs: st.mtimeMs }
+    }
+    return null
+  }
+  const src = userCodexAuthPath()
+  if (!existsSync(src)) return null
+  const [st, data] = await Promise.all([stat(src), readFile(src)])
+  return { data, mtimeMs: st.mtimeMs }
 }
 
 /**
@@ -278,36 +304,46 @@ export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNa
   return []
 }
 
+/** Why a Codex run with agents on their own OS user has no credential. */
+export const CODEX_AGENT_SIGN_IN_MESSAGE =
+  'Sign in to Codex for the agents from the Runtimes page (agents run as their own user, ' +
+  'so your own Codex login is not shared with them), or add an OpenAI API key.'
+
 /**
  * Make the run's CODEX_HOME ready: the MANAGED (persistent, per-identity) home
  * when the caller resolved one from the adapter's integration plan, the legacy
  * throwaway mkdtemp otherwise. Seeds the user's `codex login` and writes the MCP
  * config. Throws (the run then fails with that message) when a managed home has
- * no usable credential.
+ * no usable credential, or any home does with agents on their own OS user.
  */
 export async function prepareCodexHome(
   ctx: RuntimeRunContext,
 ): Promise<{ codexHome: string; managed: boolean }> {
   const managed = Boolean(ctx.homeDir)
-  const codexHome = ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-codex-home-')))
-  if (managed) await mkdir(codexHome, { recursive: true, mode: 0o700 })
+  // The home is agent space: made and written through the agent-space file
+  // verbs, which the agent host performs when agents run as their own OS user.
+  const codexHome = ctx.homeDir ?? (await makeThrowawayRuntimeHome('clawboo-codex-home-'))
+  if (managed) await agentMkdir(codexHome, { mode: 0o700 })
+  const hasApiKey = Object.keys(ctx.apiKeyEnv ?? {}).length > 0
+  const agentMode = isAgentUserMode()
   // Seed the user's ChatGPT-OAuth login so the run authenticates with their
   // `codex login` account. Freshness-aware for a managed home (see seedCodexAuth);
-  // never writes back to ~/.codex.
-  await seedCodexAuth(codexHome)
+  // never writes back to ~/.codex. With agents on their own OS user a run with an
+  // API key gets no login copied in at all: one less credential in agent space.
+  if (!(agentMode && hasApiKey)) await seedCodexAuth(codexHome)
   // FAIL-FAST guard (managed homes only — the Paperclip codex-local pattern):
   // no usable provisioned credential + no API key env ⇒ an explicit error the
   // engine can reflect, never an unauthenticated request with a cryptic 401.
   // The throwaway path keeps its historic lenient behavior (codex surfaces its
-  // own auth error), so nothing else changes shape.
-  if (
-    managed &&
-    !hasUsableCodexAuth(path.join(codexHome, 'auth.json')) &&
-    Object.keys(ctx.apiKeyEnv ?? {}).length === 0
-  ) {
+  // own auth error), so nothing else changes shape. With agents on their own OS
+  // user every run is guarded, and the message says why the person's own login
+  // does not count.
+  if ((managed || agentMode) && !hasApiKey && !(await hasUsableCodexAuthIn(codexHome))) {
     throw new Error(
-      `no Codex credentials provisioned for managed home ${codexHome} — ` +
-        `run \`${terminalCommandName('codex')} login\` in your terminal, then retry`,
+      agentMode
+        ? CODEX_AGENT_SIGN_IN_MESSAGE
+        : `no Codex credentials provisioned for managed home ${codexHome} — ` +
+            `run \`${terminalCommandName('codex')} login\` in your terminal, then retry`,
     )
   }
   if (ctx.mcpBaseUrl) {
@@ -318,10 +354,11 @@ export async function prepareCodexHome(
       transport: 'http',
       httpBaseUrl: ctx.mcpBaseUrl,
     })
-    await writeFile(
+    // Owner-only: the URLs carry the run's signed attach scope.
+    await agentWriteFile(
       path.join(codexHome, 'config.toml'),
       codexConfigToml(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined),
-      'utf8',
+      { mode: 0o600 },
     )
   }
   return { codexHome, managed }

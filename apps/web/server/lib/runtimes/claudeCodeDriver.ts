@@ -20,12 +20,10 @@
 // it and reports ONE terminal for the whole run. Verified against the SDK 0.3.268
 // types and its bundled CLI.
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 
-import { mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
-import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import type { ClaudeCodeDriver, ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
@@ -36,7 +34,8 @@ import { redactValue } from '../redact'
 import { agentSdkEntryFile, ownAgentSdkDir, resolveAgentSdkBinary } from './agentSdkBinary'
 import { buildChildEnv } from './childEnv'
 import { CLAUDE_CODE_ISOLATION_ENV, claudeCodeIsolation } from './claudeCodeIsolation'
-import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
+import { isAgentUserMode, spawnAgentProcess } from './spawner'
+import { registerRuntimeChild, unregisterRuntimeChild, writeRunContextFile } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
 // Minimal structural shapes for the SDK objects we read — deliberately decoupled
@@ -123,7 +122,8 @@ export interface SdkSpawnOptions {
  * The options are the SDK's own default spawn's: piped stdio, its forwarded
  * abort signal, a hidden window, and NOT detached. The CLI stays in the
  * engine's process group, as before, so a signal to that group (a terminal
- * Ctrl-C, the desktop app stopping the engine) still reaches it.
+ * Ctrl-C, the desktop app stopping the engine) still reaches it. With agents on
+ * their own OS user the agent host starts it as that user instead.
  *
  * The SDK reads only stdin and stdout from a process it did not spawn, so stderr
  * is drained here into `onStderr`. Left unread, the pipe would fill and stall
@@ -133,11 +133,15 @@ export function spawnTrackedClaudeProcess(
   opts: SdkSpawnOptions,
   onStderr: (chunk: string) => void,
 ): ChildProcess {
-  const child = spawn(opts.command, opts.args, {
-    cwd: opts.cwd,
+  const child = spawnAgentProcess({
+    kind: 'runtime',
+    command: opts.command,
+    args: opts.args,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
     env: opts.env,
     ...(opts.signal ? { signal: opts.signal } : {}),
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: false,
     windowsHide: true,
   })
   registerRuntimeChild(child)
@@ -583,7 +587,15 @@ export function createClaudeCodeDriver(
       // merged in so API-key auth is deterministic. The spawned CLI keeps PATH / HOME /
       // etc. When the key is absent (Keychain/OAuth user), apiKeyEnv is empty and the
       // SDK falls back to the logged-in CLI's own auth (not env-based).
-      options['env'] = { ...buildChildEnv(ctx.apiKeyEnv ?? {}), ...CLAUDE_CODE_ISOLATION_ENV }
+      options['env'] = {
+        ...buildChildEnv(ctx.apiKeyEnv ?? {}),
+        ...CLAUDE_CODE_ISOLATION_ENV,
+        // With agents on their own OS user, a run with a per-agent home keeps the
+        // CLI's config and sessions there, in agent space, as Codex and Hermes
+        // keep theirs. Without the setting the CLI uses the operator's own, as
+        // before.
+        ...(ctx.homeDir && isAgentUserMode() ? { CLAUDE_CONFIG_DIR: ctx.homeDir } : {}),
+      }
       // Spawn the CLI ourselves so its pid is known: shutdown reaps it, and the
       // next boot reaps it if this engine dies without one.
       options['spawnClaudeCodeProcess'] = (spawnOpts: SdkSpawnOptions) =>
@@ -677,9 +689,7 @@ export function createClaudeCodeDriver(
     },
     async writeContext(key: string, value: string): Promise<void> {
       if (!ctx.cwd) return
-      const target = path.join(ctx.cwd, key)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, value, 'utf8')
+      await writeRunContextFile(ctx.cwd, key, value)
     },
     steer(text: string, opts?: SteerOptions): Promise<boolean> {
       if (!started || finished || input.closed) return Promise.resolve(false)

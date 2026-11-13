@@ -1224,6 +1224,10 @@ export async function boardWorkspaceProvisionPOST(req: Request, res: Response): 
         })
         return
       }
+      if (result.reason === 'not_supported') {
+        res.status(422).json({ ok: false, error: 'not_supported', message: result.why })
+        return
+      }
       res.status(422).json({ ok: false, error: 'no_isolation', isolation: result.isolation })
       return
     }

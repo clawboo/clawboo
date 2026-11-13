@@ -2,53 +2,58 @@
 // CLI (not a libgit2 binding): the CLI is the most robust path for mutable
 // worktree operations and matches what every shipping worktree harness does.
 // All spawns use `windowsHide` + a timeout so a hung git can't wedge the
-// single-threaded server event loop.
+// single-threaded server event loop. Every git call and file read here goes
+// through the installed `WorktreeIo` (see `io.ts`).
 
-import { execFile } from 'node:child_process'
-import { readdir, realpath } from 'node:fs/promises'
-import { promisify } from 'node:util'
 import path from 'node:path'
 
 import { setAwakeTimeout, type AwakeTimer } from '@clawboo/executor'
 
+import { getWorktreeIo } from './io'
 import type { DiffStat } from './types'
-
-const execFileAsync = promisify(execFile)
-
-const GIT_TIMEOUT_MS = 60_000
-const GIT_MAX_BUFFER = 32 * 1024 * 1024 // 32 MiB — large diffs/log output
 
 export class GitError extends Error {
   readonly stderr: string
   readonly args: string[]
-  constructor(message: string, args: string[], stderr: string) {
+  /** git's exit code, or null when it did not exit on its own (it could not
+   *  start, was stopped, or its output was too large). */
+  readonly exitCode: number | null
+  constructor(message: string, args: string[], stderr: string, exitCode: number | null = null) {
     super(message)
     this.name = 'GitError'
     this.args = args
     this.stderr = stderr
+    this.exitCode = exitCode
   }
+}
+
+const COMMIT_ID_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
+
+/** True for a full commit id (SHA-1 or SHA-256), the only shape a commit id
+ *  read from git output may have before it is passed back to git. A checkout or
+ *  repository an agent controls can make git print anything (a signature check
+ *  through a `gpg.program` of its own, say), and a line such as `--output=<file>`
+ *  passed on as an argument would be an option, not a commit. */
+export function isCommitId(s: string): boolean {
+  return COMMIT_ID_RE.test(s)
+}
+
+/** `out` trimmed, or a thrown `GitError` unless it is a full commit id. */
+function commitIdFrom(out: string, args: string[]): string {
+  const sha = out.trim()
+  if (!isCommitId(sha)) {
+    throw new GitError(`git ${args.join(' ')} did not print a commit id`, args, '')
+  }
+  return sha
 }
 
 /**
  * Run `git <args>` in `cwd`. Throws `GitError` (with stderr) on non-zero exit.
- * `windowsHide` suppresses the console popup on Windows; the timeout bounds a
- * hung invocation so it can't block the event loop forever.
+ * Run by the installed `WorktreeIo`: here (`windowsHide`, a timeout that bounds
+ * a hung invocation), or where the caller sends git in that folder.
  */
 export async function execGit(cwd: string, args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync('git', args, {
-      cwd,
-      timeout: GIT_TIMEOUT_MS,
-      windowsHide: true,
-      maxBuffer: GIT_MAX_BUFFER,
-      encoding: 'utf8',
-    })
-    return stdout
-  } catch (err) {
-    const e = err as { stderr?: string; stdout?: string; message?: string }
-    const stderr = (e.stderr ?? e.stdout ?? e.message ?? '').toString()
-    throw new GitError(`git ${args.join(' ')} failed: ${stderr.trim()}`, args, stderr)
-  }
+  return getWorktreeIo().git(cwd, args)
 }
 
 /** True when `dir` is inside a git work tree. */
@@ -73,12 +78,14 @@ export async function isBareRepo(dir: string): Promise<boolean> {
 
 /** Resolve a ref (default HEAD) to a full commit SHA. */
 export async function resolveBaseSha(repoPath: string, ref = 'HEAD'): Promise<string> {
-  return (await execGit(repoPath, ['rev-parse', ref])).trim()
+  const args = ['rev-parse', ref]
+  return commitIdFrom(await execGit(repoPath, args), args)
 }
 
 /** Resolve the current HEAD commit of a worktree. */
 export async function revParse(dir: string, ref = 'HEAD'): Promise<string> {
-  return (await execGit(dir, ['rev-parse', ref])).trim()
+  const args = ['rev-parse', ref]
+  return commitIdFrom(await execGit(dir, args), args)
 }
 
 /** True when a local branch exists. */
@@ -166,14 +173,19 @@ export async function addWorktree(repoPath: string, args: string[]): Promise<voi
   await execGit(repoPath, ['worktree', 'add', ...args])
 }
 
-/** Force-remove a worktree registration (no error if absent), then prune. */
-export async function removeWorktree(repoPath: string, worktreePath: string): Promise<void> {
+/** Force-remove a worktree registration (no error if absent), then prune,
+ *  unless `prune` is false. */
+export async function removeWorktree(
+  repoPath: string,
+  worktreePath: string,
+  opts: { prune?: boolean } = {},
+): Promise<void> {
   try {
     await execGit(repoPath, ['worktree', 'remove', '--force', worktreePath])
   } catch {
     // The worktree may already be gone / never registered — prune cleans it up.
   }
-  await pruneWorktrees(repoPath)
+  if (opts.prune !== false) await pruneWorktrees(repoPath)
 }
 
 export async function pruneWorktrees(repoPath: string): Promise<void> {
@@ -210,7 +222,7 @@ export async function listWorktreePaths(repoPath: string): Promise<string[]> {
  */
 async function canonical(p: string): Promise<string> {
   try {
-    return await realpath(p)
+    return await getWorktreeIo().realpath(p)
   } catch {
     return path.resolve(p)
   }
@@ -294,9 +306,9 @@ export async function checkoutContents(
   repoPath: string,
   worktreePath: string,
 ): Promise<CheckoutContents> {
-  let entries: string[]
+  let entries: unknown[]
   try {
-    entries = await readdir(worktreePath)
+    entries = await getWorktreeIo().readdir(worktreePath)
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable'
   }
@@ -311,8 +323,15 @@ export async function checkoutContents(
     // task's repository, whose objects live there, and a loss for anything else.
     if ((await commonGitDir(worktreePath)) !== (await commonGitDir(repoPath))) return 'foreign'
     // `--ignored`, because `.env` files and the like never show in a plain
-    // status and would go with the folder.
-    const status = await execGit(worktreePath, ['status', '--porcelain', '--ignored'])
+    // status and would go with the folder. `--untracked-files=normal` is git's
+    // default, said outright: a `status.showUntrackedFiles=no` in the checkout's
+    // config would otherwise hide every untracked file from this check.
+    const status = await execGit(worktreePath, [
+      'status',
+      '--porcelain',
+      '--ignored',
+      '--untracked-files=normal',
+    ])
     const lines = status.split('\n').filter((l) => l.trim().length > 0)
     if (lines.some((l) => !l.startsWith('!!'))) return 'dirty'
     if (!(await headIsOnABranch(worktreePath))) return 'unbranched'
@@ -324,7 +343,9 @@ export async function checkoutContents(
 
 /** True when the working tree has any uncommitted change (incl. untracked). */
 export async function hasUncommittedChanges(worktreePath: string): Promise<boolean> {
-  const out = await execGit(worktreePath, ['status', '--porcelain'])
+  // The default untracked mode, said outright so the checkout's config cannot
+  // turn it off (see `checkoutContents`).
+  const out = await execGit(worktreePath, ['status', '--porcelain', '--untracked-files=normal'])
   return out.trim().length > 0
 }
 
@@ -354,6 +375,10 @@ export async function findScaffoldCommit(
   taskId: string,
 ): Promise<string> {
   const out = await execGit(repoPath, [
+    // A repository's own config can turn on signature checks, whose output
+    // (from a `gpg.program` of its choosing) comes before the commit id.
+    '-c',
+    'log.showSignature=false',
     'log',
     '--format=%H',
     '--grep',
@@ -364,6 +389,9 @@ export async function findScaffoldCommit(
   ])
   const sha = out.trim().split('\n')[0] ?? ''
   if (!sha) throw new GitError(`no scaffold commit on ${branch}`, ['log'], '')
+  // It goes back to git as an argument (the diff's baseline), so nothing but a
+  // commit id will do.
+  if (!isCommitId(sha)) throw new GitError(`no scaffold commit id on ${branch}`, ['log'], '')
   return sha
 }
 
@@ -402,7 +430,8 @@ export async function diffStat(
     insertions += add === '-' ? 0 : Number(add) || 0
     deletions += del === '-' ? 0 : Number(del) || 0
   }
-  const status = await execGit(worktreePath, ['status', '--porcelain'])
+  // The default untracked mode, said outright (see `checkoutContents`).
+  const status = await execGit(worktreePath, ['status', '--porcelain', '--untracked-files=normal'])
   const excludeSet = new Set(exclude)
   const untracked = status
     .split('\n')

@@ -33,7 +33,11 @@ import {
   invalidateCodexModelsCache,
   peekCodexModels,
 } from '../lib/runtimes/codexModels'
-import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import {
+  agentHermesCodexAuthSeen,
+  isHermesCodexAuthPresent,
+  refreshAgentHermesCodexAuth,
+} from '../lib/runtimes/hermesAuth'
 import { resolveRuntimeInstall, resolveSdkBinary } from '../lib/runtimes/installProbe'
 import { runNpmRuntimeInstall } from '../lib/runtimes/npmRuntimeInstall'
 import {
@@ -124,7 +128,10 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   // no vault slot). A presence-only shape check (sync read of a tiny file, the
   // detectAuthProfileKeys precedent; values never leave the helper) folds into
   // hasCredential so a subscription-only hermes reads Connected/ready.
-  const hermesCodexAuth = id === 'hermes' && installed ? isHermesCodexAuthPresent() : false
+  // With agents on their own OS user, a sign-in made from this page is the agent
+  // user's own (`refreshAgentHermesCodexAuth` keeps that answer for this read).
+  const hermesCodexAuth =
+    id === 'hermes' && installed ? isHermesCodexAuthPresent() || agentHermesCodexAuthSeen() : false
   // Runtime-scoped resolution: an EXPLICITLY disconnected runtime resolves no key,
   // so neither the ambient process-env / OpenClaw-.env fallbacks nor a vault key
   // it shares with another runtime keep the card reading "Connected".
@@ -194,6 +201,7 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
         const adapter = adapterFactoryFor(id)({})
         // Probe the codex login state async (off the event-loop hot path).
         const oauthLoggedIn = id === 'codex' ? await isCodexLoggedIn() : false
+        if (id === 'hermes') await refreshAgentHermesCodexAuth()
         // A signed-in Codex CLI too old for the plan's current models fails every
         // run. Read from the cached model probe, never awaited: the first request
         // starts it and a later one reports it.

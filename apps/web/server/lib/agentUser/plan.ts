@@ -102,8 +102,10 @@ export function agentUserPlan(p: PlanInput): string {
       'sudo chmod 440 /private/etc/sudoers.d/clawboo',
       'sudo visudo -c',
       '',
-      `# 3. Keep ${u} out of your files (macOS homes are readable by the staff group).`,
+      `# 3. Keep ${u} out of your files (macOS homes are readable by the staff group),`,
+      `#    and give it no jobs of its own that would run after Clawboo stops its agents.`,
       `chmod 750 ${p.serverHome}`,
+      `echo ${u} | sudo tee -a /usr/lib/cron/cron.deny /usr/lib/cron/at.deny >/dev/null`,
     )
   } else {
     lines.push(
@@ -117,8 +119,10 @@ export function agentUserPlan(p: PlanInput): string {
       'sudo chmod 440 /etc/sudoers.d/clawboo',
       'sudo visudo -cf /etc/sudoers.d/clawboo',
       '',
-      `# 3. Per-user limits, so a runaway agent cannot exhaust the computer.`,
+      `# 3. Per-user limits, so a runaway agent cannot exhaust the computer, and no`,
+      `#    jobs of its own that would run after Clawboo stops its agents.`,
       `printf '%s\\n' '${u} hard nproc 4096' '${u} hard nofile 65536' | sudo tee /etc/security/limits.d/clawboo-agent.conf >/dev/null`,
+      `echo ${u} | sudo tee -a /etc/cron.deny /etc/at.deny >/dev/null`,
       '',
       `# 4. Keep ${u} out of your files.`,
       `chmod 750 ${p.serverHome}`,

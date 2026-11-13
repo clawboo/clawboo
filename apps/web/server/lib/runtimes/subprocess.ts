@@ -10,15 +10,15 @@
 // spawn without a shell — by routing it through cmd.exe with every argument
 // quoted + caret-escaped (so cmd metacharacters in the prompt are inert).
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
+import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 
+import { agentMkdir, agentStat, agentWriteFile } from '../agentUser/agentFs'
 import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree, killProcessTreeByPid } from './killTree'
 import { recordRuntimePid } from './runtimePidFile'
-import { isHostedAgentProcess, type AgentProcess } from './spawner'
+import { isHostedAgentProcess, spawnAgentProcess, type AgentProcess } from './spawner'
 import { resolveWindowsSpawn, type WinSpawnPlan } from './winSpawn'
 
 /**
@@ -308,6 +308,23 @@ export interface SpawnDriver<N> {
   relaunch(next: () => Promise<ResolvedSpawn>): Promise<boolean>
 }
 
+/**
+ * Every driver's `writeContext`: a file the run reads, under its working folder.
+ *
+ * That folder is agent space (a task worktree or a team folder), so the write
+ * goes through the agent-space file verbs: with agents on their own OS user the
+ * agent host makes it, and either way a link planted at the file's path is
+ * replaced, never followed. A missing parent is made; one that exists keeps its
+ * mode (a team folder is owner-only). The modes are what a plain write gets
+ * under the usual umask.
+ */
+export async function writeRunContextFile(cwd: string, key: string, value: string): Promise<void> {
+  const target = path.join(cwd, key)
+  const dir = path.dirname(target)
+  if (!(await agentStat(dir))) await agentMkdir(dir, { mode: 0o755 })
+  await agentWriteFile(target, value, { mode: 0o644 })
+}
+
 /** How long a relaunch waits for the stopped process to exit. `killProcessTree`
  *  escalates to SIGKILL after 3s, so this only bounds a process that survives even
  *  that. */
@@ -361,7 +378,8 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
   }
 
   /** Plan + spawn one process for the current generation. */
-  function launch(resolved: ResolvedSpawn): void {
+  /** Start the process; false when the run ended without one. */
+  function launch(resolved: ResolvedSpawn): boolean {
     let plan: WinSpawnPlan
     try {
       // Planning REFUSES a Windows shim path that cmd.exe would substitute before
@@ -370,29 +388,40 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       plan = resolveWindowsSpawn({ command: resolved.command, args: resolved.args })
     } catch (err) {
       endWith(null, null, err instanceof Error ? err.message : String(err))
-      return
+      return false
     }
     const gen = generation
     cwd = resolved.cwd ?? null
     stdoutAll = ''
     stderrAll = ''
-    const spawned = spawn(plan.command, plan.args, {
-      cwd: resolved.cwd ?? undefined,
-      // Scrub clawboo's own server secrets before the untrusted agent subprocess
-      // inherits them; the runtime's granted keys (resolved.env) are merged on top.
-      env: buildChildEnv(resolved.env),
-      // NEVER shell:true — an untrusted prompt is passed as argv. The Windows
-      // .cmd/.bat case is handled by resolveWindowsSpawn (cmd.exe + escaping).
-      shell: false,
-      windowsHide: isWindows,
-      // POSIX: become a process-group leader so abort() can SIGTERM the whole
-      // tree (the CLI may spawn grandchildren). We never unref — the run is
-      // tracked + killed explicitly. (No effect on Windows; tree-kill there is
-      // taskkill /T.)
-      detached: !isWindows,
-      ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    let spawned: ChildProcess
+    try {
+      // NEVER a shell (the seam has none): an untrusted prompt is passed as argv.
+      // The Windows .cmd/.bat case is handled by resolveWindowsSpawn (cmd.exe +
+      // escaping). With agents on their own OS user the agent host starts it.
+      spawned = spawnAgentProcess({
+        kind: 'runtime',
+        command: plan.command,
+        args: plan.args,
+        ...(resolved.cwd != null ? { cwd: resolved.cwd } : {}),
+        // Scrub clawboo's own server secrets before the untrusted agent subprocess
+        // inherits them; the runtime's granted keys (resolved.env) are merged on top.
+        env: buildChildEnv(resolved.env),
+        windowsHide: isWindows,
+        // POSIX: become a process-group leader so abort() can SIGTERM the whole
+        // tree (the CLI may spawn grandchildren). We never unref: the run is
+        // tracked + killed explicitly. (No effect on Windows; tree-kill there is
+        // taskkill /T.)
+        detached: !isWindows,
+        ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch (err) {
+      // A start refused before any process exists (the agent host is down)
+      // ends the run the way a failed resolve does, so it still gets a terminal.
+      endWith(null, null, err instanceof Error ? err.message : String(err))
+      return false
+    }
     child = spawned
     // Track it so a server shutdown can reap it instead of orphaning it.
     // (Deregistered in the 'close' handler below.)
@@ -443,6 +472,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       const stoppedBy = abortRequested ? (signal ?? 'SIGTERM') : signal
       for (const ev of cfg.onClose(code, stoppedBy, stdoutAll, stderrAll)) push(ev)
     })
+    return true
   }
 
   return {
@@ -483,9 +513,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
 
     async writeContext(key: string, value: string): Promise<void> {
       if (!cwd) return
-      const target = path.join(cwd, key)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, value, 'utf8')
+      await writeRunContextFile(cwd, key, value)
     },
 
     async relaunch(next: () => Promise<ResolvedSpawn>): Promise<boolean> {
@@ -519,8 +547,8 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
         endWith(null, 'SIGTERM', stderrAll)
         return false
       }
-      launch(resolved)
-      return true
+      // A process that could not start ended the run: the relaunch did not happen.
+      return launch(resolved)
     },
   }
 }

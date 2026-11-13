@@ -62,6 +62,19 @@ export {
 // Moving a checkout with git's links fixed (the work folder migration).
 export { relocateWorktree, isCheckoutAt, type RelocateResult } from './relocate'
 
+// Where this package's git calls and file operations run: here by default, or
+// wherever an installed io sends them.
+export {
+  setWorktreeIo,
+  getWorktreeIo,
+  localWorktreeIo,
+  GIT_TIMEOUT_MS,
+  GIT_MAX_BUFFER,
+  type WorktreeIo,
+  type WorktreeDirEntry,
+  type WorktreeStat,
+} from './io'
+
 // Task files read and written without following a link the agent put there.
 export {
   readTaskFile,
@@ -78,6 +91,7 @@ export {
   // The raw git seam, for server-side read paths (workspace status / per-file
   // diff) that need invocations these helpers do not wrap.
   execGit,
+  isCommitId,
   isGitRepo,
   resolveBaseSha,
   revParse,

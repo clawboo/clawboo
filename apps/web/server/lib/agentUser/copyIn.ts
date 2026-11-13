@@ -1,6 +1,8 @@
 // Turning agent isolation on copies the agents' existing state into agent
 // space once (design 4.10): each runtime home (Hermes memory and skills, Codex
-// sessions) and each team folder. The originals stay where they are, so turning
+// sessions) and each team folder. Not Clawboo Native's homes, and no sign-in
+// or key file (`auth.json`, `.env`): before isolation those were copies of the
+// operator's own logins and saved keys. The originals stay where they are, so turning
 // the setting off again is the rollback.
 //
 // The server reads the originals as itself: they sit in its own folders. Those
@@ -42,6 +44,9 @@ export interface CopyInReport {
 
 const STAGING = '.clawboo-copying'
 
+/** Files never carried into agent space (see `copyTree`). */
+const NEVER_COPIED = new Set(['auth.json', '.env'])
+
 /** Every copy to make: runtime homes and team folders, by their folder names. */
 export function planCopyIn(opts: {
   dataDir: string
@@ -63,6 +68,9 @@ export function planCopyIn(opts: {
   }
   const runtimes = path.join(opts.dataDir, 'runtimes')
   for (const rt of realDirs(runtimes)) {
+    // Clawboo Native's homes hold its conversation history, which stays in the
+    // data folder: its model loop is server code and no agent process uses it.
+    if (rt === 'native') continue
     for (const agent of realDirs(path.join(runtimes, rt))) {
       items.push({
         from: path.join(runtimes, rt, agent),
@@ -122,6 +130,13 @@ async function copyTree(src: string, dst: string, report: CopyInReport): Promise
     if (e.isDirectory()) {
       await copyTree(from, to, report)
     } else if (e.isFile()) {
+      // Sign-ins and keys the server put in a home before isolation came from
+      // the operator's own logins and vault; the agent user gets its own.
+      // Runs write the files they need again.
+      if (NEVER_COPIED.has(name)) {
+        report.skipped.push({ path: from, reason: 'a sign-in or key file, written again per run' })
+        continue
+      }
       if (e.nlink > 1) {
         report.skipped.push({
           path: from,

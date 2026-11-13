@@ -9,14 +9,14 @@
 // plugins, MCP servers and hooks its home configures before any agent command,
 // and seeds the home with files, so the person's own home is never used.
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
-import os from 'node:os'
+import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 
 import { isWindows, resolveRuntimeBin } from '../platform'
 import { buildChildEnv } from './childEnv'
+import { makeThrowawayRuntimeHome, removeThrowawayRuntimeHome } from './identityHome'
 import { killProcessTree } from './killTree'
+import { spawnAgentProcess } from './spawner'
 import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
 import { resolveWindowsSpawn } from './winSpawn'
 
@@ -48,14 +48,14 @@ export async function runHermesAcpCheck(opts: HermesAcpCheckOptions = {}): Promi
   if (!command) return null
   let home: string
   try {
-    home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-acp-check-'))
+    home = await makeThrowawayRuntimeHome('clawboo-hermes-acp-check-')
   } catch {
     return null
   }
   try {
     return await checkIn(command, opts, home)
   } finally {
-    await rm(home, { recursive: true, force: true }).catch(() => undefined)
+    await removeThrowawayRuntimeHome(home).catch(() => undefined)
   }
 }
 
@@ -72,12 +72,16 @@ function checkIn(
         args: [...(opts.args ?? []), 'acp', '--check'],
       })
       const binDir = path.isAbsolute(command) ? path.dirname(command) : null
-      child = spawn(plan.command, plan.args, {
+      // As the agent user when agents run as their own OS user, like the runs it
+      // decides for; a refused start (the agent host is down) tells nothing.
+      child = spawnAgentProcess({
+        kind: 'probe',
+        command: plan.command,
+        args: plan.args,
         env: buildChildEnv({
           HERMES_HOME: home,
           ...(binDir ? { PATH: `${binDir}${path.delimiter}${process.env['PATH'] ?? ''}` } : {}),
         }),
-        shell: false,
         windowsHide: isWindows,
         // A process-group leader, so a timeout's reap takes any grandchildren too.
         detached: !isWindows,

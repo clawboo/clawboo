@@ -55,6 +55,8 @@ import {
 import { assertSafeTaskId, execGit, KeyedMutex, type DiffStat } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { agentMkdir, agentStat, agentWriteFile } from '../agentUser/agentFs'
+import { isAgentUserMode } from '../agentUser/config'
 import { auditBudgetCrossing } from '../budgetAudit'
 import { reserveRunBudget } from '../budgetHold'
 import { reviewerBudgetRefusal } from '../budgetPreflight'
@@ -73,7 +75,7 @@ import {
 } from '../runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, teamWorkdirFor, teamWorkdirPath } from '../runtimes/teamWorkdir'
 import { recordRunTokens } from '../runTokenLog'
-import { reviewsRoot } from '../workDir'
+import { reviewsRoot, workDirInUse } from '../workDir'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from '../verification'
 import { readTeamVerifyCommand } from '../verification/teamVerifyCommand'
 import { parseCodingModelConfig } from './serverDeliver'
@@ -95,12 +97,32 @@ const HISTORY_EXCLUDES = [
 const historyMutex = new KeyedMutex()
 
 /**
- * `<clawboo home>/team-folder-history/<team>.git`. Pinned under that root with
+ * Where the histories are. In the data folder normally. With agents running as
+ * their own OS user the team folder is the agent user's, so the server cannot
+ * read it and must not run git in it as itself: the history moves under the work
+ * folder, where git runs as the agent user, and the reviewer's checkout is made
+ * from it there. Agents can reach it then, as they could reach the data folder
+ * when they ran as the server's user; what a check measures is unchanged.
+ */
+function historyRoot(): string {
+  return isAgentUserMode()
+    ? path.join(workDirInUse(), 'team-history')
+    : path.resolve(resolveClawbooDir(), 'team-folder-history')
+}
+
+/** Whether the team's history has been made. */
+async function historyExists(gitDir: string): Promise<boolean> {
+  if (!isAgentUserMode()) return existsSync(path.join(gitDir, 'HEAD'))
+  return (await agentStat(path.join(gitDir, 'HEAD')).catch(() => null)) !== null
+}
+
+/**
+ * `<history root>/<team>.git`. Pinned under that root with
  * the same single startsWith test as `teamWorkdirPath`, so no team id can name a
  * folder anywhere else.
  */
 export function teamFolderHistoryDir(teamId: string): string {
-  const root = path.resolve(resolveClawbooDir(), 'team-folder-history')
+  const root = historyRoot()
   const prefix = root.endsWith(path.sep) ? root : root + path.sep
   const dir = path.resolve(root, `${sanitizeAgentId(teamId)}.git`)
   if (!dir.startsWith(prefix)) {
@@ -113,7 +135,7 @@ export function teamFolderHistoryDir(teamId: string): string {
  *  it is not checked again. Best-effort; a team with no history has nothing to drop. */
 export async function dropTeamFolderBase(teamId: string, taskId: string): Promise<void> {
   const gitDir = teamFolderHistoryDir(teamId)
-  if (!existsSync(path.join(gitDir, 'HEAD'))) return
+  if (!(await historyExists(gitDir))) return
   const folder = teamWorkdirPath(teamId)
   await historyMutex
     .run(gitDir, () => historyGit(gitDir, folder, ['update-ref', '-d', baseRef(taskId)]))
@@ -127,11 +149,19 @@ function historyGit(gitDir: string, folder: string, args: string[]): Promise<str
 }
 
 async function ensureHistory(gitDir: string): Promise<void> {
-  if (existsSync(path.join(gitDir, 'HEAD'))) return
+  if (await historyExists(gitDir)) return
+  const excludes = `${HISTORY_EXCLUDES.join('\n')}\n`
+  if (isAgentUserMode()) {
+    await agentMkdir(gitDir)
+    await execGit(gitDir, ['init', '--bare', '-q'])
+    await agentMkdir(path.join(gitDir, 'info'))
+    await agentWriteFile(path.join(gitDir, 'info', 'exclude'), excludes, { mode: 0o644 })
+    return
+  }
   await mkdir(gitDir, { recursive: true, mode: 0o700 })
   await execGit(gitDir, ['init', '--bare', '-q'])
   await mkdir(path.join(gitDir, 'info'), { recursive: true })
-  await writeFile(path.join(gitDir, 'info', 'exclude'), `${HISTORY_EXCLUDES.join('\n')}\n`)
+  await writeFile(path.join(gitDir, 'info', 'exclude'), excludes)
 }
 
 /** How many times a snapshot tries `git add` before it gives up. */
@@ -257,7 +287,7 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
 
   /** The task's starting point, or '' when it has none. */
   const baseOf = async (folder: string, taskId: string): Promise<string> =>
-    existsSync(path.join(gitDir, 'HEAD'))
+    (await historyExists(gitDir))
       ? (
           await historyGit(gitDir, folder, [
             'rev-parse',

@@ -30,7 +30,9 @@ import {
 } from './fsOps'
 import {
   AGENT_HOST_PROTOCOL_VERSION,
+  MAX_LIST_REPLY_CHARS,
   MAX_READ_BYTES,
+  MAX_SEARCH_MATCHES,
   MAX_WRITE_BYTES,
   createLineSplitter,
   encodeFrame,
@@ -242,15 +244,17 @@ async function findInodes(
   root: string,
   targets: InodeRef[],
   maxEntries: number,
-): Promise<{ matches: string[]; truncated: boolean }> {
+): Promise<{ matches: string[]; privileged: string[]; truncated: boolean }> {
   const want = new Set(targets.map((t) => `${t.dev}:${t.ino}`))
   const matches: string[] = []
+  const privileged: string[] = []
+  const me = typeof process.getuid === 'function' ? BigInt(process.getuid()) : -1n
   let seen = 0
   let rootDev: bigint
   try {
     rootDev = (await fs.promises.lstat(root, { bigint: true })).dev
   } catch {
-    return { matches, truncated: false }
+    return { matches, privileged, truncated: false }
   }
   const stack = [root]
   while (stack.length > 0) {
@@ -262,7 +266,7 @@ async function findInodes(
       continue
     }
     for (const name of names) {
-      if (++seen > maxEntries) return { matches, truncated: true }
+      if (++seen > maxEntries) return { matches, privileged, truncated: true }
       if (seen % 512 === 0) await yieldNow()
       const p = path.join(dir, name)
       let st: fs.BigIntStats
@@ -273,12 +277,22 @@ async function findInodes(
       }
       if (st.isDirectory()) {
         if (st.dev === rootDev) stack.push(p)
-      } else if (st.isFile() && st.nlink > 1n && want.has(`${st.dev}:${st.ino}`)) {
-        matches.push(p)
+      } else if (st.isFile()) {
+        if (
+          st.nlink > 1n &&
+          want.has(`${st.dev}:${st.ino}`) &&
+          matches.length < MAX_SEARCH_MATCHES
+        ) {
+          matches.push(p)
+        }
+        // setuid (04000) or setgid (02000), owned by anyone but this user.
+        if ((st.mode & 0o6000n) !== 0n && st.uid !== me && privileged.length < MAX_SEARCH_MATCHES) {
+          privileged.push(p)
+        }
       }
     }
   }
-  return { matches, truncated: false }
+  return { matches, privileged, truncated: false }
 }
 
 /** A folder's entries without following links, without blocking the host. */
@@ -288,8 +302,13 @@ async function listDirAsync(
 ): Promise<{ entries: FsEntry[]; truncated: boolean }> {
   const names = (await fs.promises.readdir(dir)).sort()
   const entries: FsEntry[] = []
+  let chars = 0
   for (const [i, name] of names.slice(0, max).entries()) {
     if (i % 512 === 511) await yieldNow()
+    // The reply is one line; past the budget, stop and say so rather than send
+    // a line the server would refuse as too long (and drop the connection).
+    chars += name.length * 2 + 96
+    if (chars > MAX_LIST_REPLY_CHARS) return { entries, truncated: true }
     try {
       const st = await fs.promises.lstat(path.join(dir, name))
       entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
@@ -317,7 +336,10 @@ export function serveConnection(
   opts: { onEnd?: () => void } = {},
 ): HostConnection {
   const procs = new Map<string, Proc>()
+  /** Paused because the connection to the server is congested. */
   const paused = new Set<Readable>()
+  /** Paused because the server's buffer for that process is full. */
+  const heldByServer = new Set<Readable>()
   let ended = false
 
   const send = (frame: HostToServerFrame): void => {
@@ -337,7 +359,7 @@ export function serveConnection(
     }
   }
   output.on('drain', () => {
-    for (const s of paused) s.resume()
+    for (const s of paused) if (!heldByServer.has(s)) s.resume()
     paused.clear()
   })
   output.on('error', () => {
@@ -372,7 +394,9 @@ export function serveConnection(
     let child: ChildProcess
     try {
       child = spawn(String(f['command'] ?? ''), args, {
-        cwd: typeof f['cwd'] === 'string' && f['cwd'] ? f['cwd'] : undefined,
+        // An empty folder name fails the spawn, as it does for Node's own
+        // spawn: never the host's own folder instead.
+        cwd: typeof f['cwd'] === 'string' ? f['cwd'] : undefined,
         env: childEnvFor(env),
         stdio,
         detached: group,
@@ -411,6 +435,22 @@ export function serveConnection(
   }
 
   const handle = async (f: Record<string, unknown>): Promise<void> => {
+    if (f['t'] === 'pause' || f['t'] === 'resume') {
+      // The server's buffer for this process's output is full (or drained):
+      // hold the child, as a full pipe would.
+      const p = procs.get(String(f['proc'] ?? ''))
+      for (const st of [p?.child.stdout, p?.child.stderr]) {
+        if (!st) continue
+        if (f['t'] === 'pause') {
+          heldByServer.add(st)
+          st.pause()
+        } else {
+          heldByServer.delete(st)
+          if (!paused.has(st)) st.resume()
+        }
+      }
+      return
+    }
     if (f['t'] === 'in' || f['t'] === 'in-end') {
       const p = procs.get(String(f['proc'] ?? ''))
       if (!p?.child.stdin) return
@@ -483,9 +523,21 @@ export function serveConnection(
         case 'fs.rm':
           await fs.promises.rm(String(f['path']), { recursive: true, force: true })
           return reply(id, {})
+        case 'fs.rmdir': {
+          const target = String(f['path'])
+          // rmdir on a link fails with ENOTDIR on Linux and removes nothing; the
+          // lstat makes that the same everywhere.
+          if (!(await fs.promises.lstat(target)).isDirectory()) {
+            throw Object.assign(new Error(`${target} is not a folder`), { code: 'ENOTDIR' })
+          }
+          await fs.promises.rmdir(target)
+          return reply(id, {})
+        }
         case 'fs.rename':
           fs.renameSync(String(f['from']), String(f['to']))
           return reply(id, {})
+        case 'fs.realpath':
+          return reply(id, { path: fs.realpathSync.native(String(f['path'])) })
         case 'fs.stat': {
           try {
             return reply(id, { stat: toStat(fs.lstatSync(String(f['path']))) })
@@ -533,8 +585,29 @@ export function serveConnection(
           const max = Math.max(1, Math.min(Number(f['maxEntries']) || 200_000, 2_000_000))
           return reply(id, await findInodes(String(f['root']), targets, max))
         }
-        case 'sudoList':
-          return reply(id, await runCheck('sudo', ['-n', '-l']))
+        case 'privCheck': {
+          const server = String(f['serverUser'] ?? '')
+          const tries: [string, string, string[]][] = [
+            ['sudo', 'sudo', ['-n', 'true']],
+            ['doas', 'doas', ['-n', 'true']],
+          ]
+          if (/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(server)) {
+            tries.push([`sudo -u ${server}`, 'sudo', ['-n', '-u', server, 'true']])
+            tries.push([`doas -u ${server}`, 'doas', ['-n', '-u', server, 'true']])
+          }
+          const attempts = []
+          for (const [what, cmd, args] of tries) {
+            const r = await runCheck(cmd, args)
+            attempts.push({ what, ran: r.ran, succeeded: r.ran && r.exitCode === 0 })
+          }
+          const cron = await runCheck('crontab', ['-l'])
+          const crontab = !cron.ran
+            ? 'absent'
+            : /not allowed|permission denied|not permitted/i.test(cron.stderr + cron.stdout)
+              ? 'denied'
+              : 'allowed'
+          return reply(id, { attempts, crontab })
+        }
         case 'canExec': {
           const paths = Array.isArray(f['paths']) ? f['paths'].map(String) : []
           const results = paths.map((p) => {

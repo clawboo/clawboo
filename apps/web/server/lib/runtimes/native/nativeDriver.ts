@@ -7,8 +7,6 @@
 // inside the provider clients, so booting the server costs nothing.
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 
 import type { NativeDriver, NativeEvent } from '@clawboo/adapter-native'
 import { chatMessages, type ClawbooDb } from '@clawboo/db'
@@ -16,6 +14,7 @@ import type { StartOpts, SteerOptions } from '@clawboo/executor'
 import { isTeamSessionKey, nativeChatSessionKey } from '@clawboo/team-orchestration'
 
 import { getDb } from '../../db'
+import { writeRunContextFile } from '../subprocess'
 import type { RuntimeRunContext } from '../types'
 import { loadAgentConfigOrDefault } from './agentConfigStore'
 import { Conversation } from './conversation'
@@ -248,9 +247,7 @@ export function createNativeDriver(
     },
     async writeContext(key: string, value: string): Promise<void> {
       if (!ctx.cwd) return
-      const target = path.join(ctx.cwd, key)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, value, 'utf8')
+      await writeRunContextFile(ctx.cwd, key, value)
     },
   }
 }

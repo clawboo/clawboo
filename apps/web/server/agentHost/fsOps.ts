@@ -70,7 +70,7 @@ export function writeAtomic(p: string, data: Buffer, mode: number): void {
   try {
     let off = 0
     while (off < data.length) off += fs.writeSync(fd, data, off, data.length - off)
-    fs.fchmodSync(fd, mode)
+    chmodBestEffort(() => fs.fchmodSync(fd, mode))
   } catch (err) {
     fs.closeSync(fd)
     fs.rmSync(tmp, { force: true })
@@ -90,7 +90,20 @@ export function mkdirMode(p: string, mode: number): void {
   fs.mkdirSync(p, { recursive: true, mode })
   const st = fs.lstatSync(p)
   if (!st.isDirectory()) throw Object.assign(new Error(`${p} is not a folder`), { code: 'ENOTDIR' })
-  if ((st.mode & 0o777) !== mode) fs.chmodSync(p, mode)
+  if ((st.mode & 0o777) !== mode) chmodBestEffort(() => fs.chmodSync(p, mode))
+}
+
+/** Codes a filesystem with no POSIX modes (vfat, exfat, some network shares)
+ *  answers a mode change with. The file is still written; it keeps the mode the
+ *  filesystem gives it. */
+const NO_MODES = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EINVAL', 'ENOSYS'])
+
+export function chmodBestEffort(change: () => void): void {
+  try {
+    change()
+  } catch (err) {
+    if (!NO_MODES.has((err as { code?: string }).code ?? '')) throw err
+  }
 }
 
 /** A folder's entries, sorted by name, without following links. */

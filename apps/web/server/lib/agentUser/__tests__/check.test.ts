@@ -9,7 +9,13 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentHostClient } from '../client'
-import { narrowDataDir, runAgentUserCheck, unsafeParents, type CheckDeps } from '../check'
+import {
+  dataDirProblem,
+  narrowDataDir,
+  runAgentUserCheck,
+  unsafeParents,
+  type CheckDeps,
+} from '../check'
 import type { AgentUserConfig } from '../config'
 import { killAllAgentProcesses, socketProblem } from '../system'
 import { startInProcessHost, type InProcessHost } from './inProcessHost'
@@ -47,6 +53,7 @@ describe.runIf(posix)('agent isolation startup check', () => {
       runtimeBinaries: [],
       narrowDataDir: () => [],
       unsafeParents: () => [],
+      dataDirProblem: () => null,
       startHost: async () => {
         const h = startInProcessHost()
         hosts.push(h)
@@ -94,7 +101,7 @@ describe.runIf(posix)('agent isolation startup check', () => {
       expect(r.ok).toBe(true)
       expect(r.client).not.toBeNull()
       expect(r.workDir).toBe(path.join(dir, 'work'))
-      expect(r.steps.map((s) => s.step)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+      expect([...new Set(r.steps.map((s) => s.step))]).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
     },
   )
 
@@ -143,6 +150,25 @@ describe.runIf(posix)('agent isolation startup check', () => {
     expect(failed(r)?.message).toContain('sudo: a password is required')
     expect(failed(r)?.message).toContain('alice ALL=(clawboo-agent) NOPASSWD: ALL')
     expect(failed(r)?.message).toContain('Defaults:alice !requiretty')
+  })
+
+  it('prints the sudoers lines when sudo starts but exits before the host says hello', async () => {
+    const { startFakeHost } = await import('./inProcessHost')
+    const r = await runAgentUserCheck(
+      config,
+      {
+        ...deps,
+        startHost: async () => {
+          const fake = startFakeHost()
+          // sudo -n with no rule: it prints its complaint and exits.
+          setImmediate(() => fake.toServer.end())
+          return fake.client
+        },
+      },
+      { serverUser: 'alice' },
+    )
+    expect(failed(r)).toMatchObject({ step: 5 })
+    expect(failed(r)?.message).toContain('alice ALL=(clawboo-agent) NOPASSWD: ALL')
   })
 
   it('refuses a launcher socket with the wrong owner or mode before connecting', async () => {
@@ -266,15 +292,45 @@ describe.runIf(posix)('agent isolation startup check', () => {
     )
   })
 
-  it.runIf(me.uid !== 0)('refuses an agent user that may use sudo', async () => {
-    override('sudoList', {
-      ran: true,
-      exitCode: 0,
-      stdout: 'User clawboo-agent may run the following commands',
-      stderr: '',
+  it.runIf(me.uid !== 0)('refuses an agent user that can become another user', async () => {
+    override('privCheck', {
+      attempts: [
+        { what: 'sudo', ran: true, succeeded: false },
+        { what: 'sudo -u alice', ran: true, succeeded: true },
+      ],
+      crontab: 'denied',
+    })
+    const r = await runAgentUserCheck(config, deps, { serverUser: 'alice' })
+    expect(failed(r)).toMatchObject({ step: 8 })
+    expect(failed(r)?.message).toContain('can run `sudo -u alice`')
+  })
+
+  it.runIf(me.uid !== 0)('warns when the agent user may schedule its own jobs', async () => {
+    override('privCheck', {
+      attempts: [{ what: 'sudo', ran: true, succeeded: false }],
+      crontab: 'allowed',
     })
     const r = await runAgentUserCheck(config, deps)
-    expect(failed(r)).toMatchObject({ step: 8 })
+    expect(r.ok).toBe(true)
+    expect(r.steps.find((s) => s.name === 'scheduled jobs')?.message).toMatch(/cron\.deny/)
+  })
+
+  it.runIf(me.uid !== 0)(
+    'refuses a setuid file in the work folder that the agent user does not own',
+    async () => {
+      override('inodes', { matches: [], privileged: ['/work/teams/t/cat'], truncated: false })
+      const r = await runAgentUserCheck(config, deps)
+      expect(failed(r)).toMatchObject({ step: 7, name: 'setuid files' })
+      expect(failed(r)?.message).toMatch(/chmod ug-s/)
+    },
+  )
+
+  it('refuses a data folder that is not the server user alone', async () => {
+    const r = await runAgentUserCheck(config, {
+      ...deps,
+      dataDirProblem: () => 'The data folder /data has mode 755. Run `chmod 700 /data`.',
+    })
+    expect(failed(r)).toMatchObject({ step: 4 })
   })
 
   it.runIf(me.uid !== 0)(
@@ -345,6 +401,26 @@ describe.runIf(posix)('agent isolation system helpers', () => {
     )
     expect(fs.statSync(data).mode & 0o777).toBe(0o700)
     expect(fs.statSync(path.join(data, 'clawboo.db')).mode & 0o777).toBe(0o600)
+  })
+
+  it('makes a missing data folder, private, on a first start', () => {
+    const data = path.join(dir, 'fresh', '.clawboo')
+    narrowDataDir(data, [])
+    expect(fs.statSync(data).mode & 0o777).toBe(0o700)
+    expect(dataDirProblem(data, [])).toBeNull()
+  })
+
+  it('says why a data folder is not the server user alone', () => {
+    const data = path.join(dir, 'data')
+    fs.mkdirSync(data, { mode: 0o755 })
+    fs.chmodSync(data, 0o755)
+    expect(dataDirProblem(data, [])).toMatch(/mode 755/)
+    fs.chmodSync(data, 0o700)
+    expect(dataDirProblem(data, [])).toBeNull()
+    const db = path.join(data, 'clawboo.db')
+    fs.writeFileSync(db, 'db')
+    fs.linkSync(db, path.join(dir, 'elsewhere.db'))
+    expect(dataDirProblem(data, [db])).toMatch(/another hard link/)
   })
 
   it('names a parent folder others can write', () => {

@@ -64,13 +64,17 @@ server_home=$(home_of "$SERVER_USER")
 agent_home=$(home_of "$AGENT_USER")
 [ -n "$agent_home" ] || agent_home=/nonexistent
 
-# Run a command as <uid> <gid>, with no supplementary groups.
+# Run a command as <uid> <gid>, with no supplementary groups. With setpriv it
+# also gets no_new_privs, so neither it nor anything it starts can gain a user
+# through a setuid file (one an agent planted while it still ran as the server's
+# user, say). gosu cannot set that: run the container with
+# --security-opt no-new-privileges then.
 as_user() {
   uid=$1
   gid=$2
   shift 2
   if command -v setpriv >/dev/null 2>&1; then
-    exec_cmd="setpriv --reuid=$uid --regid=$gid --clear-groups --"
+    exec_cmd="setpriv --reuid=$uid --regid=$gid --clear-groups --no-new-privs --"
   elif command -v gosu >/dev/null 2>&1; then
     exec_cmd="gosu $uid:$gid"
   else
@@ -87,9 +91,26 @@ kill_agents() {
   done
 }
 
+# Nothing the agent user ran before this start survives it, and nothing it
+# runs can change the work folder while it is handed over below.
+kill_agents
+
+# The data folder and the work folder must be apart: handing the work folder
+# to the agent user would otherwise hand it the database and the vault too.
+inside() { # inside <a> <b>: a is b or sits in b
+  case "$1/" in "$2"/*) return 0 ;; *) return 1 ;; esac
+}
+if [ -n "${CLAWBOO_HOME:-}" ] && [ -n "${CLAWBOO_WORK_DIR:-}" ]; then
+  data_real=$(realpath -m "$CLAWBOO_HOME" 2>/dev/null || echo "$CLAWBOO_HOME")
+  work_real=$(realpath -m "$CLAWBOO_WORK_DIR" 2>/dev/null || echo "$CLAWBOO_WORK_DIR")
+  if inside "$data_real" "$work_real" || inside "$work_real" "$data_real"; then
+    die "CLAWBOO_HOME ($CLAWBOO_HOME) and CLAWBOO_WORK_DIR ($CLAWBOO_WORK_DIR) must not contain each other"
+  fi
+fi
+
 # 1. The run folder.
 mkdir -p "$RUN_DIR"
-chown "$agent_uid:$server_gid" "$RUN_DIR"
+chown -h "$agent_uid:$server_gid" "$RUN_DIR"
 chmod 0710 "$RUN_DIR"
 rm -f "$SOCK"
 
@@ -104,14 +125,15 @@ if [ -n "${CLAWBOO_WORK_DIR:-}" ]; then
     done
     find "$CLAWBOO_WORK_DIR" -xdev ! \( -type f -links +1 \) -exec chown -h "$agent_uid:$agent_gid" {} +
   fi
+  # On every start: no file in the work folder may make anyone another user.
+  # A setuid or setgid file an agent planted while it ran as the server's user
+  # would run as the server's user (or group) for an agent now.
+  find "$CLAWBOO_WORK_DIR" -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
   chmod 0700 "$CLAWBOO_WORK_DIR"
 fi
 if [ -n "${CLAWBOO_HOME:-}" ] && [ -d "$CLAWBOO_HOME" ]; then
   chmod 0700 "$CLAWBOO_HOME"
 fi
-
-# Nothing the agent user ran before this start survives it.
-kill_agents
 
 # 3. The agent host.
 as_user "$agent_uid" "$agent_gid" env -i \
@@ -131,7 +153,12 @@ while [ ! -S "$SOCK" ]; do
   fi
   sleep 0.1
 done
-chown "$agent_uid:$server_gid" "$SOCK"
+# Never through a link at the socket's name: the folder is the agent user's.
+[ -S "$SOCK" ] && [ ! -L "$SOCK" ] || {
+  kill_agents
+  die "$SOCK is not the agent host's socket"
+}
+chown -h "$agent_uid:$server_gid" "$SOCK"
 chmod 0660 "$SOCK"
 
 # 4. The server.

@@ -20,9 +20,7 @@
 // recorded as a `userMessage` item in the SAME turn, which then completed once);
 // the protocol types match the 0.136 CLI's `app-server generate-ts` output.
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
-import path from 'node:path'
+import type { ChildProcess } from 'node:child_process'
 
 import type { CodexDriver, CodexNativeEvent } from '@clawboo/adapter-codex'
 import type { StartOpts, Usage } from '@clawboo/executor'
@@ -31,7 +29,8 @@ import { isWindows, resolveRuntimeBin } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { codexErrorCode, codexFailureMessage } from './codexFailure'
 import { killProcessTree } from './killTree'
-import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
+import { spawnAgentProcess } from './spawner'
+import { registerRuntimeChild, unregisterRuntimeChild, writeRunContextFile } from './subprocess'
 import type { RuntimeRunContext } from './types'
 import { resolveWindowsSpawn } from './winSpawn'
 
@@ -374,10 +373,14 @@ export function createCodexAppServerDriver(
     }
     let spawned: ChildProcess
     try {
-      spawned = spawn(plan.command, plan.args, {
-        cwd: ctx.cwd ?? undefined,
+      // As the agent user when agents run as their own OS user; a refused start
+      // (the agent host is down) reads as "could not start" below.
+      spawned = spawnAgentProcess({
+        kind: 'runtime',
+        command: plan.command,
+        args: plan.args,
+        ...(ctx.cwd != null ? { cwd: ctx.cwd } : {}),
         env: buildChildEnv({ CODEX_HOME: codexHome, ...(ctx.apiKeyEnv ?? {}) }),
-        shell: false,
         windowsHide: isWindows,
         detached: !isWindows,
         ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
@@ -560,9 +563,7 @@ export function createCodexAppServerDriver(
     },
     async writeContext(key: string, value: string): Promise<void> {
       if (!ctx.cwd) return
-      const target = path.join(ctx.cwd, key)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, value, 'utf8')
+      await writeRunContextFile(ctx.cwd, key, value)
     },
     // `turn/steer` only ever joins the turn in progress (a finished one refuses
     // it), so a passive steer needs no different handling.

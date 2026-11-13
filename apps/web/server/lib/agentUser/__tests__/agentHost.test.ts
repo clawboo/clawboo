@@ -223,6 +223,63 @@ describe.runIf(posix)('agent host protocol', () => {
     expect(res.matches).toEqual([path.join(work, 'notes.txt')])
   })
 
+  it('stops a listing before its reply could exceed a frame, and says it was cut', async () => {
+    const big = path.join(dir, 'big')
+    fs.mkdirSync(big)
+    const stem = 'x'.repeat(180)
+    for (let i = 0; i < 22_000; i++) fs.writeFileSync(path.join(big, `${stem}${i}`), '')
+    const raw: string[] = []
+    h.toServer.on('data', (d: Buffer) => raw.push(d.toString()))
+    const res = await h.client.request(
+      { op: 'fs.list', path: big, max: 100_000 },
+      { timeoutMs: 120_000 },
+    )
+    expect(res.truncated).toBe(true)
+    expect(res.entries.length).toBeGreaterThan(0)
+    expect(res.entries.length).toBeLessThan(22_000)
+    expect(h.client.closed).toBeNull()
+  }, 120_000)
+
+  it('holds a process whose output the server is not reading, and lets it go when it is', async () => {
+    const frames: string[] = []
+    h.toHost.on('data', (d: Buffer) => frames.push(d.toString()))
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: [
+        '-c',
+        'while :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done',
+      ],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      group: true,
+    })
+    for (let i = 0; i < 200 && !frames.join('').includes('"t":"pause"'); i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(frames.join('')).toContain(`"t":"pause","proc":"${p.id}"`)
+    p.stdout?.resume()
+    for (let i = 0; i < 200 && !frames.join('').includes('"t":"resume"'); i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(frames.join('')).toContain(`"t":"resume","proc":"${p.id}"`)
+    p.killTree(100)
+    await closed(p)
+  })
+
+  it('tries every way to become another user, as the agent user', async () => {
+    const res = await h.client.request(
+      { op: 'privCheck', serverUser: 'nobody' },
+      { timeoutMs: 60_000 },
+    )
+    expect(res.attempts.map((a) => a.what)).toEqual([
+      'sudo',
+      'doas',
+      'sudo -u nobody',
+      'doas -u nobody',
+    ])
+    expect(['allowed', 'denied', 'absent']).toContain(res.crontab)
+  })
+
   it('refuses a signal it does not know', async () => {
     await expect(
       h.client.request({ op: 'signal', proc: 'p0', signal: 'SIGSTOP' }),

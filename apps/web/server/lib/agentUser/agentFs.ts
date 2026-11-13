@@ -32,7 +32,16 @@ export async function agentMkdir(dir: string, opts: { mode?: number } = {}): Pro
     if (!st.isDirectory()) {
       throw Object.assign(new Error(`${dir} is not a folder`), { code: 'ENOTDIR' })
     }
-    if ((st.mode & 0o777) !== mode) await fs.promises.chmod(dir, mode)
+    if ((st.mode & 0o777) !== mode) {
+      try {
+        await fs.promises.chmod(dir, mode)
+      } catch (err) {
+        // A filesystem without POSIX modes, or a folder of another user's: it
+        // is still there to use, as `mkdir` alone left it before.
+        if (!['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EINVAL', 'ENOSYS'].includes(code(err) ?? ''))
+          throw err
+      }
+    }
     return
   }
   await activeAgentHost().client.request({ op: 'fs.mkdir', path: dir, mode })
@@ -129,6 +138,22 @@ export async function agentRemove(target: string): Promise<void> {
   await activeAgentHost().client.request({ op: 'fs.rm', path: target }, { timeoutMs: 10 * 60_000 })
 }
 
+/**
+ * Remove a folder only when it is empty: anything in it, or a link at the path,
+ * fails and removes nothing. For folders that may hold a person's documents,
+ * where `agentRemove` would take everything.
+ */
+export async function agentRemoveEmptyDir(dir: string): Promise<void> {
+  if (!isAgentUserMode()) {
+    if (!(await fs.promises.lstat(dir)).isDirectory()) {
+      throw Object.assign(new Error(`${dir} is not a folder`), { code: 'ENOTDIR' })
+    }
+    await fs.promises.rmdir(dir)
+    return
+  }
+  await activeAgentHost().client.request({ op: 'fs.rmdir', path: dir })
+}
+
 /** Rename within agent space. */
 export async function agentRename(from: string, to: string): Promise<void> {
   if (!isAgentUserMode()) {
@@ -153,6 +178,20 @@ export async function agentStat(p: string): Promise<FsStat | null> {
   if (res.stat === null) return null
   if (!isFsStat(res.stat)) throw new AgentHostError('the agent host sent a malformed stat')
   return res.stat
+}
+
+/**
+ * `p` with every link in it resolved, as the agent user sees it. Rejects with
+ * `ENOENT` when nothing is there. What the host answers is data: an absolute
+ * path of bounded length, used for comparing paths, never as a place to write.
+ */
+export async function agentRealpath(p: string): Promise<string> {
+  if (!isAgentUserMode()) return fs.promises.realpath(p)
+  const res = await activeAgentHost().client.request({ op: 'fs.realpath', path: p })
+  if (typeof res.path !== 'string' || !path.isAbsolute(res.path) || res.path.length > 4096) {
+    throw new AgentHostError('the agent host sent a malformed path')
+  }
+  return res.path
 }
 
 /** A folder's entries, sorted by name, at most `max` (default 10,000). */
@@ -193,6 +232,8 @@ function isFsEntry(v: unknown): v is FsEntry {
     typeof o === 'object' &&
     typeof o['name'] === 'string' &&
     o['name'] !== '' &&
+    o['name'] !== '.' &&
+    o['name'] !== '..' &&
     !(o['name'] as string).includes('/') &&
     FS_TYPES.has(o['type'] as string) &&
     typeof o['size'] === 'number' &&

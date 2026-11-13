@@ -19,7 +19,6 @@
 // out-of-band would be invisible to the engine.
 
 import { randomUUID } from 'node:crypto'
-import { mkdir } from 'node:fs/promises'
 
 import { agedTaskPriority } from '@clawboo/board-core'
 import {
@@ -73,6 +72,7 @@ import {
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
+import { agentMkdir } from '../agentUser/agentFs'
 import {
   NO_BUDGET_HOLD,
   reserveRunBudget,
@@ -1564,8 +1564,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           let jobRan = false
           const runJob = async (): Promise<void> => {
             jobRan = true
+            // Agent space: the agent host makes it when agents run as their own OS user.
             if (capturedHomeDir)
-              await mkdir(capturedHomeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+              await agentMkdir(capturedHomeDir, { mode: 0o700 }).catch(() => undefined)
             // Gate 1: a Stop or a release may have landed while this waited on the
             // agent's lock.
             const before = refusal()

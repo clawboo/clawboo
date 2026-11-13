@@ -45,6 +45,7 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
+import { readBounded, writeAtomic } from '../../agentHost/fsOps'
 import { isAgentUserMode } from '../agentUser/config'
 
 let dashboardPort: number | null = null
@@ -153,6 +154,19 @@ function localFileArgs(spec: { flag: string; style: 'origins' | 'urlPatterns' } 
  *  starts at the same moment never reads half of it, and an edited file is
  *  put back before the next browser reads it. */
 function writeIfChanged(file: string, body: string): void {
+  if (isAgentUserMode()) {
+    // In a folder of this server's under the shared temporary folder: read
+    // without following a link, and written by a fresh random name (never one
+    // anybody could have planted a link at) with exactly 0644, whatever the
+    // umask, so the agent user can read it.
+    try {
+      if (readBounded(file, 64 * 1024).data.toString('utf8') === body) return
+    } catch {
+      // Not written yet, or not a plain file: write it.
+    }
+    writeAtomic(file, Buffer.from(body, 'utf8'), 0o644)
+    return
+  }
   try {
     if (fs.readFileSync(file, 'utf8') === body) return
   } catch {
@@ -193,6 +207,17 @@ function networkRuleArgs(
 
 let agentReadableGuardDir: string | null = null
 
+/** A real folder (not a link) this process's user owns, with mode 0755. */
+function isOwnSharedFolder(dir: string): boolean {
+  try {
+    const st = fs.lstatSync(dir)
+    const me = typeof process.getuid === 'function' ? process.getuid() : st.uid
+    return st.isDirectory() && st.uid === me && (st.mode & 0o777) === 0o755
+  } catch {
+    return false
+  }
+}
+
 /**
  * Where a browser's guard file goes. In the data folder normally. With agents
  * running as their own OS user the browser runs as that user, who cannot read
@@ -205,7 +230,11 @@ function guardFileFor(slug: string): string {
   if (!isAgentUserMode()) {
     return path.join(resolveClawbooDir(), 'browser-profiles', slug, 'guard.json')
   }
-  if (agentReadableGuardDir === null) {
+  // Checked on every use, not only when made: a temp cleaner can remove the
+  // folder while the server runs, and anybody, the agent user included, could
+  // then make one by the same name. Anything but this server's own 0755 folder
+  // is left alone and a fresh one made.
+  if (agentReadableGuardDir === null || !isOwnSharedFolder(agentReadableGuardDir)) {
     const dir = fs.mkdtempSync(
       path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'clawboo-guard-'),
     )

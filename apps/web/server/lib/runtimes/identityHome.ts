@@ -4,10 +4,14 @@
 // drivers receive the path through `RuntimeRunContext.homeDir` and never derive
 // it themselves.
 
+import { randomBytes } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
+import { agentMkdir, agentRemove } from '../agentUser/agentFs'
 import { isAgentUserMode } from '../agentUser/config'
 import { agentHomeDir } from '../agentUser/state'
 
@@ -68,4 +72,34 @@ export function runtimeIdentityHomePath(
     throw new Error(`runtime identity home escapes ${root}: ${home}`)
   }
   return home
+}
+
+/**
+ * A throwaway runtime home, for a run or a check that has no per-identity home
+ * (a reviewer run, the Hermes ACP check). `prefix` names it, as for mkdtemp.
+ *
+ * In the system temp folder normally. With agents on their own OS user, a folder
+ * the server made there is the server's (owner-only), so the runtime could not
+ * use it: the agent host makes it instead, under the agent user's runtime homes.
+ * A dot name there can never be a runtime's own folder (those are sanitized
+ * ids). Remove it with `removeThrowawayRuntimeHome`.
+ */
+export async function makeThrowawayRuntimeHome(prefix: string): Promise<string> {
+  if (!isAgentUserMode()) return mkdtemp(path.join(os.tmpdir(), prefix))
+  const dir = path.join(
+    runtimeHomesRoot(),
+    '.throwaway',
+    `${prefix}${randomBytes(8).toString('hex')}`,
+  )
+  await agentMkdir(dir, { mode: 0o700 })
+  return dir
+}
+
+/** Remove a home `makeThrowawayRuntimeHome` made. Missing is fine. */
+export async function removeThrowawayRuntimeHome(dir: string): Promise<void> {
+  if (!isAgentUserMode()) {
+    await rm(dir, { recursive: true, force: true })
+    return
+  }
+  await agentRemove(dir)
 }

@@ -2,10 +2,9 @@
 // plus age/count GC and the detached read-only reviewer. The task's worktree is
 // the durable system-of-record any runtime can pick up cold; the board is just
 // the dispatcher. All mutating ops are serialized per worktree path so concurrent
-// callers can't race on the same checkout.
+// callers can't race on the same checkout. Every git call and file operation
+// goes through the installed `WorktreeIo` (see `io.ts`).
 
-import { existsSync } from 'node:fs'
-import { mkdir, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -32,6 +31,7 @@ import {
   worktreeRegistration,
   worktreeRootFor,
 } from './git'
+import { getWorktreeIo } from './io'
 import { SOR_FILES, writeScaffold } from './scaffold'
 import type { CheckoutContents } from './git'
 import type { DiffStat, TaskScaffoldInput, Worktree } from './types'
@@ -142,6 +142,16 @@ async function isOnBranch(worktreePath: string, branch: string): Promise<boolean
   }
 }
 
+/** True when `a` is `b` or an ancestor of it. Any failure reads as false. */
+async function isAncestor(repoPath: string, a: string, b: string): Promise<boolean> {
+  try {
+    await execGit(repoPath, ['merge-base', '--is-ancestor', a, b])
+    return true
+  } catch {
+    return false
+  }
+}
+
 // The system-of-record bookkeeping files — excluded from the "did the agent do
 // work?" diff so a worktree that only carries its own scaffold/handoff is empty.
 const SOR_FILE_LIST = Object.values(SOR_FILES)
@@ -154,6 +164,7 @@ const DEFAULT_MAX_AGE_MS = 72 * 60 * 60 * 1000 // 72h (matches the field norm)
 const DEFAULT_MAX_COUNT = 25
 
 export interface ProvisionOptions {
+  /** The repository the checkout is a worktree of: a working one or a bare one. */
   repoPath: string
   taskId: string
   /** Branch point. A SHA is used as-is; otherwise `baseRef` (default HEAD) is resolved. */
@@ -163,6 +174,14 @@ export interface ProvisionOptions {
   rootDir?: string
   /** The system-of-record scaffold written + committed as the baseline. */
   scaffold: TaskScaffoldInput
+  /**
+   * Keep commits on an existing task branch. Absent or false, a branch that is
+   * not at the branch point is reset to it (`-B`), commits past it and all.
+   * True, it is reset only when that loses no commit (its tip is an ancestor of
+   * the branch point); otherwise this throws {@link UnsafeWorktreeError} and
+   * changes nothing.
+   */
+  keepBranchCommits?: boolean
 }
 
 /**
@@ -196,20 +215,31 @@ export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktre
   const branch = branchNameForTask(opts.taskId)
 
   return mutex.run(worktreePath, async () => {
-    if (!(await isGitRepo(opts.repoPath))) {
+    // A bare repository is a repository too: the copy of one that agents keep
+    // when they run as their own OS user is bare.
+    if (!(await isGitRepo(opts.repoPath)) && !(await isBareRepo(opts.repoPath))) {
       throw new Error(`not a git repository: ${opts.repoPath}`)
     }
     const branchPoint =
       opts.baseSha?.trim() || (await resolveBaseSha(opts.repoPath, opts.baseRef ?? 'HEAD'))
-    await mkdir(root, { recursive: true })
+    await getWorktreeIo().mkdir(root)
     // Checked once, before either pass below: after it, anything at the path is
     // this provision's own (a failed first attempt), safe for the retry to clear.
     await assertReplaceable(opts.repoPath, worktreePath)
+    if (opts.keepBranchCommits && (await branchExists(opts.repoPath, branch))) {
+      const tip = await revParse(opts.repoPath, branch)
+      if (tip !== branchPoint && !(await isAncestor(opts.repoPath, tip, branchPoint))) {
+        throw new UnsafeWorktreeError(
+          worktreePath,
+          `its branch ${branch} has commits after the commit the task would start from, which starting over would drop`,
+        )
+      }
+    }
 
     const attempt = async (): Promise<void> => {
       // Orphan-resilient pre-clean.
       await removeWorktree(opts.repoPath, worktreePath)
-      await rm(worktreePath, { recursive: true, force: true })
+      await getWorktreeIo().rm(worktreePath)
 
       if (await branchExists(opts.repoPath, branch)) {
         const existing = await revParse(opts.repoPath, branch)
@@ -224,7 +254,10 @@ export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktre
         await addWorktree(opts.repoPath, ['-b', branch, worktreePath, branchPoint])
       }
 
-      if (!existsSync(worktreePath) || !(await isWorktreeRegistered(opts.repoPath, worktreePath))) {
+      if (
+        !(await getWorktreeIo().exists(worktreePath)) ||
+        !(await isWorktreeRegistered(opts.repoPath, worktreePath))
+      ) {
         throw new Error('worktree add did not register the worktree')
       }
     }
@@ -234,7 +267,7 @@ export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktre
     } catch {
       // Comprehensive cleanup, then one retry.
       await removeWorktree(opts.repoPath, worktreePath)
-      await rm(worktreePath, { recursive: true, force: true })
+      await getWorktreeIo().rm(worktreePath)
       await pruneWorktrees(opts.repoPath)
       await attempt()
     }
@@ -309,7 +342,7 @@ export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
     const why = whyNotReplaceable(contents, opts.repoPath)
     if (why !== null) throw new UnsafeWorktreeError(worktreePath, why)
     await removeWorktree(opts.repoPath, worktreePath)
-    await rm(worktreePath, { recursive: true, force: true })
+    await getWorktreeIo().rm(worktreePath)
     // Attach the existing branch — no -b/-B, so prior commits are preserved.
     await addWorktree(opts.repoPath, [worktreePath, branch])
     const baseCommit = await findScaffoldCommit(opts.repoPath, branch, opts.taskId)
@@ -328,27 +361,37 @@ export interface PauseResult {
  * the worktree from the preserved branch. `rootDir` is the root, or the list of
  * roots, the record's checkout may be under; a record under none of them throws
  * before anything is touched.
+ *
+ * Only a checkout git lists can be committed. When git could not say whether it
+ * lists this one, this throws {@link RegistrationUnknownError}; when it does
+ * not list it, the folder is removed only if that loses nothing, and otherwise
+ * this throws {@link UnsafeWorktreeError}. Either way nothing was touched.
+ * `prune: false` leaves the repository's other registrations alone.
  */
 export async function pauseWorktree(
   repoPath: string,
   worktree: Worktree,
   rootDir?: WorktreeRoots,
+  opts: { prune?: boolean } = {},
 ): Promise<PauseResult> {
   const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
   return mutex.run(worktreePath, async () => {
+    const registration = await worktreeRegistration(repoPath, worktreePath)
+    if (registration === 'unknown') throw new RegistrationUnknownError(worktreePath)
+    if (registration === 'unregistered') {
+      const why = whyNotReplaceable(await checkoutContents(repoPath, worktreePath), repoPath)
+      if (why !== null) throw new UnsafeWorktreeError(worktreePath, why)
+    }
     let committed = false
-    if (
-      (await isWorktreeRegistered(repoPath, worktreePath)) &&
-      (await hasUncommittedChanges(worktreePath))
-    ) {
+    if (registration === 'registered' && (await hasUncommittedChanges(worktreePath))) {
       await commitAll(worktreePath, `clawboo: pause task ${worktree.taskId}`)
       committed = true
     }
     const head = committed
       ? await revParse(worktreePath, 'HEAD')
       : await revParse(repoPath, worktree.branch)
-    await removeWorktree(repoPath, worktreePath) // keep the branch
-    await rm(worktreePath, { recursive: true, force: true })
+    await removeWorktree(repoPath, worktreePath, opts) // keep the branch
+    await getWorktreeIo().rm(worktreePath)
     return { committed, head }
   })
 }
@@ -414,7 +457,7 @@ export async function completeWorktree(
     })
     if (!ds.dirty) {
       await removeWorktree(repoPath, worktreePath)
-      await rm(worktreePath, { recursive: true, force: true })
+      await getWorktreeIo().rm(worktreePath)
       await deleteBranch(repoPath, worktree.branch)
       return { dirty: false, diffStat: ds, cleaned: true }
     }
@@ -439,6 +482,9 @@ export interface GcOptions {
   owns?: (taskId: string, worktreePath: string) => boolean
   /** Injectable clock for tests. */
   now?: number
+  /** False: never `git worktree prune` the repository, only remove the
+   *  registrations of the checkouts reaped. Default true. */
+  prune?: boolean
 }
 
 export interface GcResult {
@@ -466,18 +512,18 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
 
   let entries
   try {
-    entries = await readdir(root, { withFileTypes: true })
+    entries = await getWorktreeIo().readdir(root)
   } catch {
     return result // no worktree root yet — nothing to GC
   }
 
   const infos = await Promise.all(
     entries
-      .filter((e) => e.isDirectory())
+      .filter((e) => e.isDirectory)
       .filter((e) => opts.owns?.(e.name, path.join(root, e.name)) ?? true)
       .map(async (e) => {
         const p = path.join(root, e.name)
-        const st = await stat(p)
+        const st = await getWorktreeIo().stat(p)
         return { taskId: e.name, worktreePath: p, mtimeMs: st.mtimeMs }
       }),
   )
@@ -532,8 +578,8 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
           const why = whyNotReplaceable(contents, opts.repoPath)
           if (why !== null) return skip(why)
         }
-        await removeWorktree(opts.repoPath, info.worktreePath) // keep the branch
-        await rm(info.worktreePath, { recursive: true, force: true })
+        await removeWorktree(opts.repoPath, info.worktreePath, { prune: opts.prune }) // keep the branch
+        await getWorktreeIo().rm(info.worktreePath)
         return true
       })
       if (reaped) result.reaped.push(info.taskId)
@@ -541,7 +587,7 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
       result.failed.push({ taskId: info.taskId, error: String(err) })
     }
   }
-  await pruneWorktrees(opts.repoPath)
+  if (opts.prune !== false) await pruneWorktrees(opts.repoPath)
   return result
 }
 
@@ -588,10 +634,13 @@ export async function provisionReviewWorktree(opts: ReviewOptions): Promise<Work
       throw new Error(`not a git repository: ${opts.repoPath}`)
     }
     await removeWorktree(opts.repoPath, worktreePath)
-    await rm(worktreePath, { recursive: true, force: true })
-    await mkdir(reviewRoot, { recursive: true })
+    await getWorktreeIo().rm(worktreePath)
+    await getWorktreeIo().mkdir(reviewRoot)
     await addWorktree(opts.repoPath, ['--detach', worktreePath, opts.sha])
-    if (!existsSync(worktreePath) || !(await isWorktreeRegistered(opts.repoPath, worktreePath))) {
+    if (
+      !(await getWorktreeIo().exists(worktreePath)) ||
+      !(await isWorktreeRegistered(opts.repoPath, worktreePath))
+    ) {
       throw new Error('review worktree add did not register the worktree')
     }
     return { taskId: '', worktreePath, branch: '', baseCommit: opts.sha, detached: true }
@@ -611,6 +660,6 @@ export async function removeReviewWorktree(
   const worktreePath = ownedReviewDir(reviewRootFor(repoPath, rootDir), worktree.worktreePath)
   await mutex.run(worktreePath, async () => {
     await removeWorktree(repoPath, worktreePath)
-    await rm(worktreePath, { recursive: true, force: true })
+    await getWorktreeIo().rm(worktreePath)
   })
 }

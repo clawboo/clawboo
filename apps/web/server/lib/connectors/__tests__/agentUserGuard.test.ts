@@ -3,7 +3,16 @@
 // the dashboard must not be writable by it.
 
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -46,6 +55,40 @@ describe.runIf(posix)('browser launch files under agent isolation', () => {
     expect(readFileSync(file!, 'utf8')).toContain('host-resolver-rules')
   })
 
+  it('makes a fresh guard folder when the one it made was removed and taken by someone else', () => {
+    vi.stubEnv('CLAWBOO_AGENT_USER', 'clawboo-agent')
+    const pw = { chromeSwitchArg: { flag: '--config', style: 'playwrightConfig' } as const }
+    const [, first] = browserGuardArgs('playwright', pw, 18790)
+    const dir = path.dirname(first!)
+    // A temp cleaner removed it, and another user made one by the same name,
+    // with a link where the next write would go.
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { mode: 0o777 })
+    chmodSync(dir, 0o777)
+    symlinkSync(path.join(root, 'data-file'), first!)
+    writeFileSync(path.join(root, 'data-file'), 'database')
+    const [, second] = browserGuardArgs('playwright', pw, 18791)
+    expect(path.dirname(second!)).not.toBe(dir)
+    expect(readFileSync(path.join(root, 'data-file'), 'utf8')).toBe('database')
+    expect(readFileSync(second!, 'utf8')).toContain('18791')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('writes the guard file readable by every user whatever the umask', () => {
+    vi.stubEnv('CLAWBOO_AGENT_USER', 'clawboo-agent')
+    const old = process.umask(0o077)
+    try {
+      const [, file] = browserGuardArgs(
+        'playwright',
+        { chromeSwitchArg: { flag: '--config', style: 'playwrightConfig' } },
+        18799,
+      )
+      expect(statSync(file!).mode & 0o777).toBe(0o644)
+    } finally {
+      process.umask(old)
+    }
+  })
+
   it("does not hand the agent user a bin from the server user's npm cache", () => {
     const spec = '@playwright/mcp@0.0.79'
     const dir = path.join(
@@ -68,10 +111,13 @@ describe.runIf(posix)('browser launch files under agent isolation', () => {
     writeFileSync(path.join(dir, '.package-lock.json'), '{}')
     const launch = { command: 'npx', args: ['-y', spec, '--headless'] }
 
-    // Off: the cached copy runs directly, as before.
+    // Started by the server: the cached copy runs directly, as before.
     expect(planConnectorSpawn(launch, { besideServer: [] }).command).toBe(process.execPath)
-    // On: npx, which the agent user runs with a cache of its own.
     vi.stubEnv('CLAWBOO_AGENT_USER', 'clawboo-agent')
-    expect(planConnectorSpawn(launch, { besideServer: [] }).command).not.toBe(process.execPath)
+    expect(planConnectorSpawn(launch, { besideServer: [] }).command).toBe(process.execPath)
+    // Started by the agent host: npx, which the agent user runs with a cache of its own.
+    expect(planConnectorSpawn(launch, { besideServer: [], asAgentUser: true }).command).not.toBe(
+      process.execPath,
+    )
   })
 })

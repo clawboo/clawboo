@@ -66,6 +66,18 @@ describe.runIf(posix)('copying agent state into agent space', () => {
       path.join(data, 'clawboo.db'),
       path.join(data, 'runtimes', 'hermes', 'a1', 'notes.db'),
     )
+    // A login copy and a key file the server put there before isolation, and a
+    // Native home (its conversation history stays in the data folder).
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'hermes', 'a1', 'auth.json'),
+      '{"tokens":"operator"}',
+    )
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'hermes', 'a1', '.env'),
+      'OPENAI_API_KEY=sk-operator',
+    )
+    fs.mkdirSync(path.join(data, 'runtimes', 'native', 'a1', 'sessions'), { recursive: true })
+    fs.writeFileSync(path.join(data, 'runtimes', 'native', 'a1', 'sessions', 's.json'), '[]')
     fs.mkdirSync(path.join(data, 'workspaces', 'team-1'), { recursive: true })
     fs.writeFileSync(path.join(data, 'workspaces', 'team-1', 'plan.md'), '# plan')
     fs.mkdirSync(work, { recursive: true })
@@ -98,7 +110,15 @@ describe.runIf(posix)('copying agent state into agent space', () => {
     expect(fs.statSync(path.join(home, 'run.sh')).mode & 0o777).toBe(0o700)
     expect(fs.existsSync(path.join(home, 'key.txt'))).toBe(false)
     expect(fs.existsSync(path.join(home, 'notes.db'))).toBe(false)
-    expect(report.skipped.map((s) => path.basename(s.path)).sort()).toEqual(['key.txt', 'notes.db'])
+    expect(report.skipped.map((s) => path.basename(s.path)).sort()).toEqual([
+      '.env',
+      'auth.json',
+      'key.txt',
+      'notes.db',
+    ])
+    expect(fs.existsSync(path.join(home, 'auth.json'))).toBe(false)
+    expect(fs.existsSync(path.join(home, '.env'))).toBe(false)
+    expect(fs.existsSync(path.join(agentRt, 'native'))).toBe(false)
     expect(fs.readFileSync(path.join(work, 'teams', 'team-1', 'plan.md'), 'utf8')).toBe('# plan')
     // Every write went through the host.
     expect(ops).toEqual(expect.arrayContaining(['fs.mkdir', 'fs.write', 'fs.rename']))

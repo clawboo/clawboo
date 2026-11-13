@@ -26,7 +26,6 @@ import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs
 import os from 'node:os'
 import path from 'node:path'
 
-import { isAgentUserMode } from '../agentUser/config'
 import { findExecutable, isWindows } from '../platform'
 import { resolveWindowsSpawn } from '../runtimes/winSpawn'
 
@@ -127,6 +126,8 @@ function pinnedNpxPackage(launch: { command: string; args: readonly string[] }):
 export interface SpawnPlanOptions {
   /** The `node_modules` folders beside the server, nearest first. Tests. */
   besideServer?: readonly string[]
+  /** The agent host starts it, as the agent user (see `agentUserConnectorStart`). */
+  asAgentUser?: boolean
 }
 
 /**
@@ -238,10 +239,11 @@ function installedBin(pkg: NpxPackage, opts: SpawnPlanOptions): string | null {
     const bin = binIn(dir, pkg)
     if (bin) return bin
   }
-  // npx's install folder is in this user's npm cache, under its home. With agents
-  // running as their own OS user the connector may start as that user, who
-  // cannot read it: npx, run as that user, then uses a cache of its own.
-  if (isAgentUserMode()) return null
+  // npx's install folder is in this user's npm cache, under its home. A
+  // connector the agent host starts runs as the agent user, who cannot read it:
+  // npx, run as that user, then uses a cache of its own. One the server starts
+  // keeps the fast path.
+  if (opts.asAgentUser) return null
   const cache = npmCacheDir()
   if (!cache) return null
   const nodeModules = path.join(npxInstallDir(cache, pkg.spec), 'node_modules')

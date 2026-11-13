@@ -16,13 +16,20 @@
 //   `$HERMES_HOME/config.yaml` (hermes 0.15.2 `tools/mcp_tool.py`
 //   `_load_mcp_config`); a `mcp.json` is read only inside plugin bundles.
 
-import { chmod, copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { readFile, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { hasUsableHermesCodexAuth, userHermesAuthPath } from './hermesAuth'
+import {
+  agentMkdir,
+  agentReadFile,
+  agentRemove,
+  agentStat,
+  agentWriteFile,
+} from '../agentUser/agentFs'
+import { isAgentUserMode } from '../agentUser/config'
+import { agentHermesHome, hasUsableHermesCodexAuthIn, userHermesAuthPath } from './hermesAuth'
 
 export function userHermesConfigPath(): string {
   return path.join(os.homedir(), '.hermes', 'config.yaml')
@@ -207,15 +214,32 @@ export function listHermesMcpServerNames(body: string): string[] {
  */
 export async function seedHermesAuth(home: string): Promise<boolean> {
   try {
-    const src = userHermesAuthPath()
-    if (!existsSync(src)) return false
-    const dst = path.join(home, 'auth.json')
-    if (existsSync(dst) && hasUsableHermesCodexAuth(dst)) {
-      const [srcStat, dstStat] = await Promise.all([stat(src), stat(dst)])
-      if (srcStat.mtimeMs <= dstStat.mtimeMs) return false // managed token is as fresh or fresher
+    // With agents on their own OS user, only that user's own login (the in-app
+    // sign-in, run as the agent user, made it), read through the agent host. The
+    // person's own store is never copied into agent space then: any agent could
+    // read its refresh token there. The managed home is agent space, so its side
+    // is read and written through the agent-space file verbs.
+    let src: { data: Buffer; mtimeMs: number }
+    const agentHome = agentHermesHome()
+    if (agentHome) {
+      if (!(await hasUsableHermesCodexAuthIn(agentHome))) return false
+      const file = path.join(agentHome, 'auth.json')
+      const [st, data] = await Promise.all([agentStat(file), agentReadFile(file)])
+      if (!st || !data) return false
+      src = { data, mtimeMs: st.mtimeMs }
+    } else {
+      const file = userHermesAuthPath()
+      if (!existsSync(file)) return false
+      const [st, data] = await Promise.all([stat(file), readFile(file)])
+      src = { data, mtimeMs: st.mtimeMs }
     }
-    await copyFile(src, dst)
-    await chmod(dst, 0o600).catch(() => undefined) // owner-only (no-op on Windows)
+    const dst = path.join(home, 'auth.json')
+    const dstStat = await agentStat(dst)
+    if (dstStat && (await hasUsableHermesCodexAuthIn(home))) {
+      if (src.mtimeMs <= dstStat.mtimeMs) return false // managed token is as fresh or fresher
+    }
+    // Owner-only (the mode is not applied on Windows).
+    await agentWriteFile(dst, src.data, { mode: 0o600 })
     return true
   } catch {
     return false // best-effort — auth seeding is not fatal to provisioning
@@ -224,22 +248,39 @@ export async function seedHermesAuth(home: string): Promise<boolean> {
 
 export async function provisionHermesHome(
   home: string,
-  opts: { mcpServers?: HermesMcpServers | null } = {},
+  opts: {
+    mcpServers?: HermesMcpServers | null
+    /** The run has a provider key: with agents on their own OS user, no login is
+     *  copied into its home then. */
+    hasApiKey?: boolean
+  } = {},
 ): Promise<ProvisionedHermesHome> {
-  const created = !existsSync(home)
-  await mkdir(home, { recursive: true, mode: 0o700 })
+  // The home is agent space: made, read and written through the agent-space
+  // file verbs, which the agent host performs when agents run as their own OS
+  // user (and which never follow a link the runtime left in it).
+  const created = (await agentStat(home)) === null
+  await agentMkdir(home, { mode: 0o700 })
 
   // Seed config.yaml from the user's real ~/.hermes while the home's copy holds
   // nothing but clawboo's own block (so a user who configures Hermes AFTER the
   // first provision is picked up on the next run). NEVER overwrite a seeded
   // copy, NEVER write back. `.env` is NOT seeded: provider keys ride the
   // spawned process env (the credential vault is the source of truth) and
-  // copying credentials would multiply secret surfaces on disk.
+  // copying credentials would multiply secret surfaces on disk. With agents on
+  // their own OS user the person's config is not seeded at all: it can hold a
+  // custom provider's `api_key`, which any agent could read in agent space.
+  const agentMode = isAgentUserMode()
   const configPath = path.join(home, 'config.yaml')
-  const onDisk = await readFile(configPath, 'utf8').catch(() => null)
+  const onDisk = await agentReadFile(configPath)
+    .then((buf) => (buf === null ? null : buf.toString('utf8')))
+    .catch(() => null)
   let base = onDisk ?? ''
   let seededConfig = false
-  if (mergeClawbooMcpServers(base, null).body === '' && existsSync(userHermesConfigPath())) {
+  if (
+    !agentMode &&
+    mergeClawbooMcpServers(base, null).body === '' &&
+    existsSync(userHermesConfigPath())
+  ) {
     try {
       base = await readFile(userHermesConfigPath(), 'utf8')
       seededConfig = true
@@ -253,28 +294,22 @@ export async function provisionHermesHome(
   // config never lingers.
   const merged = mergeClawbooMcpServers(base, opts.mcpServers ?? null)
   if (merged.body === '') {
-    if (onDisk !== null) await rm(configPath, { force: true })
+    if (onDisk !== null) await agentRemove(configPath)
   } else if (merged.body !== onDisk) {
-    // Write-then-rename, so a crash mid-write never truncates the seeded config.
-    const tmp = `${configPath}.clawboo-${process.pid}-${randomUUID()}.tmp`
-    try {
-      await writeFile(tmp, merged.body, { encoding: 'utf8', mode: 0o600 })
-      await rename(tmp, configPath)
-    } catch (err) {
-      // The temp copy holds the attach URLs: never leave it behind.
-      await rm(tmp, { force: true }).catch(() => undefined)
-      throw err
-    }
-    await chmod(configPath, 0o600).catch(() => undefined) // owner-only (no-op on Windows)
+    // Owner-only (it holds the attach URLs). Written by a fresh name renamed into
+    // place, so a crash mid-write never truncates the seeded config, and a failed
+    // write leaves no temp copy behind.
+    await agentWriteFile(configPath, merged.body, { mode: 0o600 })
   }
   // Earlier versions wrote the servers to `mcp.json`, which Hermes never reads.
-  await rm(path.join(home, 'mcp.json'), { force: true })
+  await agentRemove(path.join(home, 'mcp.json'))
 
   // Seed the ChatGPT-subscription auth (freshness-gated; see seedHermesAuth).
   // A managed home outside ~/.hermes is its OWN hermes root (no global-auth
   // fallback), so without this copy the user's `hermes login` is invisible to
-  // spawned runs and an `openai-codex` pick would fail auth.
-  const seededAuth = await seedHermesAuth(home)
+  // spawned runs and an `openai-codex` pick would fail auth. With agents on
+  // their own OS user a run with a provider key gets no login copied in.
+  const seededAuth = agentMode && opts.hasApiKey ? false : await seedHermesAuth(home)
 
   return { home, created, seededConfig, seededAuth, mcpAttached: merged.attached }
 }
@@ -288,7 +323,10 @@ export async function provisionHermesHome(
 export async function detectProvider(home: string): Promise<string | null> {
   let body: string
   try {
-    body = await readFile(path.join(home, 'config.yaml'), 'utf8')
+    // The home is agent space: read through the agent-space file verbs.
+    const buf = await agentReadFile(path.join(home, 'config.yaml'))
+    if (buf === null) return null
+    body = buf.toString('utf8')
   } catch {
     return null
   }

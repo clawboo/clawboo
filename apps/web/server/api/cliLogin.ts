@@ -21,18 +21,21 @@ import type { Request, Response } from 'express'
 
 import { resolveStateDir } from '@clawboo/config'
 
+import { isAgentUserMode } from '../lib/agentUser/config'
 import { isWindows } from '../lib/platform'
 import { detectOauthProfileProviders } from '../lib/openclawEnv'
 import {
   invalidateCodexAuthCache,
+  isAgentCodexLoggedIn,
   isCodexLoggedIn,
   userCodexAuthPath,
 } from '../lib/runtimes/codexAuth'
 import { hasUsableCodexAuth } from '../lib/runtimes/codexDriver'
 import { invalidateCodexModelsCache } from '../lib/runtimes/codexModels'
-import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import { isAgentHermesCodexAuthPresent, isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { buildCmdShimPlan, needsCmdShim } from '../lib/runtimes/winSpawn'
 import { killProcessTree } from '../lib/runtimes/killTree'
+import { spawnAgentProcess } from '../lib/runtimes/spawner'
 import {
   buildCliLoginPlan,
   createCliLoginParser,
@@ -53,16 +56,31 @@ function sendEvent(res: Response, data: Record<string, unknown>): void {
 const inFlight = new Map<CliLoginTool, ChildProcess>()
 
 /** Post-run truth: is the tool actually signed in now? Probes the real store
- *  (never trusts the exit code — e.g. `script` can exit 0 around a failed CLI). */
-async function probeLoggedIn(tool: CliLoginTool): Promise<boolean> {
+ *  (never trusts the exit code: `script`, for one, can exit 0 around a failed CLI).
+ *  `asAgent`: the login ran as the agent user, so its store is that user's. */
+async function probeLoggedIn(tool: CliLoginTool, asAgent: boolean): Promise<boolean> {
   if (tool === 'codex') {
     invalidateCodexAuthCache()
     // A new sign-in can be a different ChatGPT plan, with different models.
     invalidateCodexModelsCache()
-    return isCodexLoggedIn()
+    return asAgent ? isAgentCodexLoggedIn() : isCodexLoggedIn()
   }
-  if (tool === 'hermes') return isHermesCodexAuthPresent()
+  if (tool === 'hermes')
+    return asAgent ? isAgentHermesCodexAuthPresent() : isHermesCodexAuthPresent()
   return detectOauthProfileProviders(resolveStateDir()).has('openai-codex')
+}
+
+/** The store watcher's tick for a login run as the agent user: its store is in
+ *  agent space, read through the agent host, so the check is asynchronous. */
+async function agentWatchTickLoggedIn(tool: 'codex' | 'hermes'): Promise<boolean> {
+  if (tool === 'hermes') return isAgentHermesCodexAuthPresent()
+  const present = await isAgentCodexLoggedIn()
+  if (present) {
+    invalidateCodexAuthCache()
+    // A new sign-in can be a different ChatGPT plan, with different models.
+    invalidateCodexModelsCache()
+  }
+  return present
 }
 
 /** The cheap per-tick variant for the store watcher — pure file reads (the
@@ -124,11 +142,28 @@ export function cliLoginPOST(req: Request, res: Response): void {
   // spawn misparses a resolved bin path containing a space, e.g. a spaced
   // Windows username). Everything else is a plain argv spawn that no shell ever
   // parses.
+  //
+  // With agents on their own OS user, the Codex and Hermes sign-ins run as that
+  // user, so the login they make is the agents' own. OpenClaw's stays a server
+  // spawn: its agents run in its Gateway as the server's user (agent isolation
+  // does not cover OpenClaw), so its login must land in that user's store.
+  const asAgent = tool !== 'openclaw' && isAgentUserMode()
   let child: ChildProcess
   try {
-    if (needsCmdShim(plan.command)) {
+    if (tool === 'openclaw') {
+      // POSIX only (Windows has no plan for it): plain argv, never a shell.
+      child = spawn(plan.command, plan.args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: plan.env,
+        detached: !isWindows,
+        windowsHide: isWindows,
+      })
+    } else if (needsCmdShim(plan.command)) {
       const shim = buildCmdShimPlan({ command: plan.command, args: plan.args })
-      child = spawn(shim.command, shim.args, {
+      child = spawnAgentProcess({
+        kind: 'login',
+        command: shim.command,
+        args: shim.args,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: plan.env,
         // Windows: no process groups; taskkill /T inside killProcessTree covers
@@ -138,11 +173,13 @@ export function cliLoginPOST(req: Request, res: Response): void {
         windowsHide: true,
       })
     } else {
-      child = spawn(plan.command, plan.args, {
+      child = spawnAgentProcess({
+        kind: 'login',
+        command: plan.command,
+        args: plan.args,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: plan.env,
-        // Process-group leader so Cancel kills the whole tree (browser helpers,
-        // the script-wrapped openclaw).
+        // Process-group leader so Cancel kills the whole tree (browser helpers).
         detached: !isWindows,
         windowsHide: isWindows,
       })
@@ -195,18 +232,31 @@ export function cliLoginPOST(req: Request, res: Response): void {
   // open after a successful (slow) sign-in; the credential landing ON DISK is
   // the real completion signal. The moment it appears: report success, close
   // the stream, reap the child (its work is done).
-  const watcher = setInterval(() => {
-    if (res.writableEnded) {
-      clearInterval(watcher)
-      return
-    }
-    if (!watchTickLoggedIn(tool)) return
+  const signedIn = (): void => {
     clearInterval(watcher)
     clearTimeout(timeout)
     if (inFlight.get(tool) === child) inFlight.delete(tool)
     sendEvent(res, { type: 'complete', success: true, loggedIn: true })
     res.end()
     killProcessTree(child)
+  }
+  // A check of the agent user's store is asynchronous: one at a time.
+  let checking = false
+  const watcher = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(watcher)
+      return
+    }
+    if (!asAgent) {
+      if (watchTickLoggedIn(tool)) signedIn()
+      return
+    }
+    if (checking) return
+    checking = true
+    void agentWatchTickLoggedIn(tool).then((present) => {
+      checking = false
+      if (present && !res.writableEnded) signedIn()
+    })
   }, STORE_WATCH_INTERVAL_MS)
   watcher.unref()
 
@@ -227,7 +277,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
     if (res.writableEnded) return
     void (async () => {
       // The PROBE is the truth; the exit code only shapes the failure copy.
-      const loggedIn = await probeLoggedIn(tool).catch(() => false)
+      const loggedIn = await probeLoggedIn(tool, asAgent).catch(() => false)
       if (loggedIn) {
         sendEvent(res, { type: 'complete', success: true, loggedIn: true })
       } else if (signalName || code === 130) {

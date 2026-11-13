@@ -30,6 +30,7 @@ import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardCha
 import { legacyTeamFolderPath, teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { teamFolderHistoryDir } from '../lib/teamChat/teamWorkCheck'
 import { getRegistry } from '../lib/agentSource/registry'
+import { agentRemove } from '../lib/agentUser/agentFs'
 import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
 import { ensureNativeBooZero } from '../lib/teamChat/booZero'
 import {
@@ -392,11 +393,13 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
     // After the row, so a failed delete never loses the files, and only for a
     // team that existed: a made-up id must not remove another folder under
     // teams/ (the shared `_no-team` one, say). The path is pinned under the
-    // team folders' root, and `rm` removes a symlink, never its target.
+    // team folders' root, and the removal takes a symlink, never its target. The
+    // folder is agent space, so the agent-space file verbs remove it (the agent
+    // host, when agents run as their own OS user).
     let folderRemoved = false
     if (existed) {
       try {
-        await rm(teamWorkdirPath(teamId), { recursive: true, force: true })
+        await agentRemove(teamWorkdirPath(teamId))
         folderRemoved = true
       } catch {
         folderRemoved = false
@@ -410,9 +413,8 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
         /* nothing there */
       }
       // The history the work check keeps of that folder goes with it.
-      await rm(teamFolderHistoryDir(teamId), { recursive: true, force: true }).catch(
-        () => undefined,
-      )
+      // In the work folder with agents on their own OS user: removed through the host.
+      await agentRemove(teamFolderHistoryDir(teamId)).catch(() => undefined)
       appendAudit(db, {
         eventType: 'board',
         teamId,

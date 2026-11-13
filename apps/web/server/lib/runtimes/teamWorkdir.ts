@@ -23,6 +23,8 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
+import { agentMkdir } from '../agentUser/agentFs'
+import { isAgentUserMode } from '../agentUser/config'
 import { stayingTeamFolder } from '../workDirJournal'
 import { workDirInUse, workLayout } from '../workDir'
 import { sanitizeAgentId } from './identityHome'
@@ -113,7 +115,18 @@ export function taskRunWorkdirFor(
   return teamWorkdirPath(teamId || NO_TEAM_SEGMENT, env)
 }
 
-/** Create the folder owner-only (0700), parents included. Throws on failure. */
+/**
+ * Create the folder owner-only (0700), parents included. Throws on failure.
+ *
+ * With agents on their own OS user the folder is theirs, so the agent host makes
+ * it (the server cannot write there). Without the setting it stays the
+ * asynchronous mkdir it was: the agent-space verbs run synchronously then, and
+ * that moves when a chat turn's follow-up timers are set.
+ */
 export async function ensureTeamWorkdir(dir: string): Promise<void> {
+  if (isAgentUserMode()) {
+    await agentMkdir(dir, { mode: 0o700 })
+    return
+  }
   await mkdir(dir, { recursive: true, mode: 0o700 })
 }

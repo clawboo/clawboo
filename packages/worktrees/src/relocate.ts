@@ -11,12 +11,12 @@
 // which a rename breaks and repair does not fix. Either way the caller checks
 // the result with {@link isCheckoutAt} before it relies on it.
 // Renames only: a move across volumes fails with `EXDEV` and changes nothing.
+// Every git call and file operation goes through the installed `WorktreeIo`.
 
-import { existsSync } from 'node:fs'
-import { realpath, rename, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import { execGit, listWorktreePaths } from './git'
+import { getWorktreeIo } from './io'
 
 export type RelocateResult =
   | { ok: true; via: 'move' | 'repair' }
@@ -38,7 +38,7 @@ export async function relocateWorktree(
   } catch (moveErr) {
     // git renames first and fixes the links after, so a failure in between
     // leaves the folder at `to`; repair finishes that one too.
-    if (!existsSync(to)) {
+    if (!(await getWorktreeIo().exists(to))) {
       const submodules = await hasSubmodules(from)
       if (submodules !== false) {
         return {
@@ -50,7 +50,7 @@ export async function relocateWorktree(
         }
       }
       try {
-        await rename(from, to)
+        await getWorktreeIo().rename(from, to)
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code
         return {
@@ -83,7 +83,7 @@ async function hasSubmodules(dir: string): Promise<boolean | 'unknown'> {
     return 'unknown'
   }
   try {
-    return (await stat(path.join(gitDir, 'modules'))).isDirectory()
+    return (await getWorktreeIo().stat(path.join(gitDir, 'modules'))).isDirectory
   } catch {
     return false
   }
@@ -91,7 +91,7 @@ async function hasSubmodules(dir: string): Promise<boolean | 'unknown'> {
 
 async function canonical(p: string): Promise<string> {
   try {
-    return await realpath(p)
+    return await getWorktreeIo().realpath(p)
   } catch {
     return path.resolve(p)
   }
