@@ -785,14 +785,47 @@ describe.runIf(posix)('task checkouts under agent isolation', { timeout: 120_000
     // work folder, one that exists.
     const outside = path.join(dir, 'outside')
     git(mirrorPathFor(repo), 'worktree', 'add', '-q', outside, branch)
+    const inMirror = git(mirrorPathFor(repo), 'rev-parse', branch)
     localGit = []
 
-    // The rebuild then refuses, as the branch is checked out there.
-    expect(await resumeTaskWorkspace(taskId, { repoPath: repo })).toMatchObject({ ok: false })
-    // Nothing ran there as the server, and nothing in it moved.
+    // Resume refuses, and says where the branch is checked out.
+    const resumed = await resumeTaskWorkspace(taskId, { repoPath: repo })
+    expect(resumed).toMatchObject({ ok: false })
+    expect(JSON.stringify(resumed)).toContain('outside the work folder')
+    // Nothing ran there as the server, nothing in it moved, and the branch
+    // stays where that checkout has it.
     expect(localGit.filter((c) => c.cwd === outside)).toEqual([])
     expect(fs.existsSync(path.join(outside, 'theirs.txt'))).toBe(false)
-    expect(git(mirrorPathFor(repo), 'rev-parse', branch)).toBe(git(repo, 'rev-parse', branch))
+    expect(git(mirrorPathFor(repo), 'rev-parse', branch)).toBe(inMirror)
+  })
+
+  it("a completion blocks when the task's branch is gone from the agent's copy", async () => {
+    const taskId = newTask()
+    setSetting(getDb(), teamVerifyCommandSettingKey('team1'), JSON.stringify({ command: 'exit 0' }))
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { worktreePath: wt, branch } = prov.worktree
+    fs.writeFileSync(path.join(wt, 'feature.txt'), 'finished work\n')
+    // The mirror answers that the branch is not there when the export looks.
+    const target = `refs/heads/${branch}^{commit}`
+    const spawnSpy = vi.mocked(h.client.spawn)
+    const prev = spawnSpy.getMockImplementation()!
+    spawnSpy.mockImplementation((o) =>
+      prev(
+        o.args.includes('--quiet') && o.args.includes(target)
+          ? {
+              ...o,
+              args: o.args.map((a) => (a === target ? 'refs/heads/clawboo/gone^{commit}' : a)),
+            }
+          : o,
+      ),
+    )
+
+    const done = await actOnTaskWorkspace(taskId, 'complete')
+    expect(done.ok).toBe(true)
+    expect(getTask(getDb(), taskId)?.status).toBe('blocked')
+    const notes = getComments(getDb(), taskId).map((c) => c.body)
+    expect(notes.some((b) => b.includes('gone from the agent'))).toBe(true)
   })
 
   it('a completion whose run lost the task while its work was brought over leaves the task be', async () => {
