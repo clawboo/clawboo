@@ -148,12 +148,12 @@ Folders Clawboo creates here are `0755`, and each finished install is readable b
 
 Provider keys, connector secrets and sign-in tokens are encrypted with AES-256-GCM in `secrets/runtime-keys.json`, under the key in `secrets/master.key`. This protects a copied or synced vault file; a program running as your user can still read both files. To keep the key apart from the vault, set `CLAWBOO_SECRETS_MASTER_KEY`. If the key changes, saved keys read as missing and **System Health** reports that the master key changed.
 
-A runtime looks for its key in this order: the server's environment, the vault, then OpenClaw's `~/.openclaw/.env`. After you disconnect a runtime on its card in **Settings > Runtimes**, that runtime uses only the vault until you connect it again. That disconnect deletes every vault key the runtime reads, including keys other runtimes share; [Providers and runtimes](/using/providers-and-runtimes) covers connecting and disconnecting.
+A runtime looks for its key in this order: the server's environment, the vault, then OpenClaw's `~/.openclaw/.env`. After you disconnect a runtime on its card in **Settings > Runtimes**, that runtime uses only the vault until you connect it again. That disconnect deletes the vault keys only that runtime reads and keeps any key another runtime also reads; [Providers and runtimes](/using/providers-and-runtimes) covers connecting and disconnecting.
 
 <Warning>
 Keys you add in **Settings > Providers**, or in OpenClaw's setup inside Clawboo, are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's `auth-profiles.json`, because the OpenClaw Gateway reads them there. Disconnecting the provider removes both copies.
 
-Every OpenRouter, Anthropic or OpenAI key Hermes reads, from any of these places or from the server's environment, is also written in plain text to each Hermes agent's profile `.env` (`runtimes/hermes/_gateway/profiles/<profile>/.env`, mode `0600`), and stays there between runs for the jobs Hermes runs on its own. Disconnecting Hermes on its card removes those copies; any other change reaches a profile at that agent's next run or the next gateway start. Otherwise, a key you enter on a runtime's own card in **Settings > Runtimes** stays only in the encrypted vault.
+Every OpenRouter, Anthropic or OpenAI key Hermes reads, from any of these places or from the server's environment, is also written in plain text to each Hermes agent's profile `.env` (`runtimes/hermes/_gateway/profiles/<profile>/.env`, mode `0600`), and stays there between runs for the jobs Hermes runs on its own. A key you connect, replace or remove anywhere in Clawboo reaches every profile right away. Otherwise, a key you enter on a runtime's own card in **Settings > Runtimes** stays only in the encrypted vault.
 </Warning>
 
 ## OpenClaw files Clawboo reads and writes
