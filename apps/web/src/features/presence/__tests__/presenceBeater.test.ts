@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { INPUT_IDLE_MS, createPresenceBeater, type PresenceBeatBody } from '../presenceBeater'
+import {
+  GLANCE_MS,
+  INPUT_IDLE_MS,
+  createPresenceBeater,
+  type PresenceBeatBody,
+} from '../presenceBeater'
 
 function setup(start: { visible: boolean; focused: boolean }) {
   let t = 1_000_000
@@ -77,6 +82,39 @@ describe('presence beat', () => {
     expect(sent.map((b) => b.focused)).toEqual([true, false])
     beater.input()
     expect(sent.at(-1)).toEqual({ tabId: 'tab-1', visible: true, focused: true, acted: true })
+  })
+
+  it('a page load nobody touches counts only for GLANCE_MS', () => {
+    const { beater, sent, advance } = setup({ visible: true, focused: true })
+    beater.changed()
+    advance(GLANCE_MS - 1)
+    beater.tick()
+    advance(1)
+    beater.tick()
+    expect(sent.map((b) => b.focused)).toEqual([true, true, false])
+  })
+
+  it('input after a load keeps the tab counting for INPUT_IDLE_MS', () => {
+    const { beater, sent, advance } = setup({ visible: true, focused: true })
+    beater.changed()
+    beater.input()
+    advance(INPUT_IDLE_MS - 1)
+    beater.tick()
+    expect(sent.at(-1)).toMatchObject({ focused: true })
+  })
+
+  it('switching back without touching anything counts only for GLANCE_MS', () => {
+    const { beater, sent, page, advance } = setup({ visible: true, focused: true })
+    beater.changed()
+    page.focused = false
+    beater.changed()
+    advance(INPUT_IDLE_MS)
+    page.focused = true
+    beater.changed()
+    expect(sent.at(-1)).toMatchObject({ focused: true })
+    advance(GLANCE_MS)
+    beater.tick()
+    expect(sent.at(-1)).toMatchObject({ focused: false })
   })
 
   it('a person switching back after a long break counts at once, before any click', () => {

@@ -76,8 +76,13 @@ describe.runIf(posix)('copying agent state into agent space', () => {
       path.join(data, 'runtimes', 'hermes', 'a1', '.env'),
       'OPENAI_API_KEY=sk-operator',
     )
-    fs.mkdirSync(path.join(data, 'runtimes', 'native', 'a1', 'sessions'), { recursive: true })
-    fs.writeFileSync(path.join(data, 'runtimes', 'native', 'a1', 'sessions', 's.json'), '[]')
+    fs.mkdirSync(path.join(data, 'runtimes', 'clawboo-native', 'a1', 'sessions'), {
+      recursive: true,
+    })
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'clawboo-native', 'a1', 'sessions', 's.json'),
+      '[]',
+    )
     fs.mkdirSync(path.join(data, 'workspaces', 'team-1'), { recursive: true })
     fs.writeFileSync(path.join(data, 'workspaces', 'team-1', 'plan.md'), '# plan')
     fs.mkdirSync(work, { recursive: true })
@@ -118,7 +123,7 @@ describe.runIf(posix)('copying agent state into agent space', () => {
     ])
     expect(fs.existsSync(path.join(home, 'auth.json'))).toBe(false)
     expect(fs.existsSync(path.join(home, '.env'))).toBe(false)
-    expect(fs.existsSync(path.join(agentRt, 'native'))).toBe(false)
+    expect(fs.existsSync(path.join(agentRt, 'clawboo-native'))).toBe(false)
     expect(fs.readFileSync(path.join(work, 'teams', 'team-1', 'plan.md'), 'utf8')).toBe('# plan')
     // Every write went through the host.
     expect(ops).toEqual(expect.arrayContaining(['fs.mkdir', 'fs.write', 'fs.rename']))
@@ -153,6 +158,14 @@ describe.runIf(posix)('copying agent state into agent space', () => {
     expect(report.copied).toEqual([])
     expect(report.skipped.some((s) => /disk full/.test(s.reason))).toBe(true)
     expect(fs.existsSync(path.join(agentRt, 'hermes', 'a1'))).toBe(false)
+  })
+})
+
+describe("Clawboo Native's homes", () => {
+  it('are skipped by the name its runtime id gives their folder', async () => {
+    const { getDescriptor } = await import('../../runtimes/descriptor')
+    const { NATIVE_RUNTIME_ID } = await import('../copyIn')
+    expect(getDescriptor(NATIVE_RUNTIME_ID as never).id).toBe(NATIVE_RUNTIME_ID)
   })
 })
 
