@@ -4,8 +4,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import {
-  OPENCLAW_INSTALL_COMMAND_SUDO,
   OPENCLAW_INSTALL_SPEC,
+  OPENCLAW_NODE_RANGES,
   OPENCLAW_NODE_REQUIREMENT,
   isNodeVersionSupportedByOpenclaw,
 } from '@clawboo/protocol'
@@ -26,7 +26,9 @@ import {
 } from '../lib/processManager'
 import { findListenerPid } from '@clawboo/process-lookup'
 import { getContextWindowFromCli, getModelsFromCli } from '../lib/modelCache'
-import { isWindows, resolveShimName } from '../lib/platform'
+import { isWindows } from '../lib/platform'
+import { runNpmRuntimeInstall, type NpmRuntime } from '../lib/runtimes/npmRuntimeInstall'
+import { markInstallInUse, ownedRuntimeProblem, terminalCommandName } from '../lib/runtimeFolder'
 import {
   detectOauthProfileProviders,
   ENV_KEY_MAP,
@@ -46,7 +48,7 @@ import {
 import { providerStatus } from '../lib/providerKeys'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
-import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
+import { detectOpenClaw, invalidateOpenClawCache, openclawInvocation } from '../lib/openclawDetect'
 import { gatewayFailureReason, needsDoctorFix, runDoctorFix } from '../lib/openclawRepair'
 import { refuseUnlessPerson } from '../lib/auth'
 import { liveCwd } from '../lib/cwdGuard'
@@ -55,6 +57,20 @@ import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '@clawboo/mode
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_PORT = 18789
+
+/**
+ * OpenClaw's own tool sandbox (`agents.defaults.sandbox.mode`): `off` runs its
+ * tools on the host, the computer Clawboo and its other agents use, instead of
+ * a Docker or Podman container per agent. Checked against OpenClaw 2026.9.
+ */
+export const OPENCLAW_SANDBOX_MODE = 'off'
+
+/** OpenClaw as an npm runtime in Clawboo's runtimes folder. */
+export const OPENCLAW_NPM_RUNTIME: NpmRuntime = {
+  id: 'openclaw',
+  spec: OPENCLAW_INSTALL_SPEC,
+  bins: ['openclaw'],
+}
 
 // Default OpenClaw ROUTING model id per provider (used by both the configure and
 // the auto-configure paths). OpenClaw addresses models by `provider/model`.
@@ -105,6 +121,12 @@ const KEYLESS_PROVIDERS = new Set(['ollama', 'openai-codex'])
  *  profile. NON-destructive (unlike `openclaw onboard`, which can reset
  *  channels/memory/cron); surfaced to the UI, never executed by clawboo. */
 export const OPENCLAW_CODEX_LOGIN_COMMAND = 'openclaw models auth login --provider openai-codex'
+
+/** {@link OPENCLAW_CODEX_LOGIN_COMMAND} as the person types it: with the full
+ *  path of the copy in Clawboo's runtimes folder, which is not on their PATH. */
+function openclawCodexLoginCommand(): string {
+  return OPENCLAW_CODEX_LOGIN_COMMAND.replace(/^openclaw\b/, () => terminalCommandName('openclaw'))
+}
 
 /** Whether OpenClaw's bootstrap-from-~/.codex is trusted to materialize the
  *  auth profile WITHOUT the login command. Probed on 2026.5.27: quota-free
@@ -434,6 +456,15 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
         installed: oc.installed,
         version: oc.version,
         path: oc.path,
+        // Additive: 'clawboo' for a copy in Clawboo's runtimes folder, 'path'
+        // for a global install, and the Node the Clawboo copy runs on.
+        source: oc.source,
+        runsOnNode: oc.node,
+        // How a person types `openclaw` in a terminal (the full path for
+        // Clawboo's copy, which is not on PATH), and why Clawboo's copy cannot
+        // be used when one is on record but unusable.
+        command: terminalCommandName('openclaw'),
+        problem: ownedRuntimeProblem('openclaw'),
         stateDir,
         configExists,
         envExists,
@@ -476,8 +507,8 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
 export async function approveDevicePOST(req: Request, res: Response): Promise<void> {
   // A person's call: this is a standing grant to the Gateway, for whichever device asked.
   if (refuseUnlessPerson(req, res)) return
-  const oc = await detectOpenClaw()
-  if (!oc.installed || !oc.path) {
+  const oc = openclawInvocation()
+  if (!oc) {
     res.status(400).json({ error: 'OpenClaw not installed' })
     return
   }
@@ -486,10 +517,10 @@ export async function approveDevicePOST(req: Request, res: Response): Promise<vo
   // `shell: isWindows` — required by Node 18.20.2+ / 20.12.2+ / 22+ when
   // oc.path resolves to a .cmd shim on Windows (CVE-2024-27980 fix). No-op
   // on Unix. `windowsHide: isWindows` — hide the cmd.exe console window.
-  const preview = spawnSync(oc.path, ['devices', 'approve', '--latest'], {
+  const preview = spawnSync(oc.command, [...oc.args, 'devices', 'approve', '--latest'], {
     encoding: 'utf8',
     timeout: 5_000,
-    shell: isWindows,
+    shell: oc.shell,
     windowsHide: isWindows,
   })
 
@@ -519,10 +550,10 @@ export async function approveDevicePOST(req: Request, res: Response): Promise<vo
   try {
     // `shell: isWindows` — see detectOpenClaw for rationale (CVE-2024-27980).
     // `windowsHide: isWindows` — hide the cmd.exe console window.
-    const approveOut = execFileSync(oc.path, ['devices', 'approve', requestId], {
+    const approveOut = execFileSync(oc.command, [...oc.args, 'devices', 'approve', requestId], {
       encoding: 'utf8',
       timeout: 10_000,
-      shell: isWindows,
+      shell: oc.shell,
       windowsHide: isWindows,
     })
     res.json({ ok: true, requestId, output: approveOut.trim().slice(0, 1000) })
@@ -541,111 +572,102 @@ export async function approveDevicePOST(req: Request, res: Response): Promise<vo
 }
 
 // POST /api/system/install-openclaw
+//
+// Installs OpenClaw into Clawboo's own runtimes folder (`runtimeFolder.ts`),
+// never into npm's global prefix: no EACCES on a root-owned prefix, no `sudo`,
+// no install stranded by an nvm switch. Node is checked first, because OpenClaw
+// runs on the Node it is installed with (this server's), and npm does not refuse
+// a Node outside OpenClaw's range: it quietly installs an older release instead.
+//
+// Pinned with OPENCLAW_INSTALL_SPEC rather than `@latest`, so a new user gets a
+// Gateway this clawboo has been tested against.
+/** Set from the start of an install until its result is in (the pointer
+ *  switched or the folder removed), which is later than npm's exit. */
+let openclawInstalling = false
+
 export async function installOpenclawPOST(_req: Request, res: Response): Promise<void> {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders()
 
-  sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing OpenClaw...' })
-
-  // Four Windows-compat fixes folded into this call site:
-  //   1. `resolveShimName('npm')` returns `npm.cmd` on Windows. Bare 'npm'
-  //      throws ENOENT on Windows because Node's spawn doesn't auto-resolve
-  //      .cmd extensions.
-  //   2. `shell: isWindows` — Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn
-  //      .cmd / .bat files without shell:true (CVE-2024-27980 fix). Without
-  //      it, spawn THROWS EINVAL synchronously, the throw escapes the
-  //      request handler after the SSE headers are already flushed, and the
-  //      browser surfaces the dropped connection as "Network error". On
-  //      Unix the option is a no-op.
-  //   3. `windowsHide: isWindows` — with shell:true on Windows, Node spawns
-  //      through cmd.exe, which by default pops a console window in front
-  //      of the dashboard. Hide it. No-op on Unix.
-  //   4. Pin with OPENCLAW_INSTALL_SPEC rather than `@latest`, so a new user
-  //      gets a Gateway this clawboo has been tested against.
-  //
-  //      This line used to read `openclaw@^2026.5` under a comment claiming it
-  //      held new users on the 2026.5 line. It did not: caret pins only the
-  //      leftmost non-zero digit, so `^2026.5` means any 2026.x and npm was
-  //      serving 2026.9.1. Every install after 2026.6 shipped got a Gateway
-  //      that fails on agent creation, the capability toggles, chat sends and
-  //      approvals. The spec is a shared constant now precisely because the
-  //      comment and the code were allowed to disagree.
-  let child
-  try {
-    child = spawn(resolveShimName('npm'), ['install', '-g', OPENCLAW_INSTALL_SPEC], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: isWindows,
-      windowsHide: isWindows,
-    })
-  } catch (err) {
-    // Defensive: if spawn throws synchronously (CVE-2024-27980 EINVAL, or
-    // any future similar guard), surface the actual error as an SSE event
-    // instead of crashing the request handler and letting the SPA show a
-    // generic "Network error" from the dropped fetch stream.
+  const nodeVersion = process.version
+  if (!isNodeVersionSupportedByOpenclaw(nodeVersion)) {
     sendEvent(res, {
       type: 'error',
-      code: 'SPAWN_THROW',
-      message: err instanceof Error ? err.message : String(err),
+      code: 'NODE_UNSUPPORTED',
+      message: openclawNodeRefusal(nodeVersion),
     })
     res.end()
     return
   }
 
-  child.stdout?.on('data', (chunk: Buffer) => {
-    const lines = chunk.toString().split('\n').filter(Boolean)
-    for (const line of lines) {
-      sendEvent(res, { type: 'output', line })
-    }
-  })
-
-  child.stderr?.on('data', (chunk: Buffer) => {
-    const text = chunk.toString()
-    if (text.includes('EACCES') || text.toLowerCase().includes('permission denied')) {
-      sendEvent(res, {
-        type: 'error',
-        code: 'EACCES',
-        message: `Permission denied. Your Node.js installation may require sudo for global installs. Try: ${OPENCLAW_INSTALL_COMMAND_SUDO}`,
-      })
-    }
-    const lines = text.split('\n').filter(Boolean)
-    for (const line of lines) {
-      sendEvent(res, { type: 'output', line })
-    }
-  })
-
-  child.on('error', (err) => {
-    sendEvent(res, { type: 'error', code: 'SPAWN_ERROR', message: String(err) })
+  if (openclawInstalling) {
+    sendEvent(res, {
+      type: 'error',
+      code: 'INSTALL_RUNNING',
+      message: 'OpenClaw is already being installed. Wait for it to finish, then try again.',
+    })
     res.end()
-  })
+    return
+  }
 
-  child.on('close', (code) => {
-    if (code === 0) {
-      // The binary was just (re)installed — drop any cached version so we
-      // re-read the freshly-installed one. Detection is async + bounded, so
-      // a slow cold-start `--version` can't freeze the response: worst case
-      // it times out and we report version 'unknown', and the client
-      // advances regardless (the wizard only needs success, not the exact
-      // version).
-      invalidateOpenClawCache()
-      void detectOpenClaw().then((oc) => {
-        sendEvent(res, { type: 'complete', success: true, version: oc.version ?? 'unknown' })
-        res.end()
-      })
-    } else {
-      sendEvent(res, {
-        type: 'error',
-        code: `EXIT_${code}`,
-        message: `Installation failed with exit code ${code}`,
-      })
-      res.end()
-    }
-  })
+  sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing OpenClaw...' })
 
+  openclawInstalling = true
+  const run = runNpmRuntimeInstall(OPENCLAW_NPM_RUNTIME, {
+    onLine: (line) => sendEvent(res, { type: 'output', line }),
+  })
   res.on('close', () => {
-    if (!child.killed) child.kill()
+    // A stopped install is removed and the current one stays, so this is safe.
+    if (run.child && !run.child.killed && run.child.exitCode === null) run.child.kill()
   })
+
+  let result: Awaited<typeof run.result>
+  try {
+    result = await run.result
+  } finally {
+    openclawInstalling = false
+  }
+  if (!result.ok) {
+    sendEvent(res, { type: 'error', code: result.code, message: result.message })
+    res.end()
+    return
+  }
+  // A fresh install: drop any cached version so status reads the new one.
+  invalidateOpenClawCache()
+  const oc = await detectOpenClaw()
+  sendEvent(res, {
+    type: 'complete',
+    success: true,
+    version: oc.version ?? result.version ?? 'unknown',
+    path: oc.path,
+  })
+  res.end()
+}
+
+/** What the install says when this Node cannot run OpenClaw's current release:
+ *  the Node found, the range needed (both from @clawboo/protocol), and what to
+ *  update, including the desktop app, which brings its own Node. */
+export function openclawNodeRefusal(nodeVersion: string): string {
+  const floor = OPENCLAW_NODE_RANGES[0]?.min ?? [0, 0, 0]
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion.trim())
+  const got = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+  const tooOld =
+    got !== null &&
+    (got[0] !== floor[0]
+      ? (got[0] as number) < floor[0]
+      : got[1] !== floor[1]
+        ? (got[1] as number) < floor[1]
+        : (got[2] as number) < floor[2])
+  const what = tooOld
+    ? `Node.js ${nodeVersion} is too old for OpenClaw, which needs ${OPENCLAW_NODE_REQUIREMENT}`
+    : `Node.js ${nodeVersion} is not one OpenClaw runs on: it needs ${OPENCLAW_NODE_REQUIREMENT}`
+  return (
+    `${what}, so nothing was installed. Update the Node.js Clawboo runs on: if Clawboo came ` +
+    'with the desktop app, update the app; otherwise start Clawboo with Node.js 24.22.1 or a ' +
+    'newer Node 24. Then install OpenClaw again.'
+  )
 }
 
 // POST /api/system/configure-openclaw
@@ -701,7 +723,14 @@ export async function configureOpenclawPOST(req: Request, res: Response): Promis
         auth: { mode: 'token', token: '${GATEWAY_AUTH_TOKEN}' },
       },
       agents: {
-        defaults: resolvedModel ? { model: { primary: resolvedModel } } : {},
+        defaults: {
+          ...(resolvedModel ? { model: { primary: resolvedModel } } : {}),
+          // OpenClaw's tools run on this computer, where Clawboo and its other
+          // agents work, not in a Docker container of OpenClaw's own: one
+          // computer every agent sees. `off` is OpenClaw's default; written out
+          // so it holds whatever a later OpenClaw defaults to.
+          sandbox: { mode: OPENCLAW_SANDBOX_MODE },
+        },
       },
       tools: {
         agentToAgent: { enabled: true },
@@ -781,7 +810,7 @@ export async function autoConfigureOpenclawPOST(req: Request, res: Response): Pr
     } else if (await isCodexLoggedIn()) {
       // Rung 3: the subscription EXISTS (codex CLI login) but OpenClaw has no
       // profile of its own; the user runs the (non-destructive) login command.
-      res.json({ ok: false, needsCodexAuth: true, loginCommand: OPENCLAW_CODEX_LOGIN_COMMAND })
+      res.json({ ok: false, needsCodexAuth: true, loginCommand: openclawCodexLoginCommand() })
       return
     } else if (isNativeOllamaConnected()) {
       // Rung 4: the user's local Ollama, keyless like the profile rung.
@@ -862,6 +891,11 @@ export async function autoConfigureOpenclawPOST(req: Request, res: Response): Pr
     if (!agents['defaults'] || typeof agents['defaults'] !== 'object') agents['defaults'] = {}
     const defaults = agents['defaults'] as Record<string, unknown>
     if (!defaults['model'] || typeof defaults['model'] !== 'object') defaults['model'] = {}
+    // OpenClaw's tools on this computer, as configure writes it. A sandbox the
+    // user set up themselves is theirs and stays.
+    if (!defaults['sandbox'] || typeof defaults['sandbox'] !== 'object') {
+      defaults['sandbox'] = { mode: OPENCLAW_SANDBOX_MODE }
+    }
     const modelObj = defaults['model'] as Record<string, unknown>
     // Set when this call picks the Ollama default, which reads Ollama's model list.
     let pickedOllamaModel = false
@@ -1121,13 +1155,17 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       if (pidInfo && !alive) removeGatewayPid()
     }
 
-    // Find openclaw binary
-    const oc = await detectOpenClaw()
-    if (!oc.installed || !oc.path) {
-      end({ type: 'error', code: 'NOT_INSTALLED', message: 'OpenClaw is not installed' })
+    // Find openclaw: Clawboo's own copy first, then one on PATH.
+    const openclaw = openclawInvocation()
+    if (!openclaw) {
+      const problem = ownedRuntimeProblem('openclaw')
+      end({
+        type: 'error',
+        code: 'NOT_INSTALLED',
+        message: problem ? `OpenClaw is not installed. ${problem}` : 'OpenClaw is not installed',
+      })
       return
     }
-    const openclawPath = oc.path
 
     // Tail the log file → SSE `output` events until the SSE stream ends (the port
     // poll completes or times out). Best-effort; a read failure just skips a tick.
@@ -1179,7 +1217,7 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
           message:
             'OpenClaw needs a one-time update to its data before the gateway can start. Running openclaw doctor --fix…',
         })
-        const repair = runDoctorFix(openclawPath, (line) => {
+        const repair = runDoctorFix(openclaw, (line) => {
           if (!ended) sendEvent(res, { type: 'output', line })
         })
         gatewayRepairInFlight = repair
@@ -1232,14 +1270,18 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
       // refuses to start in one ("process.cwd failed").
       let child
       try {
-        child = spawn(openclawPath, ['gateway', '--port', String(port), '--allow-unconfigured'], {
-          cwd: liveCwd(),
-          detached: true,
-          // File-backed (not parent pipes) so the Gateway outlives a server restart.
-          stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
-          shell: isWindows,
-          windowsHide: isWindows,
-        })
+        child = spawn(
+          openclaw.command,
+          [...openclaw.args, 'gateway', '--port', String(port), '--allow-unconfigured'],
+          {
+            cwd: liveCwd(),
+            detached: true,
+            // File-backed (not parent pipes) so the Gateway outlives a server restart.
+            stdio: ['ignore', logFd ?? 'ignore', logFd ?? 'ignore'],
+            shell: openclaw.shell,
+            windowsHide: isWindows,
+          },
+        )
       } catch (err) {
         if (logFd !== null) {
           try {
@@ -1269,6 +1311,12 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
 
       if (child.pid) {
         writeGatewayPid(child.pid, port)
+        // An update while this Gateway runs must not delete the install it runs:
+        // the one its command was read from, which an install committed since
+        // (during a doctor repair, say) is no longer the current one.
+        if (openclaw.installFolder) {
+          markInstallInUse('openclaw', child.pid, process.env, openclaw.installFolder)
+        }
       }
 
       const pid = child.pid
@@ -1344,7 +1392,7 @@ export async function openclawConfigGET(_req: Request, res: Response): Promise<v
       profile: detectOauthProfileProviders(stateDir).has('openai-codex'),
       codexCli: await isCodexLoggedIn(),
       bootstrapTrusted: OPENCLAW_CODEX_BOOTSTRAP_TRUSTED,
-      loginCommand: OPENCLAW_CODEX_LOGIN_COMMAND,
+      loginCommand: openclawCodexLoginCommand(),
     }
 
     res.json({

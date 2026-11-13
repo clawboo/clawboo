@@ -24,7 +24,6 @@ import {
   isWindows,
   resolvePython,
   resolveRuntimeBin,
-  resolveShimName,
   type PythonCandidate,
   type PythonRange,
 } from '../lib/platform'
@@ -35,7 +34,9 @@ import {
   peekCodexModels,
 } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import { agentSdkBinaryInInstall } from '../lib/runtimes/agentSdkBinary'
 import { resolveRuntimeInstall, resolveSdkBinary } from '../lib/runtimes/installProbe'
+import { runNpmRuntimeInstall } from '../lib/runtimes/npmRuntimeInstall'
 import {
   checkHermesAcp,
   peekHermesAcp,
@@ -73,7 +74,7 @@ import {
   setRuntimeSecret,
 } from '../lib/secretsVault'
 import { onEmbeddingKeysChanged } from '../lib/memoryEmbedding'
-import { detectInstallMethod } from '../lib/updateCheck'
+import { ownedRuntimeProblem, terminalCommandName } from '../lib/runtimeFolder'
 
 /** Validate the :id param against the runtime set; 404s + returns null on miss. */
 function requireRuntimeId(req: Request, res: Response): NonOpenClawRuntimeId | null {
@@ -150,6 +151,12 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
     // Additive: where the binary came from, 'cli' or 'agent-sdk' (null when
     // there is none, and for a built-in runtime).
     binSource: bin?.source ?? null,
+    // Additive: how a person types the runtime's command in a terminal (the
+    // full path for a copy in Clawboo's runtimes folder, which is not on PATH),
+    // and why Clawboo's own copy cannot be used when one is on record but is
+    // not usable (its Node.js removed by an upgrade, say).
+    terminalCommand: d.healthBin ? terminalCommandName(d.healthBin) : null,
+    installProblem: d.healthBin ? ownedRuntimeProblem(d.healthBin) : null,
     builtIn: d.builtIn,
     authKind: d.authKind,
     envVar: d.envVar,
@@ -215,17 +222,23 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
   }
 }
 
-/** The latest install of each runtime, read by the one-at-a-time guard. */
-const installs = new Map<NonOpenClawRuntimeId, { child: ChildProcess | null }>()
+/** The latest install of each runtime, read by the one-at-a-time guard.
+ *  `pending` holds the guard until an install's result is in, which for an
+ *  npm runtime is after npm exits (the install is checked and switched). */
+const installs = new Map<NonOpenClawRuntimeId, { child: ChildProcess | null; pending?: boolean }>()
 
-/** An install's process has not exited yet. */
-function installRunning(ctl: { child: ChildProcess | null } | undefined): boolean {
+/** An install's process has not exited yet, or its result is not in. */
+function installRunning(
+  ctl: { child: ChildProcess | null; pending?: boolean } | undefined,
+): boolean {
+  if (ctl?.pending) return true
   const child = ctl?.child
   return child != null && child.exitCode === null && child.signalCode === null
 }
 
 // ─── POST /api/runtimes/:id/install (SSE) ────────────────────────────────────
-// Installs the runtime's CLI. npm runtimes → `npm install -g <pkg>`; the pip
+// Installs the runtime. npm runtimes → a folder of their own under Clawboo's
+// runtimes folder (`npmRuntimeInstall.ts`, never `npm install -g`); the pip
 // runtime → pipx-preferred with a PEP-668 `--break-system-packages` fallback.
 // Mirrors system.ts `installOpenclawPOST`: text/event-stream, progress/output/
 // complete/error events, child.kill() on connection close, synchronous-throw
@@ -274,16 +287,6 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
     return
   }
 
-  // The server loads the SDK from the node_modules folders around itself, so a
-  // global `npm install -g` reaches it only when Clawboo itself is a global
-  // install. Anywhere else the download would be one no run can load.
-  const sdkRefusal = d.sdkBinary ? sdkInstallRefusal(d) : null
-  if (sdkRefusal) {
-    sendEvent(res, { type: 'error', code: 'SDK_NOT_LOADABLE', message: sdkRefusal })
-    res.end()
-    return
-  }
-
   sendEvent(res, { type: 'progress', step: 'installing', message: `Installing ${d.name}…` })
 
   // An install over one that is already there is an update. Stopped part way it
@@ -301,27 +304,6 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
 
   if (d.packageManager === 'npm') installViaNpm(res, d, ctl)
   else installViaPip(res, d, ctl)
-}
-
-/** Why an SDK install from here could not reach this server, or null when it
- *  can (a global install of Clawboo). */
-function sdkInstallRefusal(d: RuntimeDescriptor): string | null {
-  switch (detectInstallMethod()) {
-    case 'npx':
-      return (
-        `${d.name} needs ${String(d.pkg)} next to Clawboo, and a one-off npx run cannot load ` +
-        `one installed globally. Install both: npm install -g clawboo ${String(d.pkg)}, then ` +
-        'start Clawboo with clawboo.'
-      )
-    case 'dev':
-      return (
-        `This Clawboo runs from a source checkout, which loads ${String(d.pkg)} from its own ` +
-        'node_modules. Run pnpm install in the checkout (without --no-optional, which leaves ' +
-        'out the SDK binary), then restart the server.'
-      )
-    default:
-      return null
-  }
 }
 
 /** On a successful install: flip the flag on (live; runtime flags need no
@@ -344,7 +326,7 @@ async function finishInstall(res: Response, d: RuntimeDescriptor): Promise<void>
       type: 'complete',
       success: true,
       warning: d.sdkBinary
-        ? `Installed, but this Clawboo cannot load it: the SDK has to sit next to Clawboo. If Clawboo was installed with another Node or npm, install both with that one (npm install -g clawboo ${String(d.pkg)}), then run clawboo restart.`
+        ? `Installed, but the Agent SDK's own ${process.platform}-${process.arch} binary is missing from it, so Claude Code cannot run. Check that npm may install optional dependencies, then install again.`
         : `Installed, but '${String(d.healthBin)}' isn't on PATH or the known user-install dirs yet. Restart the server if it stays missing.`,
     })
   }
@@ -363,7 +345,7 @@ function streamInstallChild(res: Response, child: ChildProcess, d: RuntimeDescri
       sendEvent(res, {
         type: 'error',
         code: 'EACCES',
-        message: `Permission denied. A global install may require elevated permissions. Try: sudo ${d.installCommand}`,
+        message: `Permission denied while installing ${d.name}. Check that this user can write where it installs, then try again.`,
       })
     }
     for (const line of text.split('\n').filter(Boolean)) sendEvent(res, { type: 'output', line })
@@ -385,36 +367,41 @@ function streamInstallChild(res: Response, child: ChildProcess, d: RuntimeDescri
   })
 }
 
+/** An npm runtime goes into a folder of its own under Clawboo's runtimes folder,
+ *  after its checks (the folder is safe to use, npm is there). */
 function installViaNpm(
   res: Response,
   d: RuntimeDescriptor,
-  ctl: { child: ChildProcess | null },
+  ctl: { child: ChildProcess | null; pending?: boolean },
 ): void {
-  if (!resolveRuntimeBin('npm') && !findExecutable('npm')) {
-    sendEvent(res, {
-      type: 'error',
-      code: 'NPM_MISSING',
-      message: 'npm not found. Install Node.js (which bundles npm) and retry.',
-    })
+  ctl.pending = true
+  const run = runNpmRuntimeInstall(
+    { id: d.id, spec: d.pkg ?? '', bins: d.npmBins ?? [] },
+    {
+      onLine: (line) => sendEvent(res, { type: 'output', line }),
+      // The Agent SDK's own binary is an optional dependency npm may leave out.
+      // Without it Claude Code cannot run, so such an install is not made
+      // current: whatever ran Claude Code before keeps doing so.
+      ...(d.sdkBinary
+        ? {
+            check: (folder: string) =>
+              agentSdkBinaryInInstall(folder)
+                ? null
+                : `The Agent SDK installed without its own ${process.platform}-${process.arch} binary, so Claude Code could not run on it and nothing was changed. Check that npm may install optional dependencies, then install again.`,
+          }
+        : {}),
+    },
+  )
+  ctl.child = run.child
+  void run.result.then((result) => {
+    ctl.pending = false
+    if (result.ok) {
+      void finishInstall(res, d)
+      return
+    }
+    sendEvent(res, { type: 'error', code: result.code, message: result.message })
     res.end()
-    return
-  }
-  try {
-    ctl.child = spawn(resolveShimName('npm'), ['install', '-g', d.pkg ?? ''], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: isWindows,
-      windowsHide: isWindows,
-    })
-  } catch (err) {
-    sendEvent(res, {
-      type: 'error',
-      code: 'SPAWN_THROW',
-      message: err instanceof Error ? err.message : String(err),
-    })
-    res.end()
-    return
-  }
-  streamInstallChild(res, ctl.child, d)
+  })
 }
 
 /** "3.11 to 3.13", "3.11 or newer", or "3" for a package with no range. */
@@ -624,7 +611,7 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
     res.json({
       ok: true,
       connectionState: runtimeStatus(id, loggedIn)['connectionState'],
-      loginCommand: `${d.healthBin ?? d.id} login`,
+      loginCommand: `${terminalCommandName(d.healthBin ?? d.id)} login`,
     })
     return
   }

@@ -173,7 +173,9 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
       agents: { defaults: Record<string, unknown> }
     }
     // OpenClaw then applies its own default rather than an id the plan may refuse.
-    expect(config.agents.defaults).toEqual({})
+    // (Its tool sandbox is written off either way: OpenClaw's tools run here.)
+    expect(config.agents.defaults).toEqual({ sandbox: { mode: 'off' } })
+    expect(config.agents.defaults['model']).toBeUndefined()
   })
 
   it('configure still 400s a key-less API-KEY provider (the carve-out is exact)', async () => {

@@ -32,7 +32,7 @@ These docs track the latest code. The latest npm release is 0.6.0; anything newe
 - **Node.js 22.12 or newer.** Check with `node --version`. On an older Node, `clawboo` stops right away with a message naming the version it found. Get Node from [nodejs.org](https://nodejs.org) or a version manager such as nvm or fnm.
 - **A terminal and a web browser.** You type one command; everything after that happens in the browser.
 - **An AI provider, chosen during setup:** an API key, a local Ollama, or a ChatGPT subscription. You don't need one to install.
-- **Only if you add OpenClaw teammates:** the OpenClaw release Clawboo installs needs Node 24.22.1 or later on the 24 line, or 26.12.1 or later. Node 22 and Node 25 cannot run it. Clawboo does not check this before it installs OpenClaw, so compare `node --version` first.
+- **Only if you add OpenClaw teammates:** the OpenClaw release Clawboo installs needs Node 24.22.1 or later on the 24 line, or 26.12.1 or later. Node 22 and Node 25 cannot run it. OpenClaw runs on the Node.js Clawboo runs on, so start Clawboo with such a Node. Clawboo checks it before it installs OpenClaw, and installs nothing on a Node outside that range.
 
 There is no Clawboo account, Docker image or database to set up.
 
@@ -74,13 +74,7 @@ Your browser opens on the setup wizard. Continue with the [Quickstart](/getting-
 
 ### Add Claude Code teammates (optional)
 
-The Claude Code runtime needs the Claude Agent SDK, which the `clawboo` package does not include because it would add about 210 MB to every install. Install the two together, globally:
-
-```bash
-npm install -g clawboo @anthropic-ai/claude-agent-sdk
-```
-
-To check it, run `npm ls -g @anthropic-ai/claude-agent-sdk`: it lists the package when it is installed. A one-off `npx` run cannot load the SDK. Then connect Claude Code in **Settings → Runtimes**; see [Claude Code](/runtimes/claude-code).
+The Claude Code runtime needs the Claude Agent SDK, which the `clawboo` package does not include because it would add about 210 MB to every install. Install it from the dashboard: in **Settings → Runtimes**, click **Install** on the **Claude Code** row. That works for every way of running Clawboo, a one-off `npx` run included, and puts the SDK in Clawboo's own runtimes folder (see [Where your data lives](#where-your-data-lives)). Then connect Claude Code on the same row; see [Claude Code](/runtimes/claude-code).
 
 ## What the clawboo command does
 
@@ -141,6 +135,7 @@ The second command offers to restart the older server; `clawboo -y` restarts it 
 1. Optional: in **Settings → Providers**, click **Disconnect** on each key you added there. Keys saved in that panel are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's key file, and **Disconnect** removes every copy.
 2. Stop the server and remove the package with the two commands below.
 3. To delete your data as well, remove the data folder: `~/.clawboo`, or the folder `CLAWBOO_HOME` names. Then remove the work folder, with your agents' files: the folder `CLAWBOO_WORK_DIR` names, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`. Remove the work folder only when no other Clawboo install uses it; for a shared one, see [Reset everything](/operating/data-and-state#reset-everything).
+4. To remove the runtimes Clawboo installed for you (OpenClaw, Claude Code's Agent SDK and Codex), remove the runtimes folder with the server stopped: the folder `CLAWBOO_RUNTIMES_DIR` names, else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes`. Stop an OpenClaw Gateway that Clawboo started first; see [Move or remove it](/operating/data-and-state#move-or-remove-it).
 
 ```bash
 clawboo stop
@@ -153,11 +148,11 @@ Deleting `~/.clawboo` permanently removes your teams, tasks, chats, memory, sett
 
 </Warning>
 
-If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove the folders in step 3 if you want, with the same care for a work folder another install shares. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place.
+If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove the folders in steps 3 and 4 if you want, with the same care for a work folder another install shares. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place. The ones Clawboo installed for you stay in the runtimes folder until you remove it (step 4).
 
 ## Where your data lives
 
-Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
+Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK and Codex) go in a third folder, `~/clawboo-runtimes` (set `CLAWBOO_RUNTIMES_DIR` to use another), never in npm's global folder. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
 
 ## Troubleshooting
 

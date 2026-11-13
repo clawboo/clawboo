@@ -31,7 +31,7 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 | Method | Path                                  | Summary                                                         | Rate tier | Stream?                   |
 | ------ | ------------------------------------- | --------------------------------------------------------------- | --------- | ------------------------- |
 | GET    | `/api/system/status`                  | Node, OpenClaw and Gateway status                               | general   | No                        |
-| POST   | `/api/system/install-openclaw`        | Install the OpenClaw CLI with `npm install -g`                  | sensitive | SSE                       |
+| POST   | `/api/system/install-openclaw`        | Install OpenClaw into Clawboo's runtimes folder                 | sensitive | SSE                       |
 | POST   | `/api/system/configure-openclaw`      | Replace `openclaw.json` and `.env` for one provider (API only)  | sensitive | No                        |
 | POST   | `/api/system/auto-configure-openclaw` | Set up OpenClaw from a credential you already connected         | sensitive | No                        |
 | POST   | `/api/system/gateway`                 | Gateway control: `start`, `stop`, `restart`, `status`           | sensitive | SSE for `start`/`restart` |
@@ -54,7 +54,7 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 
 Returns one snapshot of the Node runtime, the OpenClaw install and the Gateway process. The dashboard reads it at startup to decide what to show, and the OpenClaw setup and the **System** panel read it for the Gateway's state. When the Gateway is running and `.env` exists, the call also copies the Gateway token from `.env` into Clawboo's settings, so Clawboo never connects with a stale token.
 
-The OpenClaw check is cached per binary path and gives up on `openclaw --version` after 6 seconds, so a slow first start never holds up the server. `installed` says whether the binary resolves on `PATH`; `version` is `null` when the version check timed out or failed (the binary still reads installed).
+The OpenClaw check looks in Clawboo's [runtimes folder](/operating/data-and-state#the-runtimes-folder) first, then on `PATH`. For Clawboo's own copy the version comes from its install record, and nothing is spawned. For a copy on `PATH` the check is cached per binary path and gives up on `openclaw --version` after 6 seconds, so a slow first start never holds up the server. `installed` says whether either was found; `version` is `null` when the version check timed out or failed (the binary still reads installed).
 
 - **Path/query params**: none.
 - **Request body**: none.
@@ -68,14 +68,18 @@ The OpenClaw check is cached per binary path and gives up on `openclaw --version
   node: {
     version: string // process.version, e.g. "v22.3.0"
     major: number // parsed major version
-    sufficient: boolean // whether this Node satisfies OpenClaw's engines, NOT a bare major check
+    sufficient: boolean // whether this Node satisfies OpenClaw's engines, NOT a bare major check; install-openclaw refuses when false
     required: string // the range OpenClaw requires, e.g. ">=24.22.1 <25 || >=26.12.1"
     path: string // process.execPath
   }
   openclaw: {
     installed: boolean
     version: string | null // null when the version probe timed out / failed
-    path: string | null // resolved binary path, or null when not installed
+    path: string | null // the launcher in the runtimes folder, else the binary on PATH; null when not installed
+    source: 'clawboo' | 'path' | null // 'clawboo': Clawboo's copy in the runtimes folder; 'path': found on PATH; null when not installed
+    runsOnNode: { path: string; version: string } | null // the Node.js Clawboo's copy runs on; null otherwise
+    command: string // how to type `openclaw` in a terminal: the launcher's full path for Clawboo's copy, else 'openclaw'
+    problem: string | null // why Clawboo's copy cannot be used although one is on record (its Node.js removed, say); null otherwise
     stateDir: string // resolved OpenClaw state dir (~/.openclaw)
     configExists: boolean // openclaw.json present
     envExists: boolean // .env present
@@ -106,34 +110,50 @@ curl http://localhost:18790/api/system/status
 
 ## `POST /api/system/install-openclaw`
 
-Installs the OpenClaw CLI by running `npm install -g openclaw@~2026.9`. The pin is `~2026.9` (not `@latest`, and not `^2026.9`, which would allow any 2026.x) so a new install gets an OpenClaw whose config format matches what Clawboo writes. On success the installed version is read again and reported.
+Installs OpenClaw into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), never into npm's global folder, so it never needs `sudo`. **Set up OpenClaw** and **Check for Updates** in **Settings > System** call it.
+
+1. **Node.js first.** OpenClaw will run on the Node.js the server runs on, so the route checks that version against OpenClaw's range, `>=24.22.1 <25 || >=26.12.1`. Outside it, the stream sends one `NODE_UNSUPPORTED` error and installs nothing. npm itself would not refuse such a Node: it would install an older OpenClaw release.
+2. **One install at a time.** A request while an OpenClaw install is running gets an `INSTALL_RUNNING` error.
+3. **npm into a new folder.** npm runs on the server's Node (the npm beside it, else the one on `PATH`) as `npm install --prefix <new install folder> --include=optional --no-fund --no-audit openclaw@~2026.9`, under umask 022 and without `npm_config_global`, `npm_config_location` and `npm_config_prefix`. The pin is `~2026.9` (not `@latest`, and not `^2026.9`, which would allow any 2026.x) so a new install gets an OpenClaw whose config format matches what Clawboo writes.
+4. **Switch on success.** The install becomes current, and its launcher, `<runtimes folder>/bin/openclaw`, starts OpenClaw on that Node. The previous install is kept and older ones are removed. A failed or stopped install is removed, and the current one is untouched.
+
+The Gateway Clawboo starts, `openclaw doctor --fix`, device approval, the model list and the ChatGPT sign-in all use that launcher when it is there, else an `openclaw` on `PATH`. A Gateway that something else runs, such as OpenClaw's own launchd service on port 18789, is left alone.
 
 - **Path/query params**: none.
 - **Request body**: none.
 
 ### Responses
 
-**`200 OK` + `text/event-stream`**: the stream sends `data: <json>\n\n` frames with `Cache-Control: no-cache`. The install process is killed if the client closes the connection.
+**`200 OK` + `text/event-stream`**: the stream sends `data: <json>\n\n` frames with `Cache-Control: no-cache`. If the client closes the connection, the install is stopped and its folder removed.
 
 #### Event catalog
 
-| `type`     | When                                                 | Payload fields                  |
-| ---------- | ---------------------------------------------------- | ------------------------------- |
-| `progress` | Install start                                        | `step: 'installing'`, `message` |
-| `output`   | Each non-empty stdout or stderr line                 | `line`                          |
-| `error`    | Permission denied, spawn failure, or a non-zero exit | `code`, `message`               |
-| `complete` | Process exits 0                                      | `success: true`, `version`      |
+| `type`     | When                                                        | Payload fields                     |
+| ---------- | ----------------------------------------------------------- | ---------------------------------- |
+| `progress` | Install start, after the checks                             | `step: 'installing'`, `message`    |
+| `output`   | Each non-empty line npm prints                              | `line`                             |
+| `error`    | A check refused the install, or npm failed. The stream ends | `code`, `message`                  |
+| `complete` | npm succeeded and the install is current                    | `success: true`, `version`, `path` |
 
 The `error` codes:
 
-| `code`        | Meaning                                                                                  |
-| ------------- | ---------------------------------------------------------------------------------------- |
-| `EACCES`      | stderr mentioned `EACCES` or "permission denied" (a global install that needs elevation) |
-| `SPAWN_THROW` | The spawn call threw                                                                     |
-| `SPAWN_ERROR` | The child process emitted an error                                                       |
-| `EXIT_<code>` | The process exited with a non-zero code (for example `EXIT_1`)                           |
+| `code`                 | Meaning                                                                                                                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_UNSUPPORTED`     | The server's Node.js is outside OpenClaw's range; nothing was installed. The message names the range and this Node's version                                                                                           |
+| `INSTALL_RUNNING`      | An OpenClaw install is still running; nothing new was started                                                                                                                                                          |
+| `RUNTIMES_DIR_REFUSED` | The runtimes folder is, contains or sits inside the data folder or the work folder, its `bin/` is a link or not a folder, or another user owns it or others can write to it. The message says which, and how to fix it |
+| `RUNTIMES_DIR_FAILED`  | The runtimes folder, or the new install's folder, could not be created                                                                                                                                                 |
+| `NPM_MISSING`          | No npm beside the server's Node, and none on `PATH` it can start (a Windows `npm.cmd` counts only with `npm-cli.js` beside it)                                                                                         |
+| `SPAWN_THROW`          | The spawn call threw                                                                                                                                                                                                   |
+| `SPAWN_ERROR`          | The npm process emitted an error                                                                                                                                                                                       |
+| `STOPPED`              | The install was stopped                                                                                                                                                                                                |
+| `NOT_INSTALLED`        | npm finished, but `openclaw` is not in the install's folder                                                                                                                                                            |
+| `NO_COMMAND`           | The installed package has no `openclaw` command                                                                                                                                                                        |
+| `COMMIT_FAILED`        | The install could not be made current, for example because an item in it belongs to another user or a link in it points outside it                                                                                     |
+| npm's own code         | npm failed and named a code, such as `EACCES` or `ETARGET`                                                                                                                                                             |
+| `EXIT_<code>`          | npm failed with a non-zero exit and no code of its own (for example `EXIT_1`)                                                                                                                                          |
 
-On a clean exit, `complete` carries the newly installed version (`'unknown'` when the version check could not read it).
+When npm fails, the message reads `Installation failed with exit code <n>.` followed by npm's own reason. On success, `complete` carries the installed version (`'unknown'` when it could not be read) and `path`, the launcher in the runtimes folder.
 
 Example frames:
 
@@ -142,10 +162,14 @@ data: {"type":"progress","step":"installing","message":"Installing OpenClaw..."}
 
 data: {"type":"output","line":"added 1 package in 4s"}
 
-data: {"type":"complete","success":true,"version":"2026.9.1"}
+data: {"type":"complete","success":true,"version":"2026.9.34","path":"/Users/you/clawboo-runtimes/bin/openclaw"}
 ```
 
-An `EACCES` frame does not end the stream: the exit code still decides the outcome (`complete` on 0, `EXIT_<code>` otherwise), and its message suggests running the install with `sudo`.
+On a Node.js outside the range, the only frame is:
+
+```text
+data: {"type":"error","code":"NODE_UNSUPPORTED","message":"Node.js v22.12.0 is too old for OpenClaw, which needs >=24.22.1 <25 || >=26.12.1, so nothing was installed. Update the Node.js Clawboo runs on: if Clawboo came with the desktop app, update the app; otherwise start Clawboo with Node.js 24.22.1 or a newer Node 24. Then install OpenClaw again."}
+```
 
 ### Example
 
@@ -167,7 +191,7 @@ This route replaces `~/.openclaw/openclaw.json` and `~/.openclaw/.env` entirely,
 
 </Warning>
 
-The written `openclaw.json` holds only: `gateway` (`mode: 'local'`, the port, token auth read from `GATEWAY_AUTH_TOKEN`), the default model under `agents.defaults.model.primary`, agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and for Ollama an optional `models.providers.ollama` entry. The written `.env` holds `GATEWAY_AUTH_TOKEN=<64 hex characters>` plus one key line, and only its owner can read it (mode `0600`). The route also creates `~/.openclaw/workspace`. The token is kept on the server and never returned.
+The written `openclaw.json` holds only: `gateway` (`mode: 'local'`, the port, token auth read from `GATEWAY_AUTH_TOKEN`), the default model under `agents.defaults.model.primary`, OpenClaw's tool sandbox turned off (`agents.defaults.sandbox.mode: 'off'`), agent-to-agent coordination (`tools.agentToAgent.enabled: true`, `tools.sessions.visibility: 'all'`), and for Ollama an optional `models.providers.ollama` entry. With the sandbox off, OpenClaw runs its agents' tools on the host, the computer Clawboo and its other agents use, rather than in a Docker or Podman container of its own. `off` is OpenClaw's default; the route writes it so it holds if a later OpenClaw changes that default. The written `.env` holds `GATEWAY_AUTH_TOKEN=<64 hex characters>` plus one key line, and only its owner can read it (mode `0600`). The route also creates `~/.openclaw/workspace`. The token is kept on the server and never returned.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -259,7 +283,7 @@ In step 1, with several keys connected, the route takes the first in this fixed 
 
 In step 2 a missing default model becomes your plan's own default (`openai-codex/<model>`, read from your Codex CLI through [`GET /api/runtimes/codex/models`](/reference/rest-api/runtimes)). When that list is unknown, none is written and OpenClaw applies its own.
 
-Step 3 exists because a `codex login` in your terminal is a ChatGPT subscription that OpenClaw cannot use until it holds a sign-in profile of its own. `loginCommand` is `openclaw models auth login --provider openai-codex`. The dashboard runs it for you through `POST /api/auth/cli-login/openclaw` and shows the command only if that fails.
+Step 3 exists because a `codex login` in your terminal is a ChatGPT subscription that OpenClaw cannot use until it holds a sign-in profile of its own. `loginCommand` is `openclaw models auth login --provider openai-codex`. When the OpenClaw found is Clawboo's copy, `openclaw` is replaced by its launcher's full path (quoted when it needs it), since the runtimes folder is not on your `PATH`. The dashboard runs it for you through `POST /api/auth/cli-login/openclaw` and shows the command only if that fails.
 
 Step 4 uses the same Ollama setup Clawboo Native reads: you picked **Ollama** in onboarding or pressed **Use** on it in Clawboo Native's **Manage**, or no choice is recorded and `OLLAMA_BASE_URL` is set. **Disconnect Ollama**, or a full disconnect of Clawboo Native, turns it off again. It is the last resort before the key prompt. It writes what `configure-openclaw` writes for `ollama`: `OLLAMA_API_KEY=ollama-local` in `.env`, a default model your Ollama has pulled (when `llama3.2` is not pulled, the most recently pulled model, preferring one that can use tools, always as `ollama/<model>`), and, when `OLLAMA_BASE_URL` is set, its address as `models.providers.ollama.baseUrl`.
 
@@ -298,7 +322,7 @@ An Ollama default that is not pulled fails every OpenClaw turn, so the dashboard
 What this route keeps, which makes it safe on an existing install:
 
 - **The Gateway token.** `GATEWAY_AUTH_TOKEN` in `.env` is reused; a new token is made only when there is none.
-- **Your `openclaw.json` settings.** Only `gateway.mode` is set (to `'local'`). `gateway.port`, `gateway.auth`, the default model, `tools.agentToAgent`, `tools.sessions` and, in step 4, `models.providers.ollama` are filled in only when missing.
+- **Your `openclaw.json` settings.** Only `gateway.mode` is set (to `'local'`). `gateway.port`, `gateway.auth`, the default model, `agents.defaults.sandbox` (as `{ mode: 'off' }`), `tools.agentToAgent`, `tools.sessions` and, in step 4, `models.providers.ollama` are filled in only when missing. A sandbox you set up yourself stays.
 - **An existing `OLLAMA_API_KEY`.** Step 4 keeps one that has a value, since any value lets OpenClaw load its Ollama provider.
 - **The port.** There is no `gatewayPort` input. A missing `gateway.port` becomes `18789`; an existing one is left alone.
 
@@ -315,7 +339,7 @@ curl -X POST http://localhost:18790/api/system/auto-configure-openclaw \
 
 ## `POST /api/system/gateway`
 
-Starts, stops, restarts or reports on the Gateway process. `action` picks the operation. `status` and `stop` return JSON; `start` and `restart` stream SSE, because they wait for the port to open and report progress. The port comes from Clawboo's Gateway PID file, then `gateway.port` in `openclaw.json`, then `18789`.
+Starts, stops, restarts or reports on the Gateway process. `action` picks the operation. A start runs Clawboo's own OpenClaw from the runtimes folder when there is one, so the Gateway runs on the Node.js that installed it, else the `openclaw` on `PATH`. `status` and `stop` return JSON; `start` and `restart` stream SSE, because they wait for the port to open and report progress. The port comes from Clawboo's Gateway PID file, then `gateway.port` in `openclaw.json`, then `18789`.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -377,7 +401,7 @@ Terminal `error` `code` values:
 
 | `code`                | Meaning                                                                                                                                 |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `NOT_INSTALLED`       | OpenClaw binary not found                                                                                                               |
+| `NOT_INSTALLED`       | OpenClaw binary not found; when Clawboo's copy is on record but unusable, the message adds why                                          |
 | `SPAWN_THROW`         | The spawn call threw                                                                                                                    |
 | `SPAWN_ERROR`         | The child process emitted an error                                                                                                      |
 | `TIMEOUT`             | The port did not become reachable within ~60s (120 × 500ms polls); the message carries the Gateway's stated reason when its log has one |
@@ -456,7 +480,7 @@ Reads `openclaw.json`, flags for which provider keys OpenClaw holds (from `.env`
     profile: boolean // OpenClaw holds its own openai-codex (ChatGPT) sign-in profile
     codexCli: boolean // a `codex login` exists on this machine
     bootstrapTrusted: boolean // currently false: Clawboo does not rely on OpenClaw making a profile from a codex login
-    loginCommand: string // 'openclaw models auth login --provider openai-codex'
+    loginCommand: string // 'openclaw models auth login --provider openai-codex', with the launcher's full path for Clawboo's copy
   }
 }
 ```

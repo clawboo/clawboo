@@ -8,19 +8,19 @@ keywords:
 
 Claude Code is Anthropic's coding agent. Clawboo runs it through the Claude Agent SDK, so a Claude Code agent works with Claude Code's own tools: it reads and edits files, runs shell commands and fetches web pages. Clawboo records the cost Claude Code reports for each run. Use this page to set it up, see what Clawboo controls on it, and understand what it can do on your computer.
 
-| Topic           | Claude Code                                                                  |
-| --------------- | ---------------------------------------------------------------------------- |
-| Best for        | Code changes and other file work on Anthropic models                         |
-| You need        | An Anthropic API key, plus the Claude Agent SDK on an npm install of Clawboo |
-| Who bills you   | Anthropic, per token, on your API key                                        |
-| Cost in Clawboo | The real cost Claude Code reports                                            |
-| Steering        | Your comments reach a running task                                           |
+| Topic           | Claude Code                                                             |
+| --------------- | ----------------------------------------------------------------------- |
+| Best for        | Code changes and other file work on Anthropic models                    |
+| You need        | An Anthropic API key, plus the Claude Agent SDK, which **Install** adds |
+| Who bills you   | Anthropic, per token, on your API key                                   |
+| Cost in Clawboo | The real cost Claude Code reports                                       |
+| Steering        | Your comments reach a running task                                      |
 
 To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
 ## Before you begin
 
-- Clawboo installed with npm (`npm install -g clawboo`) or running from source. A one-off `npx clawboo@latest` run cannot load the Agent SDK that Claude Code needs.
+- Clawboo running, installed any way: `npm install -g clawboo`, a one-off `npx clawboo@latest` run, or a source checkout.
 - Node.js 22.12 or newer, with npm.
 - An Anthropic API key from [console.anthropic.com](https://console.anthropic.com/settings/keys). A `claude` CLI signed in with a Claude subscription is not enough: Clawboo shows Claude Code as connected, and offers it for your agents, only when an Anthropic API key is available.
 
@@ -30,21 +30,17 @@ To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
 <Step title="Install the Claude Agent SDK">
 
-Skip this step if you run Clawboo from source. On an npm install, install Clawboo and the SDK together:
+Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Claude Code** row, click **Install**, then **Install** in the panel that opens. Clawboo installs the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk@0.3`) into its own [runtimes folder](/operating/data-and-state#the-runtimes-folder) and shows npm's output. This works however you run Clawboo, `npx` included, and needs no `sudo` and no restart.
 
-```bash
-npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3
-```
-
-The SDK has to sit next to Clawboo, which is why both install globally. Clawboo does not ship it, because its Claude Code binary adds about 210 MB to every install. If Clawboo is already running, restart it with `clawboo restart`.
+Clawboo does not ship the SDK, because its Claude Code binary adds about 210 MB to every install. A source checkout already has it in its `node_modules`, and an SDK you installed next to a global Clawboo keeps working, so there the row reads **Needs key** or **Connected** without this step.
 
 </Step>
 
 <Step title="Check the Claude Code row">
 
-Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. You should see the **Claude Code** row read **Needs key**, or **Connected** if an Anthropic key is already saved. A Claude Code run loads the SDK and starts the SDK's own `claude` binary, which came with the SDK in the step above, so there is nothing more to install. A `claude` CLI on your `PATH` is not used and does not count: without the SDK the row reads **Not installed**.
+You should see the **Claude Code** row read **Needs key**, or **Connected** if an Anthropic key is already saved. A Claude Code run loads the SDK and starts the SDK's own `claude` binary, which came with the SDK in the step above, so there is nothing more to install. A `claude` CLI on your `PATH` is not used and does not count: without the SDK the row reads **Not installed**.
 
-If the row reads **Not installed**, on a global install of Clawboo click **Install**: it runs `npm install -g @anthropic-ai/claude-agent-sdk@0.3`, which puts the SDK next to Clawboo. A one-off `npx` run and a source checkout cannot load an SDK installed that way, so there the button explains what to run instead. If it still reads **Not installed**, check that the SDK sits next to Clawboo (`npm ls -g @anthropic-ai/claude-agent-sdk`) and that npm installed its platform package (an install with `--omit=optional` leaves the binary out), then run `clawboo restart`.
+If the install ends with "The Agent SDK installed without its own `<platform>-<arch>` binary, so Claude Code could not run on it and nothing was changed", npm left out the SDK's platform package, which is an optional dependency. Clawboo keeps no such install, so whatever ran Claude Code before still does. Check that npm may install optional dependencies, then click **Install** again.
 
 </Step>
 
@@ -123,7 +119,7 @@ In **Settings** > **Runtimes**, click **Manage** on the **Claude Code** row, the
 
 - Team setup has no model picker for Claude Code members.
 - It needs an Anthropic API key to read **Connected**; a Claude subscription sign-in alone doesn't count.
-- A one-off `npx` run of Clawboo cannot load the Agent SDK.
+- The `clawboo` package does not include the Agent SDK. **Install** on the **Claude Code** row adds it.
 - A hard cap counts Claude Code's cost only when each run ends, so it refuses the next run rather than stopping the current one.
 
 ## Troubleshooting
@@ -132,9 +128,9 @@ In **Settings** > **Runtimes**, click **Manage** on the **Claude Code** row, the
 
 <Accordion title="The run failed: The Claude Code runtime needs @anthropic-ai/claude-agent-sdk">
 
-The full message continues "which this clawboo install does not ship". The Agent SDK is missing or cannot load from this Clawboo, and the **Claude Code** row under **Runtimes** reads **Not installed**. Agents already on Claude Code still try to run and fail this way until it is installed.
+The full message continues "which this clawboo install does not ship" and says to install Claude Code from Settings, Runtimes. Clawboo found no Agent SDK, in its runtimes folder or next to Clawboo, and the **Claude Code** row under **Runtimes** reads **Not installed**. Agents already on Claude Code still try to run and fail this way until it is installed.
 
-Install it next to Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3`, run `clawboo restart`, then send the message or start the task again. If you started Clawboo with `npx`, switch to the global install first.
+Click **Install** on the **Claude Code** row in **Settings** > **Runtimes**, then send the message or start the task again.
 
 </Accordion>
 
@@ -168,9 +164,11 @@ The key check could not reach Anthropic from this computer. Check your network o
 
 </Accordion>
 
-<Accordion title="Permission denied. A global install may require elevated permissions.">
+<Accordion title="Installation failed with exit code 1.">
 
-npm could not write to its global folder. The message suggests `sudo npm install -g @anthropic-ai/claude-agent-sdk@0.3`. A Node version manager such as nvm or fnm avoids the problem without `sudo`; install Node through one, then click **Install** again.
+npm failed while installing the SDK into Clawboo's runtimes folder (the exit number can differ). The message goes on with npm's own reason, and the error code is npm's, such as `EACCES` or `ETARGET`. **Install** never writes to npm's global folder, so it needs no `sudo`. Clawboo removed the failed install, and an SDK you already had keeps working. Fix what npm reports, then click **Install** again.
+
+If the message says Clawboo's runtimes folder must be apart from another folder, or belongs to another user, see [When Clawboo will not use it](/operating/data-and-state#when-clawboo-will-not-use-it).
 
 </Accordion>
 
@@ -192,7 +190,7 @@ The Clawboo server cannot find npm. Install Node.js 22.12 or newer, restart Claw
 
 - Clawboo calls the SDK's `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`. It also passes the run's working folder (the task's worktree, or else the team's folder), the model when a run names one, a session to resume, Clawboo's four MCP servers over HTTP, and the scrubbed environment plus the connected key. It sets `settingSources: ['project']`, passes `settings` with `autoMemoryEnabled: false` and a `claudeMdExcludes` list that covers every folder above the working folder and your home folder, and sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the environment, over any value Clawboo itself runs with.
 - Claude Code files its saved sessions under the folder they ran in. When Clawboo moves a team folder into the [work folder](/operating/data-and-state#move-older-work-into-it), it drops the session ids it saved for Claude Code agents (1:1 chat, team chat and task pointers), and when it moves a task checkout, the session id in that checkout's handoff. The next turn starts a fresh session with the brief and the chat history. Codex, Hermes and Clawboo Native agents keep their sessions.
-- The SDK starts Claude Code from its own platform package. The `claude` command that **Install** adds is what the Runtimes row checks for. A source build of Clawboo uses SDK version 0.3.268.
+- The SDK starts Claude Code from its own platform package. The Runtimes row checks for the SDK and that binary, never for a `claude` CLI. A run loads the SDK from Clawboo's runtimes folder first, by its file path, else from next to Clawboo (a source checkout's `node_modules`, or an SDK installed next to a global Clawboo). A source build of Clawboo uses SDK version 0.3.268.
 - Run a board task on Claude Code directly with `POST /api/runtimes/claude-code/run`; see the [Runtimes API](/reference/rest-api/runtimes). Such a run falls back to the `claude` CLI's own sign-in when no Anthropic key is available.
 - A run that hits Claude Code's turn limit ends cleanly, and the task runner continues the task in a fresh session with a handoff note. So does a run whose conversation outgrew the model's context window: it ends out of room rather than failed, with a non-fatal error coded `context_overflow` that says why. Three values of a `result`'s `terminal_reason` mean that: `prompt_too_long` (the API refused the prompt and compaction could not make it fit), `blocking_limit` (Claude Code's own count reached its limit with no compaction to fall back on, so it refused before calling the API) and `rapid_refill_breaker` (the context refilled to the limit within 3 turns of a compaction, 3 times in a row, so it gave up compacting). Clawboo does not resume such a session. In team chat, where nothing restarts by itself, the task is blocked and its saved session dropped, and **Retry** runs it in a fresh session. In a one-to-one chat, the next message starts fresh and the chat says so. Claude Code's own text for these endings, such as advice to use its `/clear`, is never shown as the agent's reply. It goes on the board as the failure's detail, so a task that ran out of room this way says why.
 - An API error reaches the SDK as an assistant message with an `error` field (`authentication_failed`, `billing_error`, `rate_limit`, ...) and then a `result` with `subtype: 'success'` and `is_error: true`. Clawboo reads that pair as a failed run carrying the `error` value as its code, and does not show the error notice as the agent's reply. A refused key or login (`authentication_failed`, `oauth_org_not_allowed`, `cloud_credential_error`) is filed as `Auth` and a refused account (`billing_error`, `account_on_hold`, `verification_required`) as `Billing`, so the task waits in **Needs you** with **Fix sign-in** instead of being retried; see [Error classes](/reference/events-and-errors#error-classes). Other failed results, such as `error_during_execution`, keep the cause from their `errors` list.

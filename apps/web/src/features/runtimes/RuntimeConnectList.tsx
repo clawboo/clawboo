@@ -46,6 +46,7 @@ import { RuntimeConnectionCard, type DisplayState } from './RuntimeConnectionCar
 import { RuntimeManageBody } from './RuntimeManageBody'
 import { OpenClawIcon, RuntimeIcon } from './RuntimeBrand'
 import { RUNTIME_CATALOG, type RuntimeCatalogEntry, type RuntimeId } from './runtimeCatalog'
+import { useTerminalCommand } from './useTerminalCommand'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -389,6 +390,9 @@ function OpenClawRow({
   onChanged: () => void | Promise<void>
 }) {
   const [userExpanded, setUserExpanded] = useState(false)
+  // The full path when Clawboo installed OpenClaw: it is not on the PATH. Read
+  // again once it connects, since the setup that installs it runs in this row.
+  const openclaw = useTerminalCommand('openclaw', !!config.connected)
   const testId = 'runtime-list-row-openclaw'
   const openRow = useCallback(() => setUserExpanded(true), [])
   useFocusedRow('openclaw', testId, openRow)
@@ -434,7 +438,7 @@ function OpenClawRow({
                   onChanged={onChanged}
                   subscriptionTool="openclaw"
                   subscriptionConnected={!!config.subscriptionConnected}
-                  subscriptionLoginCommand="openclaw models auth login --provider openai-codex"
+                  subscriptionLoginCommand={`${openclaw} models auth login --provider openai-codex`}
                   codexReady={!!config.codexReady}
                 />
                 <OpenClawDefaultModel />

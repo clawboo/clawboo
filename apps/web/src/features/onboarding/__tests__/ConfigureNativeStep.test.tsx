@@ -613,7 +613,7 @@ describe('ConfigureNativeStep', () => {
       await userEvent.click(screen.getByTestId('native-provider-openai'))
       // The install affordance is a real button (+ the manual command as reference).
       expect(await screen.findByTestId('native-codex-install')).toBeInTheDocument()
-      expect(screen.getByText('npm install -g @openai/codex')).toBeInTheDocument()
+      expect(screen.getByText('npm install -g @openai/codex@0')).toBeInTheDocument()
       expect(screen.getByTestId('native-continue')).toBeDisabled()
 
       // Install completes → re-probe → the one-click sign-in state.

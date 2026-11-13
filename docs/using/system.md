@@ -108,7 +108,7 @@ Open **Settings** > **System**, in the **System** group. The panel has three car
 
 <Step title="Update the OpenClaw program">
 
-Open **Settings** > **System** and click **Check for Updates**. It starts at once, with no confirmation: it runs `npm install -g openclaw@~2026.9` and shows npm's output below the button. You should see "Updated to" and the version, and the **OpenClaw** row shows the new version.
+Open **Settings** > **System** and click **Check for Updates**. It starts at once, with no confirmation: it installs `openclaw@~2026.9` into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder) and shows npm's output below the button. You should see "Updated to" and the version, and the **OpenClaw** row shows the new version.
 
 </Step>
 
@@ -120,13 +120,15 @@ The Gateway that is already running keeps the old version until it restarts. Ope
 
 </Steps>
 
-**Check for Updates** installs the newest release in the OpenClaw line this Clawboo is tested with (2026.9), which may not be OpenClaw's newest. If OpenClaw is not installed, the same button installs it; to set OpenClaw up and start its Gateway, use **Settings** > **Runtimes** > **OpenClaw** instead (see [OpenClaw](/runtimes/openclaw)). npm can refuse the install when your Node.js is outside the range OpenClaw supports, which is narrower than Clawboo's; the OpenClaw page lists it.
+**Check for Updates** installs the newest release in the OpenClaw line this Clawboo is tested with (2026.9), which may not be OpenClaw's newest. If OpenClaw is not installed, the same button installs it; to set OpenClaw up and start its Gateway, use **Settings** > **Runtimes** > **OpenClaw** instead (see [OpenClaw](/runtimes/openclaw)).
+
+OpenClaw runs on the Node.js Clawboo runs on, the version in the **Node.js** row. The button checks that version first: outside the range OpenClaw supports, which is narrower than Clawboo's, it installs nothing and says so. The OpenClaw page lists the range. A new install goes in beside the current one and replaces it only when npm succeeds, so a failed update leaves the OpenClaw you had. An OpenClaw you installed globally yourself stays where it is, and Clawboo uses its own copy from then on.
 
 ### If OpenClaw needs its data updated
 
 A newer OpenClaw can refuse to start until `openclaw doctor --fix` updates data that an older version wrote. When Clawboo starts the Gateway and OpenClaw asks for this, Clawboo runs `openclaw doctor --fix --non-interactive` once, then starts the Gateway again. It does this whenever Clawboo starts the Gateway: **Restart**, **Reconnect OpenClaw**, or the OpenClaw setup. It leaves a Gateway you run as a launchd or systemd service alone. The repair usually takes seconds.
 
-If the repair fails, the error says so and includes the reason ("OpenClaw needs `openclaw doctor --fix`, and running it failed"). Run `openclaw doctor --fix` in a terminal to see what it needs, then start the Gateway again. Do the same if OpenClaw still asks for it after Clawboo ran it. When the Gateway fails to start for another reason, the error reads "Gateway did not start:" followed by OpenClaw's own reason. The Gateway's log is `~/.clawboo/gateway.log`.
+If the repair fails, the error says so and includes the reason ("OpenClaw needs `openclaw doctor --fix`, and running it failed"). Run `openclaw doctor --fix` in a terminal to see what it needs (`~/clawboo-runtimes/bin/openclaw doctor --fix` when Clawboo installed OpenClaw, since that folder is not on your `PATH`), then start the Gateway again. Do the same if OpenClaw still asks for it after Clawboo ran it. When the Gateway fails to start for another reason, the error reads "Gateway did not start:" followed by OpenClaw's own reason. The Gateway's log is `~/.clawboo/gateway.log`.
 
 ## Deployment settings
 
@@ -171,7 +173,7 @@ The [CLI reference](/reference/cli) covers `clawboo stop`, `clawboo restart` and
 
 - The chip reads `GET /api/system/self-version`, and **Click to update** calls `POST /api/system/self-update`, which runs `npm install -g clawboo@latest`, waits for the agent runs going (see [Drain and hold](/reference/rest-api/system#drain-and-hold)) and restarts the server on the same port. **Restart now** sends the same request with `{"force": true}`. It works only for a global install whose folders the server's user can write; an npx run, a source checkout or another user's install gets the command to copy instead. With `CLAWBOO_DISABLE_SELF_UPDATE=1` (or `disableSelfUpdate` in the operator settings file) there is no chip, and the update route refuses.
 - The **Deployment** card reads `GET /api/system/operator-settings`, and its switch calls `PUT /api/system/operator-settings/disableBrowserAutostart`.
-- **Check for Updates** calls `POST /api/system/install-openclaw`. **Restart** calls `POST /api/system/gateway` with `{"action": "restart"}`, which waits up to 60 seconds for the Gateway's port.
+- **Check for Updates** calls `POST /api/system/install-openclaw`, which checks the Node.js version, then installs into the runtimes folder. **Restart** calls `POST /api/system/gateway` with `{"action": "restart"}`, which waits up to 60 seconds for the Gateway's port.
 - **Command Approval** reads `GET /api/system/openclaw-config` and writes `PATCH /api/system/openclaw-config` with `{"exec": {"ask": "on-miss"}}` (or `off`, `always`).
 - See the [System API](/reference/rest-api/system) for every route.
 
@@ -189,9 +191,13 @@ The chip shows npm's own reason, such as no matching version, a network failure,
 
 </Accordion>
 
-<Accordion title="Check for Updates shows Permission denied">
+<Accordion title="Check for Updates fails">
 
-The log reads "Permission denied. Your Node.js installation may require sudo for global installs." and suggests a `sudo npm install -g` command. npm cannot write to its global folder. Installing Node.js with a version manager such as nvm or fnm, or with Homebrew, keeps global packages where you can write them, so no `sudo` is needed. Then click **Check for Updates** again.
+**Check for Updates** installs into Clawboo's runtimes folder, never npm's global folder, so it needs no `sudo`. The error says what stopped it:
+
+- `Node.js … is too old for OpenClaw` (or `is not one OpenClaw runs on`): nothing was installed, because OpenClaw would run on that Node.js. If Clawboo came with the desktop app, update the app; otherwise start Clawboo with Node 24.22.1 or a newer Node 24. Then click **Check for Updates** again. See [OpenClaw troubleshooting](/runtimes/openclaw#troubleshooting).
+- `Installation failed with exit code` and npm's reason: npm failed. Fix what it reports, then click **Check for Updates** again. The OpenClaw you had is unchanged.
+- A message that Clawboo's runtimes folder must be apart from another folder, or belongs to another user: see [When Clawboo will not use it](/operating/data-and-state#when-clawboo-will-not-use-it).
 
 </Accordion>
 

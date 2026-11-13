@@ -30,6 +30,7 @@
 // nothing leaks between Vitest's module registries.
 
 import os from 'node:os'
+import path from 'node:path'
 
 const realHomedir = os.homedir
 
@@ -48,3 +49,13 @@ os.homedir = function sandboxedHomedir(): string {
 // team folders and checkouts into that real folder, and a team-delete test
 // removes `teams/<id>` from it. A suite that needs one sets it itself.
 delete process.env['CLAWBOO_WORK_DIR']
+
+// Likewise a CLAWBOO_RUNTIMES_DIR from the shell, or a real ~/clawboo-runtimes
+// holding a Codex or OpenClaw Clawboo installed, would make every suite find
+// that copy first (a Codex error then advises Settings instead of npm). So no
+// suite sees one unless it makes its own: this folder is never created.
+process.env['CLAWBOO_RUNTIMES_DIR'] = path.join(
+  os.tmpdir(),
+  `clawboo-test-no-runtimes-${process.pid}`,
+  'runtimes',
+)

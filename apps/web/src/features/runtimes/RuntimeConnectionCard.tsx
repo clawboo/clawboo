@@ -53,6 +53,7 @@ import { confirm } from '@/stores/confirm'
 import { nativeProviderForEnvVar } from '@/lib/nativeProviders'
 import { RuntimeIcon } from './RuntimeBrand'
 import type { RuntimeCatalogEntry } from './runtimeCatalog'
+import { withTerminalName } from './useTerminalCommand'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -443,14 +444,19 @@ export function RuntimeConnectionCard({
       {display === 'needs-login' && entry.id === 'codex' && (
         <ChatGptSignIn
           tool="codex"
-          loginCommand={entry.loginCommand ?? 'codex login'}
+          loginCommand={withTerminalName(
+            entry.loginCommand ?? 'codex login',
+            'codex',
+            status?.terminalCommand ?? 'codex',
+          )}
           onLoggedIn={() => void handleRecheck()}
         />
       )}
 
-      {/* Install command — subdued, its own row (the primary action is the
-          Install button below), so a long `npm install -g …` never competes
-          with or crowds the CTA on the narrow onboarding card. */}
+      {/* Install-by-hand command — subdued, its own row (the primary action is
+          the Install button below, which installs into Clawboo's runtimes
+          folder), so a long command never competes with or crowds the CTA on
+          the narrow onboarding card. */}
       {display === 'not-installed' && entry.installCommand && (
         <div
           className="rounded-lg px-3 py-2 font-mono text-[10px]"

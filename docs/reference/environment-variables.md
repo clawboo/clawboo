@@ -5,6 +5,7 @@ keywords:
   [
     'env vars',
     'CLAWBOO_HOME',
+    'CLAWBOO_RUNTIMES_DIR',
     'STUDIO_ACCESS_TOKEN',
     'HOST',
     'CLAWBOO_BASE_PATH',
@@ -41,6 +42,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | **Folders**                            |                                   |                                                                        |
 | `CLAWBOO_HOME`                         | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
 | `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
+| `CLAWBOO_RUNTIMES_DIR`                 | `~/clawboo-runtimes`              | Runtimes Clawboo installs; `<CLAWBOO_HOME>-runtimes` when that is set  |
 | `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes                      |
 | `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                              |
 | `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                                |
@@ -245,7 +247,7 @@ The data folder, where Clawboo keeps its own state.
 - Default: `~/.clawboo`
 - Example: `CLAWBOO_HOME=/srv/clawboo`
 
-It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, agent browser profiles, per-agent runtime homes and the history of team folders. It also moves the default work folder, which becomes `<CLAWBOO_HOME>-work` (see [CLAWBOO_WORK_DIR](#clawboo_work_dir)). The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
+It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, agent browser profiles, per-agent runtime homes and the history of team folders. It also moves the default work folder, which becomes `<CLAWBOO_HOME>-work` (see [CLAWBOO_WORK_DIR](#clawboo_work_dir)), and the default runtimes folder, which becomes `<CLAWBOO_HOME>-runtimes` (see [CLAWBOO_RUNTIMES_DIR](#clawboo_runtimes_dir)). The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
 
 ### CLAWBOO_WORK_DIR
 
@@ -258,6 +260,18 @@ The work folder, where all agent work goes: team folders (`teams/`), task worktr
 Clawboo uses the folder by its real path, with links resolved, and creates what it puts there readable only by you (`0700`). At startup it moves team folders and task checkouts that an older version made in `CLAWBOO_HOME` into this folder, leaving a link at each old path. Changing the value is a move too: the next start moves this install's work from the previous folder to the new one.
 
 The server refuses to start when this folder is the data folder, sits inside it or contains it, and when a value you set names a folder it cannot create. When the variable is unset and the default cannot be created, Clawboo logs a warning and keeps new work in `CLAWBOO_HOME`. In a container, set it to a second volume or folder. See [The work folder](/operating/data-and-state#the-work-folder).
+
+### CLAWBOO_RUNTIMES_DIR
+
+The runtimes folder, where Clawboo installs the runtimes it manages: OpenClaw, Claude Code's Agent SDK and Codex.
+
+- Type: path; a leading `~` is expanded and a relative path is resolved
+- Default: `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes` (`%USERPROFILE%\clawboo-runtimes` on Windows)
+- Example: `CLAWBOO_RUNTIMES_DIR=/srv/clawboo-runtimes`
+
+Clawboo uses the folder by its real path and creates it on the first install. Folders it creates there are `0755`, and each finished install is readable by other users and writable only by you. Clawboo looks here for a runtime before your `PATH`.
+
+Clawboo installs nothing into this folder, and runs nothing from it, when it is the data folder or the work folder, sits inside one or contains one, or when it, its `bin/` or a launcher belongs to another user or others can write to it. It then uses a runtime on your `PATH` instead, and the server still starts. Changing the value moves nothing: install the runtimes again from **Settings > Runtimes**. See [The runtimes folder](/operating/data-and-state#the-runtimes-folder).
 
 ### OPENCLAW_STATE_DIR
 

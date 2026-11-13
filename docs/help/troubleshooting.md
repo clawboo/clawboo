@@ -339,16 +339,9 @@ Clawboo checks a key before it saves one, with a single request to the provider'
 
 ### The Claude Code runtime needs @anthropic-ai/claude-agent-sdk
 
-**What it means:** a Claude Code run failed because the Claude Agent SDK is missing. The `clawboo` package leaves it out because it would add about 210 MB to every install. The **Claude Code** row can still read **Connected**, because that checks only the `claude` program and your key.
+**What it means:** a Claude Code run failed because Clawboo found no Claude Agent SDK, in its runtimes folder or next to Clawboo. The `clawboo` package leaves it out because it would add about 210 MB to every install. The **Claude Code** row reads **Not installed**.
 
-**Fix:**
-
-```bash
-npm install -g clawboo @anthropic-ai/claude-agent-sdk
-clawboo restart
-```
-
-Then send the message or start the task again. A one-off `npx` run cannot load the SDK, so switch to the global install first. See [Claude Code](/runtimes/claude-code).
+**Fix:** in **Settings > Runtimes**, click **Install** on the **Claude Code** row. It installs the SDK into Clawboo's own runtimes folder, however you run Clawboo, `npx` included. Then send the message or start the task again. See [Claude Code](/runtimes/claude-code).
 
 ### The Hermes install fails with (from versions: none)
 
@@ -398,11 +391,25 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 
 </Accordion>
 
-<Accordion title="Permission denied. A global install may require elevated permissions.">
+<Accordion title="Installation failed with exit code 1.">
 
-**What it means:** npm cannot write to its global folder while installing Claude Code or Codex. For OpenClaw the message reads "Permission denied. Your Node.js installation may require sudo for global installs."
+**What it means:** npm failed while installing OpenClaw, Claude Code or Codex (the exit number can differ). Clawboo installs these into its own [runtimes folder](/operating/data-and-state#the-runtimes-folder), never npm's global folder, so none of them needs `sudo`. The message goes on with npm's own reason, and the error code is npm's, such as `EACCES` or `ETARGET`. Clawboo removed the failed install, and a copy you already had keeps working.
 
-**Fix:** use Node.js from a version manager (nvm or fnm) or from Homebrew, which install global packages without `sudo`, then click **Retry**. The message also names the `sudo` command if you prefer it.
+**Fix:** fix what npm reports, then click **Retry** or **Install** again.
+
+</Accordion>
+<Accordion title="Clawboo's runtimes folder must be apart from Clawboo's data folder">
+
+**What it means:** Clawboo will not install into its runtimes folder, or run anything from it. The same refusal reads "must be apart from the work folder", or says the folder "belongs to another user or others can write to it", and with `CLAWBOO_RUNTIMES_DIR` set it names that variable. The install's error code is `RUNTIMES_DIR_REFUSED`. Until it is fixed, Clawboo uses a runtime on your `PATH`, if there is one.
+
+**Fix:** set `CLAWBOO_RUNTIMES_DIR` to a folder of its own and restart Clawboo, or, for a folder you do not own, make it yours and run `chmod go-w` on it. See [When Clawboo will not use it](/operating/data-and-state#when-clawboo-will-not-use-it).
+
+</Accordion>
+<Accordion title="Node.js … is too old for OpenClaw, or is not one OpenClaw runs on">
+
+**What it means:** OpenClaw runs on the Node.js Clawboo runs on, and this one is outside OpenClaw's range (`>=24.22.1 <25 || >=26.12.1`), so nothing was installed. The message names the Node.js found. The install's error code is `NODE_UNSUPPORTED`.
+
+**Fix:** if Clawboo came with the desktop app, update the app. Otherwise start Clawboo with Node 24.22.1 or a newer Node 24. Then click **Retry**, or **Check for Updates** in **Settings > System**. **Settings > System** shows the Node.js Clawboo runs on. See [OpenClaw](/runtimes/openclaw#troubleshooting).
 
 </Accordion>
 
@@ -418,7 +425,7 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 
 **What it means:** OpenClaw wanted a one-time update to its data before starting, and the `openclaw doctor --fix` that Clawboo ran for it failed.
 
-**Fix:** run `openclaw doctor --fix` in a terminal to see the whole report, then click **Retry** or **Reconnect OpenClaw**.
+**Fix:** run `openclaw doctor --fix` in a terminal to see the whole report (`~/clawboo-runtimes/bin/openclaw doctor --fix` when Clawboo installed OpenClaw), then click **Retry** or **Reconnect OpenClaw**.
 
 </Accordion>
 

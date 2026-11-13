@@ -46,8 +46,13 @@ export interface RuntimeDescriptor {
   sdkBinary?: 'claude-agent-sdk'
   /** How the runtime is installed. null = nothing to install (built-in). */
   packageManager: 'npm' | 'pip' | null
-  /** Package to install (`npm install -g <pkg>` / `pip|pipx install <pkg>`). */
+  /** Package to install. An npm runtime installs it into a folder of its own
+   *  under Clawboo's runtimes folder (`npmRuntimeInstall.ts`), never with
+   *  `npm install -g`; any other runtime's installer says how it uses it. */
   pkg: string | null
+  /** For an npm runtime: the package's commands to put in the runtimes folder's
+   *  `bin/` (each runs on the Node that installed it). Empty for a library. */
+  npmBins?: readonly string[]
   /** For a `pip` runtime: the lowest Python 3 MINOR version the package installs
    *  on (e.g. 11 for `>=3.11`). The installer resolves an interpreter inside
    *  `pythonMinMinor`..`pythonMaxMinor`, preferring version-specific binaries
@@ -58,7 +63,8 @@ export interface RuntimeDescriptor {
    *  on (e.g. 13 for `<3.14`). Omitted = no upper bound. Without it the installer
    *  would take the newest Python it finds, so a 3.14 would win over a 3.12. */
   pythonMaxMinor?: number
-  /** Human-readable install command (UI + error remediation). */
+  /** Human-readable install command, for a person installing it by hand (UI +
+   *  error remediation). Null when only Clawboo's own install will do. */
   installCommand: string | null
   /** Ships inside the clawboo server — always installed, never installable. */
   builtIn: boolean
@@ -89,7 +95,11 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     // driver is built against, so a future 0.4 or a compromised publish is never
     // auto-installed. Bump deliberately on review, together with apps/web.
     pkg: '@anthropic-ai/claude-agent-sdk@0.3',
-    installCommand: 'npm install -g @anthropic-ai/claude-agent-sdk@0.3',
+    // A library, so no commands: runs import it from Clawboo's runtimes folder.
+    npmBins: [],
+    // Installed by hand it has to sit next to Clawboo, which only a global
+    // Clawboo allows, so Install in Clawboo is the way it is offered.
+    installCommand: null,
     builtIn: false,
     authKind: 'api-key',
     envVar: 'ANTHROPIC_API_KEY',
@@ -103,6 +113,8 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     packageManager: 'npm',
     // Pinned to the current 0.x major (blocks an auto-install of a future 1.0).
     pkg: '@openai/codex@0',
+    npmBins: ['codex'],
+    // By hand: a global Codex on PATH is still found when Clawboo has none.
     installCommand: 'npm install -g @openai/codex@0',
     builtIn: false,
     // Codex authenticates via an interactive ChatGPT OAuth (`codex login`) — it

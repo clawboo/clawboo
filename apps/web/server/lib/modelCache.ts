@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { resolveStateDir } from '@clawboo/config'
 
 import { isWindows, resolveShimName } from './platform'
+import { ownedRuntimeLaunch } from './runtimeFolder'
 
 const execFileAsync = promisify(execFile)
 
@@ -148,19 +149,29 @@ let listingNeedsOwner = false
  */
 async function runModelList(): Promise<string> {
   const run = async (agent: string | null): Promise<string> => {
-    // On Windows, bare 'openclaw' is openclaw.cmd — Node spawn won't resolve
-    // the .cmd extension by itself, so use the platform-aware shim name.
+    // The copy in Clawboo's runtimes folder first, then one on PATH (found by
+    // name; on Windows bare 'openclaw' is openclaw.cmd, which Node spawn won't
+    // resolve by itself, so the platform-aware shim name, through a shell).
     // `shell: isWindows` — Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn
     // .cmd files without it (CVE-2024-27980 fix). On Unix it's a no-op.
     // `windowsHide: isWindows` — hide the cmd.exe console window that would
     // otherwise flash in front of the dashboard on each model-list refresh.
+    // Clawboo's own copy runs as its Node and script, with no shell.
+    const owned = ownedRuntimeLaunch('openclaw')
     const { stdout } = await execFileAsync(
-      resolveShimName('openclaw'),
-      ['models', 'list', '--all', '--json', ...(agent ? ['--agent', agent] : [])],
+      owned ? owned.command : resolveShimName('openclaw'),
+      [
+        ...(owned ? owned.args : []),
+        'models',
+        'list',
+        '--all',
+        '--json',
+        ...(agent ? ['--agent', agent] : []),
+      ],
       {
         timeout: 15_000,
         env: { ...process.env },
-        shell: isWindows,
+        shell: owned ? false : isWindows,
         windowsHide: isWindows,
       },
     )

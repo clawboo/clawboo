@@ -22,6 +22,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 import { findExecutable, isWindows } from './platform'
+import { ownedRuntimeLaunch } from './runtimeFolder'
 
 const execFileAsync = promisify(execFile)
 
@@ -29,6 +30,11 @@ export interface OpenClawInfo {
   installed: boolean
   version: string | null
   path: string | null
+  /** Where it was found: Clawboo's own runtimes folder, or PATH (a global
+   *  install). Null when it is not installed. */
+  source: 'clawboo' | 'path' | null
+  /** The Node an install from Clawboo runs on, as the install recorded it. */
+  node: { path: string; version: string } | null
 }
 
 // Bound on the version probe. The version string is non-critical — every
@@ -44,26 +50,47 @@ const VERSION_TIMEOUT_MS = 6_000
 let versionCache: { path: string; version: string } | null = null
 
 /**
- * Cheap synchronous PATH lookup — answers "is it installed, and where".
- * This is a fast `which` / `where` resolution, NOT a process spawn of
- * openclaw itself, so it's safe to call synchronously.
+ * Cheap synchronous lookup — answers "is it installed, and where". The copy
+ * Clawboo installed into its runtimes folder comes first (its launcher runs it
+ * on the Node it was installed with); a global install on PATH is the fallback,
+ * so an existing setup keeps working. A fast `which` / `where` resolution plus
+ * a few file reads, NOT a process spawn of openclaw itself, so it's safe to call
+ * synchronously.
  */
 export function findOpenClawPath(): string | null {
-  return findExecutable('openclaw')
+  return ownedRuntimeLaunch('openclaw')?.launcher ?? findExecutable('openclaw')
 }
 
 /**
  * Async, cached, bounded OpenClaw detection. Never blocks the event loop.
  */
 export async function detectOpenClaw(): Promise<OpenClawInfo> {
-  const binPath = findOpenClawPath()
+  // Clawboo's own install records its version, so there is nothing to spawn.
+  const owned = ownedRuntimeLaunch('openclaw')
+  if (owned) {
+    return {
+      installed: true,
+      version: owned.record.version,
+      path: owned.launcher,
+      source: 'clawboo',
+      node: owned.record.interpreter ?? null,
+    }
+  }
+
+  const binPath = findExecutable('openclaw')
   if (!binPath) {
     versionCache = null // uninstalled — drop any stale cache
-    return { installed: false, version: null, path: null }
+    return { installed: false, version: null, path: null, source: null, node: null }
   }
 
   if (versionCache && versionCache.path === binPath) {
-    return { installed: true, version: versionCache.version, path: binPath }
+    return {
+      installed: true,
+      version: versionCache.version,
+      path: binPath,
+      source: 'path',
+      node: null,
+    }
   }
 
   try {
@@ -80,13 +107,13 @@ export async function detectOpenClaw(): Promise<OpenClawInfo> {
     const raw = stdout.trim()
     const version = raw.replace(/^openclaw\s+v?/i, '').trim() || raw
     versionCache = { path: binPath, version } // cache success only
-    return { installed: true, version, path: binPath }
+    return { installed: true, version, path: binPath, source: 'path', node: null }
   } catch {
     // ETIMEDOUT or a read failure — the binary IS present (findExecutable
     // found it), we just couldn't read its version this time. Don't cache
     // the miss; return installed:true so the install / gateway / status
     // flows keep moving instead of freezing.
-    return { installed: true, version: null, path: binPath }
+    return { installed: true, version: null, path: binPath, source: 'path', node: null }
   }
 }
 
@@ -94,4 +121,36 @@ export async function detectOpenClaw(): Promise<OpenClawInfo> {
  * detection re-reads the version instead of serving a stale cache. */
 export function invalidateOpenClawCache(): void {
   versionCache = null
+}
+
+/** How to start `openclaw` from the server: a command, the arguments that go
+ *  before OpenClaw's own, and whether it needs a shell. */
+export interface OpenClawInvocation {
+  command: string
+  args: string[]
+  shell: boolean
+  /** For Clawboo's own copy, the install folder these arguments run from, to
+   *  mark a long-lived process with (`markInstallInUse`). */
+  installFolder?: string
+}
+
+/**
+ * How the server starts OpenClaw. Clawboo's own copy runs as what its launcher
+ * runs (the Node that installed it, with OpenClaw's entry script), with no
+ * shell in between: on Windows that avoids a `.cmd` through cmd.exe, which
+ * breaks on a path with a space. A copy on PATH runs as before (`openclaw.cmd`
+ * needs a shell on Windows). Null when there is neither.
+ */
+export function openclawInvocation(): OpenClawInvocation | null {
+  const owned = ownedRuntimeLaunch('openclaw')
+  if (owned) {
+    return {
+      command: owned.command,
+      args: [...owned.args],
+      shell: false,
+      installFolder: owned.record.folder,
+    }
+  }
+  const onPath = findExecutable('openclaw')
+  return onPath ? { command: onPath, args: [], shell: isWindows } : null
 }

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { CheckCircle2, ShieldCheck } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
+import { useTerminalCommand } from '@/features/runtimes/useTerminalCommand'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,8 @@ type Phase = 'idle' | 'approving' | 'approved' | 'error'
  * `onApproved` so the caller can retry the connect.
  */
 export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApprovalProps) {
+  // The full path when Clawboo installed OpenClaw: it is not on the PATH.
+  const openclaw = useTerminalCommand('openclaw')
   const [phase, setPhase] = useState<Phase>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -155,11 +158,11 @@ export function DevicePairingApproval({ onApproved, onCancel }: DevicePairingApp
       <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">
         Or from your terminal:{' '}
         <code className="rounded bg-foreground/[0.05] px-1 py-0.5 text-foreground/60">
-          openclaw devices approve --latest
+          {openclaw} devices approve --latest
         </code>{' '}
         then{' '}
         <code className="rounded bg-foreground/[0.05] px-1 py-0.5 text-foreground/60">
-          openclaw devices approve &lt;requestId&gt;
+          {openclaw} devices approve &lt;requestId&gt;
         </code>
         .
       </p>

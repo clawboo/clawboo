@@ -47,6 +47,7 @@
 import path from 'node:path'
 
 import { resolveRuntimeBin } from '../platform'
+import { runtimeBinDir, terminalCommandName } from '../runtimeFolder'
 import { buildChildEnv } from './childEnv'
 
 export type CliLoginTool = 'codex' | 'hermes' | 'openclaw'
@@ -74,6 +75,15 @@ export const CLI_LOGIN_COMMANDS: Record<CliLoginTool, string> = {
   codex: 'codex login',
   hermes: 'hermes auth add openai-codex',
   openclaw: 'openclaw models auth login --provider openai-codex',
+}
+
+/** The command shown for `tool`, with the full path of the copy in Clawboo's
+ *  runtimes folder when that is the one resolved: it is not on the person's PATH. */
+function displayCommandFor(tool: CliLoginTool, bin: string): string {
+  if (path.dirname(bin) !== runtimeBinDir()) return CLI_LOGIN_COMMANDS[tool]
+  return CLI_LOGIN_COMMANDS[tool].replace(new RegExp(`^${tool}\\b`), () =>
+    terminalCommandName(tool),
+  )
 }
 
 // Characters that are never part of a real program path but ARE meaningful to
@@ -126,7 +136,7 @@ export function buildCliLoginPlan(
         command: bin,
         args: ['login'],
         env: buildChildEnv(),
-        displayCommand: CLI_LOGIN_COMMANDS.codex,
+        displayCommand: displayCommandFor('codex', bin),
       },
     }
   }
@@ -147,7 +157,7 @@ export function buildCliLoginPlan(
           // The hermes bin dir is often off the server's PATH (Python user-site).
           PATH: `${binDir}${path.delimiter}${process.env['PATH'] ?? ''}`,
         }),
-        displayCommand: CLI_LOGIN_COMMANDS.hermes,
+        displayCommand: displayCommandFor('hermes', bin),
       },
     }
   }
@@ -179,7 +189,7 @@ export function buildCliLoginPlan(
         command: 'script',
         args: ['-q', '/dev/null', bin, ...loginArgs],
         env,
-        displayCommand: CLI_LOGIN_COMMANDS.openclaw,
+        displayCommand: displayCommandFor('openclaw', bin),
       },
     }
   }
@@ -193,7 +203,7 @@ export function buildCliLoginPlan(
       command: 'script',
       args: ['-qec', `'${bin}' ${loginArgs.join(' ')}`, '/dev/null'],
       env,
-      displayCommand: CLI_LOGIN_COMMANDS.openclaw,
+      displayCommand: displayCommandFor('openclaw', bin),
     },
   }
 }

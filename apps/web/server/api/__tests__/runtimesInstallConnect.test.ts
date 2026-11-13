@@ -7,7 +7,15 @@
 // NEVER echoes the key, codex's no-op needs-login, disconnect, the status shape +
 // connectionState matrix, and that a connected key reaches the run ctx.
 
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -51,6 +59,9 @@ const sdkState = vi.hoisted(() => ({ binary: null as string | null }))
 vi.mock('../../lib/runtimes/agentSdkBinary', () => ({
   AGENT_SDK_PACKAGE: '@anthropic-ai/claude-agent-sdk',
   resolveAgentSdkBinary: () => sdkState.binary,
+  agentSdkBinaryInInstall: () => sdkState.binary,
+  ownAgentSdkDir: () => null,
+  agentSdkEntryFile: (dir: string) => dir,
 }))
 
 // ── Mock how this server was installed (the real probe reads process.argv). ──
@@ -196,6 +207,8 @@ import {
   peekHermesAcp,
   resetHermesTransport,
 } from '../../lib/runtimes/hermesTransport'
+import { stableNodePath } from '../../lib/runtimes/npmRuntimeInstall'
+import { INSTALL_RECORD_FILE, launcherFileName } from '../../lib/runtimeFolder'
 
 interface Mock {
   res: Response
@@ -274,10 +287,15 @@ describe('runtimes install/connect REST', () => {
     'GROQ_API_KEY',
     'OLLAMA_BASE_URL',
     'HERMES_HOME',
+    'CLAWBOO_RUNTIMES_DIR',
+    'CLAWBOO_WORK_DIR',
   ] as const
 
   beforeEach(() => {
     for (const k of SAVED) prev[k] = process.env[k]
+    // The runtimes and work folders follow CLAWBOO_HOME (`<home>-runtimes`).
+    delete process.env['CLAWBOO_RUNTIMES_DIR']
+    delete process.env['CLAWBOO_WORK_DIR']
     delete process.env['ANTHROPIC_API_KEY']
     delete process.env['OPENROUTER_API_KEY']
     delete process.env['OPENAI_API_KEY']
@@ -314,6 +332,7 @@ describe('runtimes install/connect REST', () => {
       else process.env[k] = prev[k]
     }
     rmSync(home, { recursive: true, force: true })
+    rmSync(`${home}-runtimes`, { recursive: true, force: true })
     rmSync(stateDir, { recursive: true, force: true })
   })
 
@@ -333,19 +352,73 @@ describe('runtimes install/connect REST', () => {
     }
   })
 
-  // ── install (npm) ──────────────────────────────────────────────────────────
-  it('installs an npm runtime: spawns `npm install -g <pkg>`, completes', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
+  // ── install (npm): into Clawboo's runtimes folder, never `npm install -g` ──
+  /** The `--prefix` folder of an npm install call, or null. */
+  const prefixOf = (call: { args: string[] } | undefined): string | null => {
+    const i = call ? call.args.indexOf('--prefix') : -1
+    return i === -1 ? null : (call!.args[i + 1] ?? null)
+  }
+  /** Do what npm would: put the package (and its commands) in the prefix. */
+  const fakeNpmPuts = (
+    call: { args: string[] } | undefined,
+    name: string,
+    bin: Record<string, string> = {},
+  ): void => {
+    const pkgDir = path.join(prefixOf(call)!, 'node_modules', ...name.split('/'))
+    mkdirSync(pkgDir, { recursive: true })
+    writeFileSync(
+      path.join(pkgDir, 'package.json'),
+      JSON.stringify({ name, version: '1.2.3', bin }),
+    )
+    for (const rel of Object.values(bin)) {
+      mkdirSync(path.dirname(path.join(pkgDir, rel)), { recursive: true })
+      writeFileSync(path.join(pkgDir, rel), '// cli\n')
+    }
+  }
+
+  it('installs an npm runtime into its own folder under the runtimes folder, not globally', async () => {
     platformState.bins['codex'] = '/usr/bin/codex' // present post-install
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
-    expect(spawnState.calls[0]).toEqual({
-      cmd: 'npm',
-      args: ['install', '-g', '@openai/codex@0'],
-    })
+    const call = spawnState.calls[0]
+    expect(call?.args).not.toContain('-g')
+    expect(call?.args).toContain('install')
+    expect(call?.args[call.args.length - 1]).toBe('@openai/codex@0')
+    const prefix = prefixOf(call)
+    expect(path.dirname(prefix!)).toBe(path.join(realpathSync.native(home) + '-runtimes', 'codex'))
+    fakeNpmPuts(call, '@openai/codex', { codex: 'bin/codex.js' })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+    // Its command (`codex.cmd` on Windows), run by the Node that installed it,
+    // by the path that survives an upgrade (Homebrew's opt link for a keg Node).
+    const launcher = readFileSync(
+      path.join(`${home}-runtimes`, 'bin', launcherFileName('codex')),
+      'utf8',
+    )
+    expect(launcher).toContain(stableNodePath(process.execPath))
+    expect(launcher).toContain(
+      path.join(prefix!, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
+    )
+  })
+
+  it('a failed npm install leaves nothing behind and says why, with no sudo', async () => {
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
+    const prefix = prefixOf(spawnState.calls[0])
+    const child = spawnState.children[0] as FakeChild
+    child.emitStderr('npm error code EACCES\nnpm error syscall mkdir\n')
+    child.emitClose(1)
+    await m.ended
+    const err = m.events().find((e) => e['type'] === 'error')
+    expect(err?.['code']).toBe('EACCES')
+    expect(
+      m
+        .events()
+        .map((e) => String(e['message'] ?? ''))
+        .join(' '),
+    ).not.toMatch(/sudo/)
+    await vi.waitFor(() => expect(existsSync(prefix!)).toBe(false))
   })
 
   // ── Claude Code: the Agent SDK and its own binary, never the CLI alone ──────
@@ -400,7 +473,6 @@ describe('runtimes install/connect REST', () => {
   })
 
   it('Install fetches no second copy when the Agent SDK’s binary is already there', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
     sdkState.binary = SDK_BIN
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
@@ -412,7 +484,6 @@ describe('runtimes install/connect REST', () => {
   })
 
   it('Install fetches no CLI when the SDK’s binary is there, even with a CLI on PATH too', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
     platformState.bins['claude'] = '/usr/local/bin/claude'
     sdkState.binary = SDK_BIN
     const m = mockRes()
@@ -425,71 +496,84 @@ describe('runtimes install/connect REST', () => {
     ).toBe(true)
   })
 
-  it('Install fetches the Agent SDK a run loads, not the claude CLI', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
+  it('Install fetches the Agent SDK a run loads, into the runtimes folder, with no command', async () => {
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
-    expect(spawnState.calls[0]).toEqual({
-      cmd: 'npm',
-      args: ['install', '-g', '@anthropic-ai/claude-agent-sdk@0.3'],
-    })
-    sdkState.binary = SDK_BIN // what the install put next to clawboo
+    const call = spawnState.calls[0]
+    expect(call?.args).not.toContain('-g')
+    expect(call?.args[call.args.length - 1]).toBe('@anthropic-ai/claude-agent-sdk@0.3')
+    // Its platform binary is an optional dependency: never left out.
+    expect(call?.args).toContain('--include=optional')
+    expect(path.dirname(prefixOf(call)!)).toBe(
+      path.join(realpathSync.native(home) + '-runtimes', 'claude-code'),
+    )
+    fakeNpmPuts(call, '@anthropic-ai/claude-agent-sdk')
+    sdkState.binary = SDK_BIN // what the install put in the runtimes folder
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
     const done = m.events().find((e) => e['type'] === 'complete')
     expect(done).toEqual({ type: 'complete', success: true })
   })
 
-  it('an SDK install that the server still cannot load says why', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
+  it('an SDK install without its platform binary is not made current, and says why', async () => {
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    const prefix = prefixOf(spawnState.calls[0])!
+    fakeNpmPuts(spawnState.calls[0], '@anthropic-ai/claude-agent-sdk')
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
-    const done = m.events().find((e) => e['type'] === 'complete')
-    expect(done?.['success']).toBe(true)
-    expect(String(done?.['warning'])).toMatch(/next to Clawboo/)
+    expect(m.events().some((e) => e['type'] === 'complete')).toBe(false)
+    const err = m.events().find((e) => e['type'] === 'error')
+    expect(err?.['code']).toBe('UNUSABLE')
+    expect(String(err?.['message'])).toMatch(/without its own .* binary.*nothing was changed/)
+    // Whatever ran Claude Code before still does: no install of it is on record.
+    const runtimeDir = path.join(realpathSync.native(home) + '-runtimes', 'claude-code')
+    expect(existsSync(path.join(runtimeDir, INSTALL_RECORD_FILE))).toBe(false)
+    await vi.waitFor(() => expect(existsSync(prefix)).toBe(false))
   })
 
-  it('refuses an SDK install a one-off npx run or a source checkout could not load', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
-    for (const [method, hint] of [
-      ['npx', /npm install -g clawboo @anthropic-ai\/claude-agent-sdk@0\.3/],
-      ['dev', /pnpm install/],
-    ] as const) {
+  it('installs the SDK from a one-off npx run or a source checkout too', async () => {
+    // A run imports it from the runtimes folder, wherever Clawboo itself runs from.
+    for (const method of ['npx', 'dev'] as const) {
       installMethodState.method = method
+      spawnState.calls = []
+      spawnState.children = []
       const m = mockRes()
       runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
-      ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
+      expect(spawnState.calls, method).toHaveLength(1)
+      ;(spawnState.children[0] as FakeChild).emitClose(1)
       await m.ended
-      expect(spawnState.calls, method).toEqual([])
-      const err = m.events().find((e) => e['type'] === 'error')
-      expect(err?.['code'], method).toBe('SDK_NOT_LOADABLE')
-      expect(String(err?.['message']), method).toMatch(hint)
+      expect(
+        m.events().some((e) => e['code'] === 'SDK_NOT_LOADABLE'),
+        method,
+      ).toBe(false)
     }
   })
 
   it('installing codex (also how it is updated) drops the cached model probe', async () => {
-    platformState.bins['npm'] = '/usr/bin/npm'
     platformState.bins['codex'] = '/usr/bin/codex'
     const before = codexModelsState.invalidated
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
-    expect(spawnState.calls[0]).toEqual({
-      cmd: 'npm',
-      args: ['install', '-g', '@openai/codex@0'],
-    })
+    fakeNpmPuts(spawnState.calls[0], '@openai/codex', { codex: 'bin/codex.js' })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
     expect(codexModelsState.invalidated).toBe(before + 1)
   })
 
-  it('install reports NPM_MISSING when npm is absent (no spawn)', async () => {
-    const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
-    await m.ended
-    expect(m.events().some((e) => e['code'] === 'NPM_MISSING')).toBe(true)
-    expect(spawnState.calls.length).toBe(0)
+  it('refuses an npm install into a runtimes folder inside the data folder (no spawn)', async () => {
+    const prevDir = process.env['CLAWBOO_RUNTIMES_DIR']
+    process.env['CLAWBOO_RUNTIMES_DIR'] = path.join(home, 'runtimes')
+    try {
+      const m = mockRes()
+      runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
+      await m.ended
+      expect(m.events().find((e) => e['type'] === 'error')?.['code']).toBe('RUNTIMES_DIR_REFUSED')
+      expect(spawnState.calls.length).toBe(0)
+    } finally {
+      if (prevDir === undefined) delete process.env['CLAWBOO_RUNTIMES_DIR']
+      else process.env['CLAWBOO_RUNTIMES_DIR'] = prevDir
+    }
   })
 
   // ── install (pip / hermes) ──────────────────────────────────────────────────
