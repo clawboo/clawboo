@@ -75,7 +75,7 @@ export function agentUserPlan(p: PlanInput): string {
   }
   const u = p.agentUser
   const home = p.agentHome
-  const work = path.join(home, 'work')
+  const work = path.posix.join(home, 'work')
   const lines: string[] = [
     `# Agent isolation: run agents as the user ${u}, apart from ${p.serverUser}.`,
     '# Run these once, as an administrator. Clawboo never runs them itself.',
@@ -125,7 +125,8 @@ export function agentUserPlan(p: PlanInput): string {
     )
   }
   lines.push('')
-  if (p.nodePath.startsWith(p.serverHome + path.sep)) {
+  // The plan is for macOS and Linux, so their separator, whatever this host's.
+  if (p.nodePath.startsWith(p.serverHome + path.posix.sep)) {
     lines.push(
       `# Node runs from ${p.nodePath}, inside your home, where ${u} cannot reach it.`,
       '# Install Node, Clawboo and each runtime (Claude Code, Codex, Hermes) where every',
