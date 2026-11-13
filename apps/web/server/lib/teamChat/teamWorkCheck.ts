@@ -119,6 +119,21 @@ export async function historyExists(gitDir: string): Promise<boolean> {
 }
 
 /**
+ * `<reviews root>/team-<team>`, where a team's reviewer checkouts go. Pinned
+ * under that root with the same single startsWith test as
+ * `teamFolderHistoryDir`, so no team id can name a folder anywhere else.
+ */
+function teamReviewRoot(db: ClawbooDb, teamId: string): string {
+  const root = path.resolve(reviewsRoot(db))
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  const dir = path.resolve(root, `team-${sanitizeAgentId(teamId)}`)
+  if (!dir.startsWith(prefix)) {
+    throw new Error(`team review folder escapes ${root}: ${dir}`)
+  }
+  return dir
+}
+
+/**
  * `<history root>/<team>.git`. Pinned under that root with
  * the same single startsWith test as `teamWorkdirPath`, so no team id can name a
  * folder anywhere else.
@@ -621,7 +636,7 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
         detached: false,
       },
       diffStat: diff,
-      reviewRootDir: path.join(reviewsRoot(db), `team-${sanitizeAgentId(teamId)}`),
+      reviewRootDir: teamReviewRoot(db, teamId),
       verifyCommand: target.command,
       reviewSha: head,
       evidence: false,

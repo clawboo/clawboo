@@ -255,7 +255,14 @@ async function findInodes(
   root: string,
   targets: InodeRef[],
   maxEntries: number,
-): Promise<{ matches: string[]; privileged: string[]; truncated: boolean }> {
+): Promise<{
+  matches: string[]
+  privileged: string[]
+  truncated: boolean
+  /** Folders that could not be listed, or whose entries could not be looked
+   *  at: what they hold was not searched. Something deleted meanwhile is not. */
+  unreadable: string[]
+}> {
   const want = new Set(targets.map((t) => `${t.dev}:${t.ino}`))
   const matches: string[] = []
   const privileged: string[] = []
@@ -268,12 +275,18 @@ async function findInodes(
       ...(typeof process.getgroups === 'function' ? process.getgroups() : []),
     ].map((g) => BigInt(g)),
   )
+  const unreadable: string[] = []
+  const notSearched = (p: string, err: unknown): void => {
+    if (errorCode(err) === 'ENOENT') return
+    if (!unreadable.includes(p) && unreadable.length < MAX_SEARCH_MATCHES) unreadable.push(p)
+  }
   let seen = 0
   let rootDev: bigint
   try {
     rootDev = (await fs.promises.lstat(root, { bigint: true })).dev
-  } catch {
-    return { matches, privileged, truncated: false }
+  } catch (err) {
+    notSearched(root, err)
+    return { matches, privileged, truncated: false, unreadable }
   }
   const stack = [root]
   while (stack.length > 0) {
@@ -281,17 +294,20 @@ async function findInodes(
     let names: string[]
     try {
       names = await fs.promises.readdir(dir)
-    } catch {
+    } catch (err) {
+      notSearched(dir, err)
       continue
     }
     for (const name of names) {
-      if (++seen > maxEntries) return { matches, privileged, truncated: true }
+      if (++seen > maxEntries) return { matches, privileged, truncated: true, unreadable }
       if (seen % 512 === 0) await yieldNow()
       const p = path.join(dir, name)
       let st: fs.BigIntStats
       try {
         st = await fs.promises.lstat(p, { bigint: true })
-      } catch {
+      } catch (err) {
+        // A folder listed but not searchable (read without execute).
+        notSearched(dir, err)
         continue
       }
       if (st.isDirectory()) {
@@ -312,7 +328,7 @@ async function findInodes(
       }
     }
   }
-  return { matches, privileged, truncated: false }
+  return { matches, privileged, truncated: false, unreadable }
 }
 
 /** A folder's entries without following links, without blocking the host. */
