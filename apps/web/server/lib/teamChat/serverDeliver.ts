@@ -104,7 +104,12 @@ import { createRunCostTally } from '../runtimes/runCostTally'
 import { recordRunTokens } from '../runTokenLog'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { startFolderRun, type FolderRun } from '../runtimes/teamFolderActivity'
-import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
+import {
+  ensureTeamWorkdir,
+  taskRunFolderFor,
+  teamWorkdirFor,
+  TASK_FOLDER_NOTE,
+} from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext, buildTicketBlock } from './contextPreamble'
@@ -1146,6 +1151,17 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               }
             | undefined
           const resolvedRuntime = row?.runtime ?? null
+          // A run that holds a task starts in that task's own folder, inside its team
+          // folder, so the files it makes are tied to the task (see teamWorkdir.ts).
+          // Every other turn starts in the team folder. Either way the run reports in
+          // the team folder, which the team-chat work check measures.
+          const taskFolder =
+            runTaskId !== null
+              ? taskRunFolderFor(resolvedRuntime, {
+                  id: runTaskId,
+                  teamId: briefTask ? briefTask.teamId : teamId,
+                })
+              : null
           // The model a cost estimate is priced at when the run's cost events name
           // none. Native names its real model on every cost event, but a turn that
           // fails before one is priced at its configured model (an Ollama one as
@@ -1165,7 +1181,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           let adapter: RuntimeAdapter
           let homeKind = 'ephemeral'
           let homeDir: string | null = null
-          // The team's shared working folder (coding runtimes only; null otherwise).
+          // Where the run starts: its task's folder, or the team's shared folder
+          // (coding runtimes and Native only; null otherwise).
           let workdir: string | null = null
           // The resume handle THIS run was started with (ctx.resume) — drives the
           // drain's stale-pointer self-heal on a failed resumed run.
@@ -1291,12 +1308,17 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // turn never runs a task, so at most one of the two is set.
               taskPointer = readTaskPointer(runtime, homeDir)
               resumeHandle = taskPointer?.sessionId ?? teamResumeId
-              // Claude Code / Codex / Hermes / Native start in the team's own
-              // folder, not the server's working directory (clawboo's state dir).
-              // For Native the folder is also what turns on its file tools.
-              workdir = teamWorkdirFor(runtime, teamId)
+              // Claude Code / Codex / Hermes / Native start in the task's folder or
+              // the team's own folder, not the server's working directory (clawboo's
+              // state dir). For Native the folder is also what turns on its file
+              // tools, confined to it.
+              workdir = taskFolder?.dir ?? teamWorkdirFor(runtime, teamId)
               const ctx: RuntimeRunContext = {
                 ...(workdir ? { cwd: workdir } : {}),
+                // A run in its task's folder may still read the team folder holding it.
+                ...(taskFolder && workdir === taskFolder.dir
+                  ? { readRoot: taskFolder.teamFolder }
+                  : {}),
                 model: codingModel?.model ?? null,
                 ...(codingModel?.provider ? { providerHint: codingModel.provider } : {}),
                 resume: resumeHandle,
@@ -1404,6 +1426,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               heldReportUpIds = held.ids
               stamp.reportUpIds = [...(stamp.reportUpIds ?? []), ...held.ids]
             }
+            // A run in its task's folder is told so, beside its ticket.
+            if (taskFolder && capturedWorkdir === taskFolder.dir) {
+              ticketBlock = ticketBlock ? `${ticketBlock}\n\n${TASK_FOLDER_NOTE}` : TASK_FOLDER_NOTE
+            }
             return renderWaiting(ticketBlock, held?.text ?? null)
           }
 
@@ -1476,7 +1502,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // This run's report that it is working in the team folder, from just
           // before its start to its end (see teamFolderActivity).
           let folderRun: FolderRun | null = null
-          const runFolder = teamWorkdirFor(resolvedRuntime, teamId)
+          const runFolder = taskFolder?.teamFolder ?? teamWorkdirFor(resolvedRuntime, teamId)
           // The run's budget hold, from the budget gate until its cost settles or the
           // run is refused; the job's `finally` releases it too, whatever ended it.
           let runHold: RunBudgetHold | null = null
@@ -1642,7 +1668,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 // Never fall back to the server's working directory.
                 settleFailed(
                   new Error(
-                    `could not create the team's working folder ${capturedWorkdir}: ${e instanceof Error ? e.message : String(e)}`,
+                    `could not create the working folder ${capturedWorkdir}: ${e instanceof Error ? e.message : String(e)}`,
                   ),
                 )
                 return

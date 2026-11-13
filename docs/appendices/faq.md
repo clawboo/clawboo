@@ -102,7 +102,7 @@ Clawboo also writes to OpenClaw's `~/.openclaw` folder in a few cases:
 It depends on the runtime:
 
 - **Claude Code, Codex and Hermes** run with their own approval prompts and sandboxes turned off. They can read and change any file your user account can, and run commands, without asking you.
-- **Clawboo Native** agents read and write files only inside the folder their run works in: their team's folder in team chat, in one-to-one chat and on research and review tasks, or the task's own git worktree. Commands stay off until you switch on **Let this Boo ask to run commands** on the agent's page, under **Details > Permissions**, and then every command asks you first.
+- **Clawboo Native** agents write files only inside the folder their run works in: the task's own folder on a task with no worktree (in team chat, from the Board, or a research or review task), their team's folder on other team-chat turns and in one-to-one chat, or the task's own git worktree. On a task with no worktree they can also read the rest of the team's folder. Commands stay off until you switch on **Let this Boo ask to run commands** on the agent's page, under **Details > Permissions**, and then every command asks you first.
 - **OpenClaw** agents work in their own OpenClaw workspace, under OpenClaw's own sandbox settings. Their commands follow the **Command Execution** setting under **Details > Permissions** on their page: **Run Freely**, **Ask for Unknown** (where agents you create in Clawboo start) or **Always Ask**.
 
 A git worktree keeps a task's file changes apart from your other files, but it is not a sandbox. For work you do not trust, run Clawboo as a separate user or in a virtual machine. See [What agents can do](/concepts/permissions).
@@ -133,7 +133,7 @@ No, but the Clawboo server has to keep running. The server runs your team's work
 
 ### Where do I find what my team made?
 
-Boo Zero posts a summary in the chat when the teammates finish. Each teammate's full result is saved on its task: open **Comments & activity** on the task card in the chat, or open the task on the **Board**. Agents return their results as text. Claude Code, Codex, Hermes and Clawboo Native can also write files. In team chat they start in their team's folder (`~/clawboo-work/teams/<team id>`), which the agent's **Workspace** tab shows. Claude Code, Codex and Hermes can write anywhere you can, so name the folder you want when you ask for files elsewhere. See [Work with your first team](/getting-started/first-team).
+Boo Zero posts a summary in the chat when the teammates finish. Each teammate's full result is saved on its task: open **Comments & activity** on the task card in the chat, or open the task on the **Board**. Agents return their results as text. Claude Code, Codex, Hermes and Clawboo Native can also write files. On a task they start in the task's own folder inside their team's folder (`~/clawboo-work/teams/<team id>/tasks/<task id>`) and are asked to save the task's files there. Open the task on the **Board** and look under **Files**, or open the agent's **Computer** tab. Claude Code, Codex and Hermes can write anywhere you can, so name the folder you want when you ask for files elsewhere. See [Work with your first team](/getting-started/first-team).
 
 ### My agent is not doing what I asked. Where do I start?
 
@@ -161,7 +161,7 @@ Yes. A routine sends work on a schedule to a team or to one agent, for example e
 
 ### My agent says the work is done. Did Clawboo check it?
 
-Only if the team has a [work check](/using/teams#work-check), or the task ran in its own copy of a git repository (a worktree). With a work check, team chat work and tasks you give on the **Board** are checked when they changed the team's folder: Clawboo runs the team's test command there and, for bigger or risky changes, or work handed down from another task, has a second agent review the change. A task run that worked in a worktree and changed files is checked too, and only the API starts those. A failed check sends the task back to the agent once, then to **Needs you**. Not checked: team chat work on a team with no work check, one-to-one chats, routines made in the dashboard and all OpenClaw work. Review those results yourself. See [How work is checked](/concepts/verification).
+Only if the team has a [work check](/using/teams#work-check), or the task ran in its own copy of a git repository (a worktree). With a work check, team chat work and tasks you give on the **Board** are checked when they changed the team's folder, task folders included: Clawboo runs the team's test command there and, for bigger or risky changes, or work handed down from another task, has a second agent review the change. A task run that worked in a worktree and changed files is checked too, and only the API starts those. A failed check sends the task back to the agent once, then to **Needs you**. Not checked: team chat work on a team with no work check, one-to-one chats, routines made in the dashboard and all OpenClaw work. Review those results yourself. See [How work is checked](/concepts/verification).
 
 ### How do I keep spending under control?
 

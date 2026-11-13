@@ -65,7 +65,7 @@ To stop it, switch it off. Runs that start after the change follow it.
 With the switch on:
 
 - **Every command asks first.** Nothing is remembered and there is no **Always**, so a command you allowed asks again the next time.
-- **Only runs with a working folder can ask.** Team chat, tasks you start from the Board and routines made in the dashboard work in the team's folder. A run inside a git repository, which you set up through the API, works in its worktree. One-to-one chat on the agent's page works in the team's folder too, and its requests wait above the message box.
+- **Only runs with a working folder can ask.** Team chat works in the team's folder. A run on a task, such as a task handed out in team chat, one you start from the Board or one a routine made in the dashboard files, works in the task's own folder inside it. A run inside a git repository, which you set up through the API, works in its worktree. One-to-one chat on the agent's page works in the team's folder too, and its requests wait above the message box.
 - **Never on Windows.** The switch is there, but Clawboo does not offer the agent a way to run commands.
 - **One program at a time.** A command is a program and its arguments, run without a shell, so pipes and redirects do not work. Programs that run other commands, such as shells, `python`, `node` and `npx`, are refused before you are asked; [What agents can do](/concepts/permissions#clawboo-native) lists them.
 - **At most 10 commands per run.** Each card waits 10 minutes, and the run waits with it.
@@ -183,7 +183,7 @@ If your OpenClaw keeps its state somewhere else, set `OPENCLAW_STATE_DIR` for Cl
 
 <Accordion title="The switch is on, but my Clawboo Native agent never asks">
 
-The agent can ask only on a run with a working folder, and never on Windows. Team chat, one-to-one chat, Board tasks and routines made in the dashboard work in the team's folder, so the agent can ask there. A run that started before you switched it on cannot ask; send the next message, or start the task again.
+The agent can ask only on a run with a working folder, and never on Windows. Team chat and one-to-one chat work in the team's folder, and Board tasks and routines made in the dashboard work in the task's own folder inside it, so the agent can ask there. A run that started before you switched it on cannot ask; send the next message, or start the task again.
 
 </Accordion>
 

@@ -37,6 +37,27 @@ describe('claudeCodeIsolation', () => {
     )
   })
 
+  it.runIf(posix)("keeps the team folder's files for a run in a task's own folder", () => {
+    const team = '/home/ada/clawboo-work/teams/T'
+    const { claudeMdExcludes } = claudeCodeIsolation(`${team}/tasks/t1`, '/home/ada', {
+      readRoot: team,
+    }).settings
+    // The team's CLAUDE.md reaches its task runs, as it did when they started there.
+    expect(claudeMdExcludes).not.toContain(`${team}/CLAUDE.md`)
+    expect(claudeMdExcludes).not.toContain(`${team}/tasks/CLAUDE.md`)
+    // Everything above the team folder is still cut, home included.
+    for (const dir of ['/home/ada/clawboo-work/teams', '/home/ada/clawboo-work', '/home/ada']) {
+      expect(claudeMdExcludes).toContain(`${dir}/CLAUDE.md`)
+    }
+  })
+
+  it.runIf(posix)('ignores a read folder that does not hold the working folder', () => {
+    const { claudeMdExcludes } = claudeCodeIsolation('/home/ada/work/t1', '/home/ada', {
+      readRoot: '/home/ada/elsewhere',
+    }).settings
+    expect(claudeMdExcludes).toContain('/home/ada/work/CLAUDE.md')
+  })
+
   it.runIf(posix)('cuts home even when the run starts in home itself', () => {
     const { claudeMdExcludes } = claudeCodeIsolation('/home/ada', '/home/ada').settings
     expect(claudeMdExcludes).toContain('/home/ada/.claude/CLAUDE.md')

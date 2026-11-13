@@ -236,6 +236,8 @@ const PINNED_ROUTES = [
   'GET /api/agents/:agentId/workspaces',
   'GET /api/agents/:agentId/team-folder/tree',
   'GET /api/agents/:agentId/team-folder/file',
+  'GET /api/board/:taskId/folder/tree',
+  'GET /api/board/:taskId/folder/file',
   'POST /api/agents/:agentId/chat/stop',
   'GET /api/agents/:agentId/chat/stream',
   'POST /api/agents/:agentId/chat',

@@ -1,4 +1,4 @@
-// Derive the Workspace tab's "now line" from the obs event tail: the file the
+// Derive the Computer tab's "now line" from the obs event tail: the file the
 // agent most recently touched and the command it most recently ran. Pure so it
 // unit-tests without a stream. Tool inputs are runtime-specific and
 // best-effort by design; a wake this misses degrades to "no activity", never

@@ -73,7 +73,7 @@ Agents keep every tool. They reach Clawboo's MCP servers over HTTP on `127.0.0.1
 | ------------------------------------------------------- | --------------------------------------------- | ------------------ |
 | Clawboo's data folder (`~/.clawboo`)                    | unchanged                                     | you, `0700`        |
 | The database, the vault, settings, the token            | unchanged                                     | you, `0600`        |
-| The work folder (team folders, task checkouts)          | `<agent home>/work`, or `CLAWBOO_WORK_DIR`    | agent user, `0700` |
+| The work folder (team and task folders, task checkouts) | `<agent home>/work`, or `CLAWBOO_WORK_DIR`    | agent user, `0700` |
 | Each agent's runtime home (`CODEX_HOME`, `HERMES_HOME`) | `<agent home>/runtimes/<runtime>/<agent>`     | agent user, `0700` |
 | Claude Code's settings and sessions                     | the agent user's own `~/.claude`              | agent user         |
 | Each agent's browser profile                            | `<agent home>/browser-profiles/`              | agent user, `0700` |

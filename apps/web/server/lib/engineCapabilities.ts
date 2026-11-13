@@ -74,6 +74,8 @@ export const FEATURE_ROUTES = {
     'GET /api/board/:taskId/workspace/file',
     'GET /api/board/:taskId/workspace/file-diff',
     'GET /api/board/:taskId/workspace/status',
+    'GET /api/board/:taskId/folder/tree',
+    'GET /api/board/:taskId/folder/file',
   ],
   'workspace.preview': ['GET /api/board/:taskId/preview', 'GET /api/board/:taskId/preview/*splat'],
   'agent.nativeShell': ['GET /api/agents/:agentId/shell', 'POST /api/agents/:agentId/shell'],

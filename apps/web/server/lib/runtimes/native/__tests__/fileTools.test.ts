@@ -108,3 +108,66 @@ describe('native file tools (cwd jail)', () => {
     })
   })
 })
+
+// A run in a task's own folder writes there, and may still read the team folder
+// that holds it: the team's shared files and the other tasks' folders.
+describe('native file tools in a task folder (team folder readable)', () => {
+  let team: string
+  let task: string
+
+  beforeEach(async () => {
+    team = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-ft-team-'))
+    task = path.join(team, 'tasks', 'task-1')
+    await mkdir(task, { recursive: true })
+    await mkdir(path.join(team, 'tasks', 'task-2'), { recursive: true })
+    await writeFile(path.join(team, 'shared.md'), 'team notes')
+    await writeFile(path.join(team, 'tasks', 'task-2', 'research.md'), 'from task 2')
+  })
+  afterEach(async () => {
+    await rm(team, { recursive: true, force: true })
+  })
+
+  const tool = (name: string, readRoot: string | null = team) => {
+    const t = buildFileTools(task, { readRoot }).find((x) => x.name === name)
+    if (!t) throw new Error(`missing tool ${name}`)
+    return t
+  }
+
+  it("reads the team's shared files and another task's folder, from the task folder", async () => {
+    expect(await tool('read_file').run({ path: '../../shared.md' })).toEqual({
+      output: 'team notes',
+      isError: false,
+    })
+    expect(await tool('read_file').run({ path: '../task-2/research.md' })).toEqual({
+      output: 'from task 2',
+      isError: false,
+    })
+    const listed = await tool('list_files').run({ path: '../..' })
+    expect(listed.output).toContain('file shared.md')
+    expect(listed.output).toContain('dir  tasks')
+  })
+
+  it('writes only in the task folder', async () => {
+    const out = await tool('write_file').run({ path: '../../shared.md', content: 'overwrite' })
+    expect(out.isError).toBe(true)
+    expect(await readFile(path.join(team, 'shared.md'), 'utf8')).toBe('team notes')
+    const ok = await tool('write_file').run({ path: 'report.md', content: 'done' })
+    expect(ok.isError).toBe(false)
+    expect(await readFile(path.join(task, 'report.md'), 'utf8')).toBe('done')
+  })
+
+  it('reads nothing above the team folder', async () => {
+    const out = await tool('read_file').run({ path: '../../../outside.md' })
+    expect(out.isError).toBe(true)
+  })
+
+  it('ignores a read folder that does not hold the working folder', async () => {
+    const other = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-ft-other-'))
+    try {
+      const out = await tool('read_file', other).run({ path: '../../shared.md' })
+      expect(out.isError).toBe(true)
+    } finally {
+      await rm(other, { recursive: true, force: true })
+    }
+  })
+})

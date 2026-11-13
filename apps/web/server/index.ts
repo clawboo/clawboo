@@ -40,6 +40,7 @@ import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
+import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
 import { stopAgentUser } from './lib/agentUser/boot'
@@ -63,7 +64,10 @@ import { pumpChatReportUps, startChatReportUps } from './lib/agentChat/chatHandO
 import { pumpTaskWakes, pumpTaskWakesByRoom, type TaskWakePumpDeps } from './lib/teamChat/taskWakes'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
-import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
+import {
+  clearClaudeCodeTaskPointersOnce,
+  sweepTaskSessionPointers,
+} from './lib/teamChat/taskSessionPointers'
 import {
   getTeamOrchestrator,
   roomCanRun,
@@ -709,6 +713,11 @@ async function main() {
   try {
     const swept = sweepTaskSessionPointers(getDb())
     if (swept > 0) log.info({ swept }, 'Board: dropped task resume pointers nothing will resume')
+    // Once: Claude Code task sessions filed under the team folder, from before
+    // task runs started in their own folders.
+    const moved = clearClaudeCodeTaskPointersOnce(getDb())
+    if (moved > 0)
+      log.info({ moved }, 'Board: dropped Claude Code task sessions from before task folders')
   } catch (err) {
     log.error({ err }, 'Board: sweeping task resume pointers failed (non-fatal)')
   }
@@ -767,6 +776,20 @@ async function main() {
       }
     })
     .catch((err: unknown) => log.error({ err }, 'Worktrees: startup GC failed (non-fatal)'))
+
+  // ── Task folders: remove the empty ones of finished tasks ───────────────────
+  // Same rules as the worktree sweep: live tasks are skipped and no work is lost
+  // (a folder with files stays). Best-effort; never blocks boot.
+  void gcTaskFolders(getDb())
+    .then(({ removed }) => {
+      if (removed.length > 0) {
+        log.info(
+          { removed: removed.length },
+          'Task folders: removed empty folders of finished tasks',
+        )
+      }
+    })
+    .catch((err: unknown) => log.error({ err }, 'Task folders: startup cleanup failed (non-fatal)'))
 
   // ── Tools broker: seed the registry ─────────────────────────────────────────
   // Insert a tool_registry row for every builtin brokered tool so the enabled /

@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto'
 
 import { delegationTargetOf } from '@clawboo/board-core'
-import { getSetting, getTask, settings, type ClawbooDb } from '@clawboo/db'
+import { getSetting, getTask, setSetting, settings, type ClawbooDb } from '@clawboo/db'
 import { inArray, like } from 'drizzle-orm'
 
 import {
@@ -96,5 +96,36 @@ export function sweepTaskSessionPointers(db: ClawbooDb): number {
     db.delete(settings)
       .where(inArray(settings.key, stale.slice(i, i + CHUNK)))
       .run()
+  return stale.length
+}
+
+/** Set once the Claude Code task pointers from before task folders are gone. */
+export const TASK_FOLDER_POINTERS_CLEARED_KEY = 'task-folders:claude-code-pointers-cleared'
+
+/**
+ * Claude Code files a session under the folder it ran in, and resumes only from
+ * there. Task runs used to start in their team's folder and now start in the
+ * task's own folder, so a Claude Code task pointer saved before that names a
+ * session the next run cannot resume, and that run would fail. Drop those
+ * pointers once, so the next run starts fresh from its ticket. Other runtimes
+ * keep theirs: their sessions do not depend on the folder. Run at boot. Returns
+ * how many went.
+ */
+export function clearClaudeCodeTaskPointersOnce(db: ClawbooDb): number {
+  if (getSetting(db, TASK_FOLDER_POINTERS_CLEARED_KEY)) return 0
+  const rows = db
+    .select({ key: settings.key, value: settings.value })
+    .from(settings)
+    .where(like(settings.key, TASK_SESSION_KEYS_LIKE))
+    .all()
+  const stale = rows
+    .filter((row) => parseTaskSessionPointer(row.value)?.runtime === 'claude-code')
+    .map((row) => row.key)
+  const CHUNK = 500
+  for (let i = 0; i < stale.length; i += CHUNK)
+    db.delete(settings)
+      .where(inArray(settings.key, stale.slice(i, i + CHUNK)))
+      .run()
+  setSetting(db, TASK_FOLDER_POINTERS_CLEARED_KEY, '1')
   return stale.length
 }

@@ -550,7 +550,7 @@ This route is one of the two ways work runs through Clawboo's task runner (the o
 }
 ```
 
-A `code` task (or any kind other than `research` and `review`) changes files, so it needs a worktree. A task that already has a worktree reuses it, rebuilding it from the task branch if it was cleaned up. A checkout still on the task branch with nothing uncommitted is reused as it is. A rebuild never replaces a folder that holds uncommitted changes, files git ignores, a commit no branch holds, a separate repository, or contents git cannot read: the run is refused with `workspace_unavailable`, and the task moves to `blocked` with a `[blocked: worktree kept]` comment naming the folder. When git does not answer the check, the run is refused the same way, nothing is changed, and the task goes back to `todo`. Otherwise, with no `repoPath`, or when the worktree cannot be created, the run is refused with `workspace_unavailable`: the task gets a `[blocked: no isolation]` comment and goes back to `todo`. A `research` or `review` task gets no worktree and starts in its team's folder, `<work folder>/teams/<teamId>` (`teams/_no-team` for a task with no team); if that folder cannot be created, the run is refused with `workspace_unavailable` too. A worktree keeps file changes apart; neither it nor the team's folder is a sandbox (see [What agents can do](/concepts/permissions)).
+A `code` task (or any kind other than `research` and `review`) changes files, so it needs a worktree. A task that already has a worktree reuses it, rebuilding it from the task branch if it was cleaned up. A checkout still on the task branch with nothing uncommitted is reused as it is. A rebuild never replaces a folder that holds uncommitted changes, files git ignores, a commit no branch holds, a separate repository, or contents git cannot read: the run is refused with `workspace_unavailable`, and the task moves to `blocked` with a `[blocked: worktree kept]` comment naming the folder. When git does not answer the check, the run is refused the same way, nothing is changed, and the task goes back to `todo`. Otherwise, with no `repoPath`, or when the worktree cannot be created, the run is refused with `workspace_unavailable`: the task gets a `[blocked: no isolation]` comment and goes back to `todo`. A `research` or `review` task gets no worktree and starts in the task's own folder, `<work folder>/teams/<teamId>/tasks/<taskId>` (`teams/_no-team/tasks/<taskId>` for a task with no team), and is told to save the files it makes for the task there and that the team's shared folder is two levels up (`../..`); if that folder cannot be created, the run is refused with `workspace_unavailable` too. A worktree keeps file changes apart; neither it nor the task's folder is a sandbox (see [What agents can do](/concepts/permissions)).
 
 ### Responses
 
@@ -610,13 +610,13 @@ Without [the person check](/operating/security#the-person-check), a `409` also s
 { ok: false, reason: 'too_deep' | 'connected_substrate' | 'budget_paused' | 'workspace_unavailable' | 'no_team' }
 ```
 
-| `reason`                | Meaning                                                                                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `too_deep`              | The task sits deeper in its delegation tree than the depth limit allows.                                                                                      |
-| `connected_substrate`   | The runtime runs work over its own live connection (OpenClaw), so this route cannot run it.                                                                   |
-| `budget_paused`         | A hard-cap budget covering this agent, this delegation tree or this team is paused. Warn-only budgets never block.                                            |
-| `workspace_unavailable` | The task needs a worktree and none could be prepared (no `repoPath`, or the worktree failed), or the team's folder for a read-only task could not be created. |
-| `no_team`               | The task's team was deleted, or its `teamId` names no team. Nothing is claimed and no folder is made.                                                         |
+| `reason`                | Meaning                                                                                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `too_deep`              | The task sits deeper in its delegation tree than the depth limit allows.                                                                                          |
+| `connected_substrate`   | The runtime runs work over its own live connection (OpenClaw), so this route cannot run it.                                                                       |
+| `budget_paused`         | A hard-cap budget covering this agent, this delegation tree or this team is paused. Warn-only budgets never block.                                                |
+| `workspace_unavailable` | The task needs a worktree and none could be prepared (no `repoPath`, or the worktree failed), or the task's own folder for a read-only task could not be created. |
+| `no_team`               | The task's team was deleted, or its `teamId` names no team. Nothing is claimed and no folder is made.                                                             |
 
 **`500 Internal Server Error`**: an unexpected error inside the run:
 

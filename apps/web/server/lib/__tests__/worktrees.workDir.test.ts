@@ -298,7 +298,7 @@ describe('task checkouts recorded under the work folder', () => {
     expect(again.worktree.worktreePath).toBe(recorded)
   })
 
-  it('the Workspace tab and the task drawer read the recorded checkout', async () => {
+  it('the Computer tab and the task drawer read the recorded checkout', async () => {
     const { taskId, recorded } = await provisionInWorkFolder()
     await writeFile(path.join(recorded, 'feature.ts'), 'export const x = 1\n')
 

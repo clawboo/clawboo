@@ -169,7 +169,7 @@ export function createNativeDriver(
         // and will turn a `delegate` tool-call into a durable board task. In a 1:1 run
         // there is no orchestrator, so the tool is (correctly) absent.
         localTools: [
-          ...buildFileTools(ctx.cwd ?? null),
+          ...buildFileTools(ctx.cwd ?? null, { readRoot: ctx.readRoot ?? null }),
           // The shell, if someone switched it on for this Boo. `buildExecTool`
           // returns nothing when it is off, when the run has no working
           // directory, or on Windows: absent rather than present-and-refusing,

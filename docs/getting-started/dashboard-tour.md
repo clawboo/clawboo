@@ -91,7 +91,7 @@ Click an agent to open its page: its chat on the left, and cards on the right th
 - **Graph**: the agent with its skills, connectors and model. Change the model from the card's top corner.
 - **Tasks & Routines**: the agent's tasks, which you can open and steer, and the routines that send it work, with **New routine**.
 - **Browser** and **Activity**: as in a team chat.
-- **Details**: **Workspace**, **Personality**, **Permissions** (on OpenClaw and Clawboo Native agents), **Brief** (on Boo Zero only) and **Agent Files**, its SOUL.md and other files. Which files an agent follows depends on its runtime.
+- **Details**: **Computer**, **Personality**, **Permissions** (on OpenClaw and Clawboo Native agents), **Brief** (on Boo Zero only) and **Agent Files**, its SOUL.md and other files. Which files an agent follows depends on its runtime.
 
 **Graph** and **Details** start open. [Agents](/using/agents) covers each card. In Boo Zero's own chat, start your message with `@` and a team's name, or click the team's chip above the message box, to bring that team's brief into your message; see [Boo Zero](/using/boo-zero).
 

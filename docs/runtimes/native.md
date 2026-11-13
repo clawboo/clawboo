@@ -128,17 +128,17 @@ Changing the default model later also moves a native Boo Zero onto it. Other age
 
 A native agent acts only through the tools Clawboo gives it. Which tools it has depends on where it runs.
 
-| Tool                                    | What it does                                                                                                    | When the agent has it                        |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Peer room                               | Posts and reads notes in its team's [peer room](/concepts/peer-chat), as itself. The dashboard doesn't show it. | Team chat and team tasks                     |
-| Memory                                  | Reads and saves shared [memory](/concepts/memory): its team's in team runs, the global memory in 1:1 chat       | Every run                                    |
-| Board                                   | Reads tasks on the board. Clawboo itself makes the board changes.                                               | Every run                                    |
-| Connectors                              | Uses the [connectors](/using/connectors) you grant it                                                           | Every run                                    |
-| `delegate`                              | Hands a task to a teammate by name. Clawboo turns each call into a board task.                                  | Team chat                                    |
-| `read_file`, `write_file`, `list_files` | Reads and writes files inside the run's folder, and nowhere else, not even through a symlink                    | Every run                                    |
-| `run_command`                           | Runs one program after you approve it                                                                           | Every run, once you allow it, not on Windows |
+| Tool                                    | What it does                                                                                                                                                     | When the agent has it                        |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Peer room                               | Posts and reads notes in its team's [peer room](/concepts/peer-chat), as itself. The dashboard doesn't show it.                                                  | Team chat and team tasks                     |
+| Memory                                  | Reads and saves shared [memory](/concepts/memory): its team's in team runs, the global memory in 1:1 chat                                                        | Every run                                    |
+| Board                                   | Reads tasks on the board. Clawboo itself makes the board changes.                                                                                                | Every run                                    |
+| Connectors                              | Uses the [connectors](/using/connectors) you grant it                                                                                                            | Every run                                    |
+| `delegate`                              | Hands a task to a teammate by name. Clawboo turns each call into a board task.                                                                                   | Team chat                                    |
+| `read_file`, `write_file`, `list_files` | Reads and writes files inside the run's folder, and nowhere else, not even through a symlink. On a task with no worktree, reading also reaches the team's folder | Every run                                    |
+| `run_command`                           | Runs one program after you approve it                                                                                                                            | Every run, once you allow it, not on Windows |
 
-The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). Everywhere else it is the team's folder, `teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default), shared with every teammate: in team chat, on the tasks agents delegate there, on research and review task runs, and in the agent's 1:1 chat. In its 1:1 chat, an agent on no team, such as Boo Zero, uses `teams/_no-team`. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
+The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). A run on a task with no worktree (a task delegated in team chat, one you give from the Board, or a research or review task run) works in the task's own folder, `teams/<team id>/tasks/<task id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default). There `write_file` writes only in the task's folder, while `read_file` and `list_files` also reach the rest of the team's folder. Paths still start from the task's folder, so the team's folder is `../..` and another task's folder is `../<task id>`; nothing above the team's folder is reachable. Turns that hold no task, such as the lead's turns and your messages in team chat, and the agent's 1:1 chat work in the team's folder, `teams/<team id>`, shared with every teammate. A task with no team has its folder under `teams/_no-team/tasks/`, and an agent on no team, such as Boo Zero, uses `teams/_no-team` in its 1:1 chat. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
 
 ### Running commands
 
@@ -146,7 +146,7 @@ The run's folder is the task's own git worktree when the task run has one; see [
 
 - **You approve every command, and nothing is remembered.** Each one raises a card that reads "_agent_ wants to run a command on this computer." with the command and the folder. **Run it** approves it. There is no **Always** option.
 - **One program, no shell.** The agent can't use pipes, redirects or shell operators. Programs that run other programs (shells, interpreters, package runners and similar) are refused before you're asked.
-- **It runs as you.** The command runs in the run's folder (the team's folder or the task's worktree), under your user account, with network access. Your API keys are not passed to it.
+- **It runs as you.** The command runs in the run's folder (the task's worktree, the task's own folder, or the team's folder), under your user account, with network access. Your API keys are not passed to it.
 - **Limits per run:** the agent can ask about 10 commands. Each card waits 10 minutes for an answer, a command is stopped after 5 minutes (time the computer spends asleep does not count, except a sleep of under about a minute), and output is cut at 64 KiB.
 - **A refusal ends it.** If you decline, or nobody answers in time, the agent can't ask again in that run.
 
@@ -185,7 +185,7 @@ The bottom **Disconnect** deletes all ten provider keys from Clawboo's vault, no
 
 ## Limits
 
-- **Files only in the run's folder.** File tools work only inside the team's folder, where a 1:1 chat also starts, or the task's worktree.
+- **Files only in the run's folder.** File tools work only inside the folder the run starts in: the task's worktree, the task's own folder on a task without one, or the team's folder, where a 1:1 chat and turns that hold no task start. On a task without a worktree, reading also reaches the rest of the team's folder; writing does not.
 - **No commands on Windows.** `run_command` is never offered there.
 - **16 turns per run.** A run ends after 16 turns (model calls).
 - **No ChatGPT plan.** A ChatGPT subscription runs agents on [Codex](/runtimes/codex), not on Clawboo Native.

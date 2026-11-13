@@ -181,6 +181,37 @@ describe.runIf(posix)('the file tools with agents on their own user', () => {
     expect((await tool('read_file').run({ path: 'missing.txt' })).output).toMatch(/ENOENT/)
     expect((await tool('list_files').run({ path: 'missing' })).output).toMatch(/ENOENT/)
   })
+
+  it("in a task's folder, reads reach its team folder through the host, and writes stay", async () => {
+    // `cwd` is the team folder here; the run starts in a task folder inside it.
+    const taskDir = path.join(cwd, 'tasks', 'task-1')
+    fs.mkdirSync(taskDir, { recursive: true })
+    fs.writeFileSync(path.join(cwd, 'shared.md'), 'team notes')
+    const tools = buildFileTools(taskDir, { readRoot: cwd })
+    const run = (name: string, args: Record<string, unknown>) =>
+      tools.find((x) => x.name === name)!.run(args)
+
+    expect(await run('read_file', { path: '../../shared.md' })).toEqual({
+      output: 'team notes',
+      isError: false,
+    })
+    expect(ops).toEqual(['fs.stat', 'fs.read'])
+    ops.length = 0
+    expect(await run('list_files', { path: '../..' })).toEqual({
+      output: 'dir  tasks\nfile shared.md',
+      isError: false,
+    })
+    expect(ops).toEqual(['fs.stat', 'fs.list'])
+
+    // A write may not leave the task's folder, and the host is not asked.
+    ops.length = 0
+    expect((await run('write_file', { path: '../../shared.md', content: 'x' })).isError).toBe(true)
+    expect(ops).toEqual([])
+    expect(fs.readFileSync(path.join(cwd, 'shared.md'), 'utf8')).toBe('team notes')
+    // Nor may a read leave the team folder.
+    expect((await run('read_file', { path: '../../../escape.txt' })).isError).toBe(true)
+    expect(ops).toEqual([])
+  })
 })
 
 describe.runIf(posix)('Native transcripts with agents on their own user', () => {

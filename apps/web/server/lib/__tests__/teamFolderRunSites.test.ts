@@ -82,9 +82,10 @@ class WatchingAdapter implements RuntimeAdapter {
   async writeContext(): Promise<void> {}
 }
 
-// Every run gets the team folder from one of these two functions, so a new caller
-// is how a new way of starting a run would appear. It must report that it is working
-// there, or a team-chat work check will not wait for it.
+// Every run gets the team folder, or a task folder inside it, from one of these
+// functions, so a new caller is how a new way of starting a run would appear. It
+// must report that it is working there, or a team-chat work check will not wait
+// for it.
 describe('no way into a team folder goes unreported', () => {
   const SERVER = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
   /** Callers that never start a run in the folder, and why. */
@@ -93,6 +94,7 @@ describe('no way into a team folder goes unreported', () => {
     'lib/runtimes/teamWorkdir.ts': 'defines them',
     'lib/teamChat/teamWorkCheck.ts': 'the check itself, which holds its own place',
     'lib/workspaceFs.ts': 'reads the folder for the workspace view',
+    'lib/taskFolders.ts': 'removes empty task folders at boot',
   }
 
   function sourcesUnder(dir: string): string[] {
@@ -107,7 +109,11 @@ describe('no way into a team folder goes unreported', () => {
   it('every caller of the team folder lookups reports its run, or is listed as no run', () => {
     const callers = sourcesUnder(SERVER)
       .map((file) => ({ file, text: readFileSync(file, 'utf8') }))
-      .filter(({ text }) => /\b(teamWorkdirFor|taskRunWorkdirFor|teamWorkdirPath)\(/.test(text))
+      .filter(({ text }) =>
+        /\b(teamWorkdirFor|taskRunWorkdirFor|taskRunFolderFor|taskFolderPath|teamWorkdirPath)\(/.test(
+          text,
+        ),
+      )
       .map(({ file, text }) => ({
         name: path.relative(SERVER, file).replaceAll(path.sep, '/'),
         text,

@@ -14,6 +14,8 @@ import { setWorkDirJournal } from '../../workDirJournal'
 import {
   ensureTeamWorkdir,
   legacyTeamFolderPath,
+  taskFolderPath,
+  taskRunFolderFor,
   taskRunWorkdirFor,
   teamWorkdirFor,
   teamWorkdirPath,
@@ -91,12 +93,31 @@ describe('team-chat working folder', () => {
     expect(teamWorkdirFor('codex', '')).toBeNull()
   })
 
-  it('a task run with no worktree uses its team folder, or _no-team without a team', () => {
+  it("an agent's team folder is its team's, or _no-team without a team", () => {
     expect(taskRunWorkdirFor('codex', 'team-1')).toBe(teamWorkdirFor('codex', 'team-1'))
     expect(taskRunWorkdirFor('claude-code', null)).toBe(path.join(teams, '_no-team'))
     expect(taskRunWorkdirFor('hermes', '')).toBe(path.join(teams, '_no-team'))
     expect(taskRunWorkdirFor('clawboo-native', 'team-1')).toBe(teamWorkdirFor('codex', 'team-1'))
     expect(taskRunWorkdirFor('openclaw', null)).toBeNull()
+  })
+
+  it("a task run with no worktree starts in the task's folder inside its team folder", () => {
+    expect(taskRunFolderFor('codex', { id: 'task-1', teamId: 'team-1' })).toEqual({
+      dir: path.join(teams, 'team-1', 'tasks', 'task-1'),
+      teamFolder: path.join(teams, 'team-1'),
+    })
+    expect(taskRunFolderFor('clawboo-native', { id: 'task-2', teamId: null })).toEqual({
+      dir: path.join(teams, '_no-team', 'tasks', 'task-2'),
+      teamFolder: path.join(teams, '_no-team'),
+    })
+    expect(taskRunFolderFor('openclaw', { id: 'task-1', teamId: 'team-1' })).toBeNull()
+    expect(taskRunFolderFor('clawboo-mock', { id: 'task-1', teamId: 'team-1' })).toBeNull()
+  })
+
+  it('a task id is one path segment, never a way out of the team folder', () => {
+    for (const hostile of ['..', '../x', 'a/b', '/etc', '.hidden', '']) {
+      expect(() => taskFolderPath('team-1', hostile)).toThrow()
+    }
   })
 
   it('a hostile team id stays one segment under teams/, never the home or secrets/', () => {

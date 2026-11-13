@@ -122,6 +122,8 @@ import {
   boardWorkspaceFileGET,
   boardWorkspaceFileDiffGET,
   boardWorkspaceStatusGET,
+  boardTaskFolderFileGET,
+  boardTaskFolderTreeGET,
   agentTeamFolderFileGET,
   agentTeamFolderTreeGET,
   agentWorkspacesGET,
@@ -422,8 +424,9 @@ router.post('/api/agents/:agentId/move', agentMovePOST)
 router.get('/api/agents/:agentId/files/:name', agentFileGET)
 router.put('/api/agents/:agentId/files/:name', agentFilePUT)
 router.get('/api/agents/:agentId/sessions', agentSessionsGET)
-// The task worktrees this agent is assigned. Reads the board; the worktree
-// contents themselves are served by the /api/board/:taskId/workspace/* routes.
+// The task worktrees and task folders this agent is assigned. Reads the board;
+// their contents are served by the /api/board/:taskId/workspace/* and
+// /api/board/:taskId/folder/* routes.
 router.get('/api/agents/:agentId/screenshot', agentScreenshotGET)
 router.post('/api/agents/:agentId/screenshot/capture', agentScreenshotCapturePOST)
 router.get('/api/agents/:agentId/workspaces', agentWorkspacesGET)
@@ -484,7 +487,7 @@ router.post('/api/board/:taskId/cancel-dependents', boardCancelDependentsPOST)
 // path than the bare workspace route — distinct, no collision.
 router.post('/api/board/:taskId/workspace/handoff', boardWorkspaceHandoffPOST)
 router.get('/api/board/:taskId/workspace/detail', boardWorkspaceDetailGET)
-// Read-only workspace filesystem view (the agent-detail Workspace tab). All
+// Read-only workspace filesystem view (the agent-detail Computer tab). All
 // subpaths, so they must register before the bare workspace route below.
 // Two patterns: the bare path serves the workspace index, `*splat` serves any
 // asset under it. path-to-regexp v8 (Express 5) rejects a bare `*`.
@@ -494,6 +497,9 @@ router.get('/api/board/:taskId/workspace/tree', boardWorkspaceTreeGET)
 router.get('/api/board/:taskId/workspace/file', boardWorkspaceFileGET)
 router.get('/api/board/:taskId/workspace/file-diff', boardWorkspaceFileDiffGET)
 router.get('/api/board/:taskId/workspace/status', boardWorkspaceStatusGET)
+// The task's own folder (a task with no worktree), read-only.
+router.get('/api/board/:taskId/folder/tree', boardTaskFolderTreeGET)
+router.get('/api/board/:taskId/folder/file', boardTaskFolderFileGET)
 router.post('/api/board/:taskId/workspace', boardWorkspaceProvisionPOST)
 router.get('/api/board/:taskId/workspace', boardWorkspaceGET)
 router.patch('/api/board/:taskId/workspace', boardWorkspaceActionPATCH)

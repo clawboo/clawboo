@@ -474,7 +474,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 **Fix:**
 
 - **Agent files.** Only OpenClaw reads AGENTS.md and IDENTITY.md as instructions. OpenClaw 2026.9 and later neither loads nor accepts TOOLS.md, so put tool notes in AGENTS.md. On the other runtimes the agent follows SOUL.md: all of it on Clawboo Native, the first 4,000 characters on Claude Code, Codex and Hermes. See [Edit the agent files](/using/agents#edit-the-agent-files).
-- **Files on your computer.** In team chat and in an agent's own chat, a Clawboo Native agent can open files only in its team's folder (`~/clawboo-work/teams/<team id>`). Claude Code, Codex and Hermes agents start in that folder too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
+- **Files on your computer.** A Clawboo Native agent can open files only in its team's folder (`~/clawboo-work/teams/<team id>`). On a task it starts in the task's own folder inside it (`tasks/<task id>`), reaches the team's folder as `../..`, and writes only in the task's folder. Claude Code, Codex and Hermes agents start in those folders too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
 
 ### More chat messages
 

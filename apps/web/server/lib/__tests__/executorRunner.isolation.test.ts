@@ -32,6 +32,7 @@ import type {
 import { getDb, resetDb } from '../db'
 import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime } from '../executorRunner'
+import { TASK_FOLDER_NOTE } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 
 const CAPS: Capabilities = {
@@ -60,8 +61,12 @@ class ProbeAdapter implements RuntimeAdapter {
   async health() {
     return { ok: true }
   }
+  /** The context of each start, in order. */
+  readonly contexts: string[] = []
+
   async start(_t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
     this.startCount += 1
+    this.contexts.push(opts.context ?? '')
     if (this.throwOnStart) throw new Error('driver exploded mid-start')
     return { adapterId: this.id, sessionKey: opts.sessionKey, runId: 'rid-0' }
   }
@@ -147,11 +152,18 @@ describe('executor runner — isolation + claim safety', () => {
     expect(fake.startCount).toBe(1)
   })
 
-  /** Run read-only work and return the cwd the driver was handed. */
+  /** Run read-only work and return the cwd the driver was handed, and what it was told. */
   async function readOnlyRunCwd(
     runtime: string,
     teamId: string | null,
-  ): Promise<{ ok: boolean; cwd: string | null | undefined; fake: ProbeAdapter }> {
+  ): Promise<{
+    ok: boolean
+    cwd: string | null | undefined
+    readRoot: string | null | undefined
+    fake: ProbeAdapter
+    taskId: string
+    context: string
+  }> {
     const taskId = createTask(getDb(), {
       title: 'Research something',
       status: 'todo',
@@ -159,10 +171,14 @@ describe('executor runner — isolation + claim safety', () => {
     }).id
     const fake = new ProbeAdapter(runtime)
     let cwd: string | null | undefined
+    let readRoot: string | null | undefined
     const result = await runTaskOnRuntime({
       db: getDb(),
       makeAdapter: (ctx: RuntimeRunContext) => {
-        if (ctx.memoryScope) cwd = ctx.cwd
+        if (ctx.memoryScope) {
+          cwd = ctx.cwd
+          readRoot = ctx.readRoot
+        }
         return fake
       },
       taskId,
@@ -170,33 +186,45 @@ describe('executor runner — isolation + claim safety', () => {
       disableMemoryAutoInject: true,
       kind: 'research',
     })
-    return { ok: result.ok, cwd, fake }
+    return { ok: result.ok, cwd, readRoot, fake, taskId, context: fake.contexts.join('\n') }
   }
 
   for (const runtime of ['claude-code', 'codex', 'hermes']) {
-    it(`starts read-only ${runtime} work in its team's folder, not the server cwd`, async () => {
-      const { ok, cwd } = await readOnlyRunCwd(runtime, 'team-1')
+    it(`starts read-only ${runtime} work in the task's own folder inside its team folder, not the server cwd`, async () => {
+      const { ok, cwd, taskId, context } = await readOnlyRunCwd(runtime, 'team-1')
 
       expect(ok).toBe(true)
-      const folder = path.join(teamsRoot(), 'team-1')
+      const folder = path.join(teamsRoot(), 'team-1', 'tasks', taskId)
       expect(cwd).toBe(folder)
       expect((await stat(folder)).isDirectory()).toBe(true)
       if (process.platform !== 'win32') expect((await stat(folder)).mode & 0o777).toBe(0o700)
+      // The run is told the folder is the task's own.
+      expect(context).toContain(TASK_FOLDER_NOTE)
     })
   }
 
-  it('starts read-only work with no team in the shared _no-team folder', async () => {
-    const { ok, cwd } = await readOnlyRunCwd('codex', null)
+  it('starts read-only work with no team in its folder under the shared _no-team folder', async () => {
+    const { ok, cwd, taskId } = await readOnlyRunCwd('codex', null)
 
     expect(ok).toBe(true)
-    expect(cwd).toBe(path.join(teamsRoot(), '_no-team'))
+    expect(cwd).toBe(path.join(teamsRoot(), '_no-team', 'tasks', taskId))
   })
 
-  it("starts read-only Clawboo Native work in its team's folder too", async () => {
-    const { ok, cwd } = await readOnlyRunCwd('clawboo-native', 'team-1')
+  it("starts read-only Clawboo Native work in the task's own folder too, reading the team's", async () => {
+    const { ok, cwd, readRoot, taskId } = await readOnlyRunCwd('clawboo-native', 'team-1')
 
     expect(ok).toBe(true)
-    expect(cwd).toBe(path.join(teamsRoot(), 'team-1'))
+    expect(cwd).toBe(path.join(teamsRoot(), 'team-1', 'tasks', taskId))
+    // Its file tools may still read the team folder that holds the task's.
+    expect(readRoot).toBe(path.join(teamsRoot(), 'team-1'))
+  })
+
+  it('gives two tasks of one team two folders', async () => {
+    const a = await readOnlyRunCwd('claude-code', 'team-1')
+    const b = await readOnlyRunCwd('claude-code', 'team-1')
+
+    expect(a.cwd).not.toBe(b.cwd)
+    expect(path.dirname(a.cwd ?? '')).toBe(path.dirname(b.cwd ?? ''))
   })
 
   it('gives a runtime with no folder (the mock harness) no cwd', async () => {

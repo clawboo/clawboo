@@ -54,7 +54,16 @@ describe('GET /api/board/:taskId/workspace/detail', () => {
     const r = mockRes()
     await boardWorkspaceDetailGET(req(task.id), r.res)
     expect(r.statusCode()).toBe(200)
-    expect(r.body()).toEqual({ ok: false, reason: 'no_workspace' })
+    // It names the task's own folder instead, not made before the task's first run.
+    expect(r.body()).toEqual({
+      ok: false,
+      reason: 'no_workspace',
+      taskFolder: {
+        path: expect.stringMatching(new RegExp(`team1[\\/]tasks[\\/]${task.id}$`)),
+        onDisk: false,
+        holdsFiles: false,
+      },
+    })
   })
 
   it('answers the same for a workspace row that never got a checkout', async () => {
@@ -64,7 +73,7 @@ describe('GET /api/board/:taskId/workspace/detail', () => {
     const r = mockRes()
     await boardWorkspaceDetailGET(req(task.id), r.res)
     expect(r.statusCode()).toBe(200)
-    expect(r.body()).toEqual({ ok: false, reason: 'no_workspace' })
+    expect(r.body()).toMatchObject({ ok: false, reason: 'no_workspace' })
   })
 
   it('keeps a 404 for a task that does not exist', async () => {

@@ -30,10 +30,11 @@ import { Spinner } from '@/features/shared/Spinner'
 // ─── Tab types ───────────────────────────────────────────────────────────────
 
 // `'brief'` is Boo-Zero-only — gated by `isBooZero` at the tab-list level.
-// `'workspace'` is the read-only view of the agent's task worktree (tree + now
-// line + diff). (Tasks, the browser and the activity feed are cards of their own,
-// from the top bar.)
-type EditorTab = 'personality' | 'permissions' | 'workspace' | 'brief' | AgentFileName
+// `'computer'` is the read-only view of the agent's computer: its task folders
+// and worktrees (tree + now line + diff). Named Computer, not Workspace, because
+// a workspace is a whole Clawboo (Settings > Workspace). (Tasks, the browser and
+// the activity feed are cards of their own, from the top bar.)
+type EditorTab = 'personality' | 'permissions' | 'computer' | 'brief' | AgentFileName
 
 const FILE_TAB_LABELS: Record<AgentFileName, string> = {
   'SOUL.md': 'SOUL',
@@ -48,14 +49,14 @@ const FILE_TAB_LABELS: Record<AgentFileName, string> = {
 function getTabLabel(tab: EditorTab): string {
   if (tab === 'personality') return 'Personality'
   if (tab === 'permissions') return 'Permissions'
-  if (tab === 'workspace') return 'Workspace'
+  if (tab === 'computer') return 'Computer'
   if (tab === 'brief') return 'Brief'
   return FILE_TAB_LABELS[tab] ?? tab.replace('.md', '')
 }
 
 /** Type guard: is this tab one of the file-backed CodeMirror tabs? */
 function isAgentFileTab(tab: EditorTab): tab is AgentFileName {
-  return tab !== 'personality' && tab !== 'permissions' && tab !== 'workspace' && tab !== 'brief'
+  return tab !== 'personality' && tab !== 'permissions' && tab !== 'computer' && tab !== 'brief'
 }
 
 function SectionPill({
@@ -140,7 +141,7 @@ export function InlineEditor({
 
   const allTabs: EditorTab[] = useMemo(
     () => [
-      'workspace',
+      'computer',
       'personality',
       // Permissions is shown where something actually READS it, which is the same
       // rule as the file tabs above: never show an editor whose bytes no driver
@@ -305,7 +306,7 @@ export function InlineEditor({
         background: 'var(--background)',
       }}
     >
-      {/* Sections, as pills: its Workspace, who it is (Personality, Permissions,
+      {/* Sections, as pills: its Computer, who it is (Personality, Permissions,
           Brief), and its Agent Files.
           The files themselves get their own row, only under Agent Files, so a file
           editor is never mistaken for a live view or a setting. This row is
@@ -391,7 +392,7 @@ export function InlineEditor({
             area, so it must only render over a file tab. `useAgentFiles` bails
             out early while the Gateway client is null, which is the steady
             state for a native-only install, leaving `loading` true forever and
-            painting this over Personality / Activity / Workspace / Permissions
+            painting this over Personality / Activity / Computer / Permissions
             permanently. */}
         {loading && isFileTab && (
           <div
@@ -421,9 +422,9 @@ export function InlineEditor({
           </div>
         )}
 
-        {/* Workspace tab: read-only view of the agent's task worktree. The
-            panel owns its own layout, so no padding wrapper here. */}
-        {activeTab === 'workspace' && (
+        {/* Computer tab: read-only view of the agent's task folders and
+            worktrees. The panel owns its own layout, so no padding wrapper here. */}
+        {activeTab === 'computer' && (
           <div style={{ height: '100%', minHeight: 0 }}>
             <WorkspacePanel agentId={agentId} />
           </div>
@@ -470,8 +471,8 @@ export function InlineEditor({
             ? `${agentName} · Personality`
             : activeTab === 'permissions'
               ? `${agentName} · Permissions`
-              : activeTab === 'workspace'
-                ? `${agentName} · Workspace · read-only`
+              : activeTab === 'computer'
+                ? `${agentName} · Computer · read-only`
                 : activeTab === 'brief'
                   ? `${agentName} · Brief · display name`
                   : AGENT_FILE_META[activeTab].hint}

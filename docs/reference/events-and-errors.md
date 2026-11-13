@@ -245,13 +245,13 @@ A run finished. The cost and token fields carry the run's final totals (see [Cos
 
 On task-runner runs, `error` holds a code when Clawboo stopped or refused the run:
 
-| `error`                   | `status`                | Meaning                                                                                                              |
-| ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `workspace_unavailable`   | `failed`                | A file-changing task had no repository, or its git worktree could not be created, so the run was refused             |
-| `budget_paused:<scope>`   | `budget_paused`         | A hard-cap budget stopped the run; `<scope>` is `agent`, `mission`, `team`, or `node` (a routine's per-run cost cap) |
-| `budget_held:<scope>`     | `budget_held`           | Right before the model call, a hard cap's remaining room was held by runs already going, so the run did not start    |
-| `circuit_broken:<reason>` | `breaker_tripped`       | A circuit breaker stopped the run; see the reasons below                                                             |
-| Anything else             | `failed` or `cancelled` | The run's own error summary                                                                                          |
+| `error`                   | `status`                | Meaning                                                                                                                                                      |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `workspace_unavailable`   | `failed`                | A file-changing task had no repository, its git worktree could not be created, or a read-only task's own folder could not be created, so the run was refused |
+| `budget_paused:<scope>`   | `budget_paused`         | A hard-cap budget stopped the run; `<scope>` is `agent`, `mission`, `team`, or `node` (a routine's per-run cost cap)                                         |
+| `budget_held:<scope>`     | `budget_held`           | Right before the model call, a hard cap's remaining room was held by runs already going, so the run did not start                                            |
+| `circuit_broken:<reason>` | `breaker_tripped`       | A circuit breaker stopped the run; see the reasons below                                                                                                     |
+| Anything else             | `failed` or `cancelled` | The run's own error summary                                                                                                                                  |
 
 `cancelled` means a person. The two budget rows also carry `errorClass` `BudgetRefused`, and a raised cap lets a wake on the task go out. A held budget clears by itself, so that task runs again when it does.
 

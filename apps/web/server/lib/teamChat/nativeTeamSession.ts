@@ -179,8 +179,8 @@ const TASK_POINTER_HOME_RUNTIMES = new Set(['clawboo-native', 'codex', 'hermes']
  *    (Native reloads its transcript, Codex resumes its thread, Hermes resumes
  *    its session), so they need that home.
  *  · Claude Code has no home: its session files stay under the operator's
- *    `~/.claude/projects`, keyed by the folder a run starts in, and every team
- *    run starts in the team's own folder.
+ *    `~/.claude/projects`, keyed by the folder a run starts in, and every run of
+ *    a task starts in that task's own folder.
  *  · OpenClaw never: its runtime session is the team session itself.
  *
  * The read (ctx.resume) and the write (on the run's terminal) share this gate,

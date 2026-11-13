@@ -5,14 +5,15 @@
  * sandbox (which the runtime owns): a worktree gives *concurrency* isolation
  * (no write races between parallel teammates), NOT a privilege boundary.
  *
- * - `none`      — read-only / research work runs in place; no worktree cost.
+ * - `folder`    — research / review work gets a plain folder of its own for the
+ *                 files it writes (the server makes it); no worktree cost.
  * - `worktree`  — file-mutating work gets its own git worktree + branch (default).
  * - `container` — reserved opt-in tier for untrusted / Docker-running / parallel
  *                 writers, keyed off a repo `devcontainer.json`. Not provisioned
  *                 by this package; documented as the seam where a real privilege
  *                 boundary (container / microVM) becomes mandatory.
  */
-export type IsolationLevel = 'none' | 'worktree' | 'container'
+export type IsolationLevel = 'folder' | 'worktree' | 'container'
 
 /** What a task does — drives the isolation decision. Open set. */
 export type TaskKind = 'code' | 'research' | 'review' | (string & {})

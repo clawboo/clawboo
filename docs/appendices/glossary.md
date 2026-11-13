@@ -157,6 +157,8 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Task**: one piece of work on the Board, usually with an agent, a status and comments. See [Board](/using/board).
 
+**Task folder**: the folder of one task that a Claude Code, Codex, Hermes or Clawboo Native agent runs without a worktree, `teams/<team id>/tasks/<task id>` in the work folder. Each run of the task starts there and is asked to save the task's files there, and the task's **Files** section on the Board shows them. See [Task folders](/operating/data-and-state#task-folders).
+
 **Task runner**: one of the two ways Clawboo runs agents. It runs agent routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started through the API. Only the task runner gives a run that names a git repository its own worktree and stops runs that go nowhere. Most work runs in team chat instead. See [How a team works](/intro/how-it-works).
 
 **Tasks card**: the card beside a team chat that sorts the chat's tasks into **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**. Open a task there to read its comments, steer it, or open it on the Board. An agent's page has a **Tasks & Routines** card instead. See [Team chat](/using/team-chat).
@@ -164,6 +166,8 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 **Team**: a group of agents that work together, with its own chats, rules, brief and memory. Deploy one from the Marketplace or build your own. See [Teams](/using/teams).
 
 **Team chat**: a team's conversations: **General** and any rooms. When you send a message that @mentions no one, Boo Zero answers it or hands the work to a teammate. See [Team chat](/using/team-chat).
+
+**Team folder**: the folder a team's agents share, `teams/<team id>` in the work folder (`~/clawboo-work` by default). Turns that hold no task and one-to-one chats start there, and each task folder sits inside it, under `tasks/`. Deleting the team deletes it. See [The work folder](/operating/data-and-state#the-work-folder).
 
 **Team graph**: the card beside a team's chat that draws the team, with each agent's live status. In a room it is the **Room graph**. See [Org chart and team graphs](/using/org-chart).
 

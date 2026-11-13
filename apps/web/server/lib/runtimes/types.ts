@@ -8,6 +8,13 @@
 export interface RuntimeRunContext {
   /** Worktree path the run executes in (file-mutating tasks). */
   cwd?: string | null
+  /**
+   * A folder holding `cwd` that a runtime confining its own file tools (Clawboo
+   * Native) may still READ: the team folder, for a run in a task's own folder,
+   * so the team's shared files and the other tasks' folders stay readable.
+   * Writes stay in `cwd`. Runtimes that do not confine files ignore it.
+   */
+  readRoot?: string | null
   /** Model override for this run. */
   model?: string | null
   /**

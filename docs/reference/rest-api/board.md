@@ -1,11 +1,22 @@
 ---
 title: 'Board API'
 sidebarTitle: 'Board'
-description: 'REST reference for the board: tasks, claims, status changes, comments, retry, assign, the run ledger, dependencies, worktrees, workspace files and preview.'
-keywords: ['board', 'tasks', 'kanban', 'claim', 'worktree', 'workspace', 'preview', 'executions']
+description: 'REST reference for the board: tasks, claims, status changes, comments, retry, assign, the run ledger, dependencies, worktrees, workspace and task folder files, and preview.'
+keywords:
+  [
+    'board',
+    'tasks',
+    'kanban',
+    'claim',
+    'worktree',
+    'workspace',
+    'task folder',
+    'preview',
+    'executions',
+  ]
 ---
 
-These routes read and change the [board](/concepts/the-board), where every team's tasks live. They create and list tasks, claim a task for one agent, move tasks through the status rules (including the check that guards `done`), record each run in the run ledger, link dependencies, and manage a task's git worktree: create it, read it, pause or complete it, browse its files and preview what the agent built.
+These routes read and change the [board](/concepts/the-board), where every team's tasks live. They create and list tasks, claim a task for one agent, move tasks through the status rules (including the check that guards `done`), record each run in the run ledger, link dependencies, and manage a task's git worktree: create it, read it, pause or complete it, browse its files and preview what the agent built. A task with no worktree has its own folder instead, which they browse and preview the same way.
 
 Several routes also post a short system line to the team's peer room, the agents' shared room behind the TeamChat tools (see [Peer chat](/concepts/peer-chat)). The dashboard's team chat does not show those lines, and a failed post never fails the request.
 
@@ -63,8 +74,10 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | GET    | `/api/board/:taskId/workspace/file`       | One file, size-capped                                         | No      |
 | GET    | `/api/board/:taskId/workspace/file-diff`  | One file's diff against the starting commit                   | No      |
 | GET    | `/api/board/:taskId/workspace/status`     | `git status` for the worktree                                 | No      |
-| GET    | `/api/board/:taskId/preview`              | Serve the worktree's `index.html` (redirects to `preview/`)   | No      |
-| GET    | `/api/board/:taskId/preview/<path>`       | Serve one file from the worktree, for the preview frame       | No      |
+| GET    | `/api/board/:taskId/folder/tree`          | One directory level of the task's own folder                  | No      |
+| GET    | `/api/board/:taskId/folder/file`          | One file from the task's own folder, size-capped              | No      |
+| GET    | `/api/board/:taskId/preview`              | Serve the task's `index.html` (redirects to `preview/`)       | No      |
+| GET    | `/api/board/:taskId/preview/<path>`       | Serve one file of the task's, for the preview frame           | No      |
 
 ## Task statuses
 
@@ -1268,10 +1281,10 @@ The task `kind` decides whether a worktree is made: `code` (the default) and any
 { "ok": false, "error": "task not found" }
 ```
 
-**`422 Unprocessable Entity`**: the task kind gets no worktree (`research` or `review`):
+**`422 Unprocessable Entity`**: the task kind gets no worktree (`research` or `review`); it runs in the task's own folder:
 
 ```ts
-{ ok: false, error: 'no_isolation', isolation: 'none' }
+{ ok: false, error: 'no_isolation', isolation: 'folder' }
 ```
 
 **`409 Conflict`**: a folder is already at the task's worktree path and replacing it could lose work, because it has uncommitted changes or git cannot read it. The folder is left as it is:
@@ -1515,7 +1528,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace/handoff \
 
 ## `GET /api/board/:taskId/workspace/detail`
 
-The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff. The files are read the way the [workspace file view](#the-workspace-file-view) reads one, up to 256 KB each, so a task file that is a symbolic link, or that is not text, is left out, and a longer one holds only its first 256 KB and is named in `sorFilesTruncated`.
+What the task drawer's **Files** section shows for a worktree: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff. The files are read the way the [workspace file view](#the-workspace-file-view) reads one, up to 256 KB each, so a task file that is a symbolic link, or that is not text, is left out, and a longer one holds only its first 256 KB and is named in `sorFilesTruncated`.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -1528,10 +1541,10 @@ The task drawer's workspace view: the contents of the task files that exist (`TA
 { "error": "task not found" }
 ```
 
-**`200 OK`** with `ok: false`: the task exists but has no checkout of its own (no workspace row, or one with no worktree path). Most tasks never get one, so this is the ordinary answer for them:
+**`200 OK`** with `ok: false`: the task exists but has no checkout of its own (no workspace row, or one with no worktree path). Most tasks never get one, so this is the ordinary answer for them. `taskFolder` is the task's own folder, where its runs start instead, with `onDisk: false` until the task's first run makes it and `holdsFiles: false` while nothing is in it. Read its files with the [task folder file view](#the-task-folder-file-view):
 
-```json
-{ "ok": false, "reason": "no_workspace" }
+```ts
+{ ok: false, reason: 'no_workspace', taskFolder: { path: string, onDisk: boolean, holdsFiles: boolean } }
 ```
 
 **`200 OK`**: the task files and the diff (`diffStat` and `diff` are empty when the worktree is paused or git is unavailable):
@@ -1563,7 +1576,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace/detail
 
 ## The workspace file view
 
-Four read-only routes behind an agent's **Workspace** tab. They serve a task's worktree: one directory level, one file, one file's diff, and the git status behind the change badges. Nothing here writes.
+Four read-only routes behind an agent's **Computer** tab and the task drawer's **Files** section. They serve a task's worktree: one directory level, one file, one file's diff, and the git status behind the change badges. Nothing here writes.
 
 The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. The agent can change the worktree while it is read, so a file is opened without following a link, and checked again after the open: its path must still resolve to itself and name the same file, with one name. A file or folder swapped for a link after the first check is refused too. On Linux the check after the open also asks the kernel where the open file is, which a folder swapped back and forth during the check cannot fool; on macOS and Windows that last case is a race the server can lose. A file with more than one hard link is refused as well, since a hard link can give a file outside the worktree a name inside it; a git checkout never makes one, though a package manager's store can. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
 
@@ -1614,12 +1627,47 @@ curl 'http://localhost:18790/api/board/<task-id>/workspace/file?path=src/index.t
 
 ---
 
+## The task folder file view
+
+Two read-only routes for a task with no worktree, behind the task drawer's **Files** section and the task folders on an agent's **Computer** tab. They serve the task's own folder, `<team folder>/tasks/<task id>`: one directory level and one file. The folder comes from the task's row (its team and id), never from the request. Both take the same `dir` and `path` query values, keep every path inside the folder by the same rules, and answer with the same shapes as the [workspace file view](#the-workspace-file-view). The folder is not a git checkout, so there is no status or diff. Nothing here writes.
+
+A refused path, such as an absolute path, a `..` segment or a link inside the folder, answers **400** `{ "ok": false, "error": "<what is wrong>" }`. When the folder itself cannot be read, both answer `{ "ok": false, "error": "<message>", "reason": "<reason>" }`:
+
+| Status | `error`                | `reason`     | Meaning                                                                               |
+| ------ | ---------------------- | ------------ | ------------------------------------------------------------------------------------- |
+| `404`  | `workspace not found`  | `not_found`  | No task with that id                                                                  |
+| `404`  | `workspace not found`  | `gone`       | The folder is not on disk: the task has not run yet, or the cleanup removed it empty  |
+| `409`  | `workspace unreadable` | `unreadable` | The task folder, its `tasks/` folder or its team folder is a link, or is not a folder |
+
+### `GET /api/board/:taskId/folder/tree`
+
+One directory level of the task's folder, as `workspace/tree` lists one of a worktree.
+
+- **Query**: `dir` (relative to the task's folder; empty or left out lists the root).
+- **`200 OK`**: `{ ok, dir, entries: [{ name, kind: "file" | "dir", size? }], truncated }`.
+
+### `GET /api/board/:taskId/folder/file`
+
+One file's contents, up to 256 KB, as `workspace/file` reads one from a worktree.
+
+- **Query**: `path` (relative to the task's folder).
+- **`200 OK`**: `{ ok, path, binary: false, size, content, truncated }` for text, or `{ ok, path, binary: true, size }`.
+
+### Example
+
+```bash
+curl 'http://localhost:18790/api/board/<task-id>/folder/tree'
+curl 'http://localhost:18790/api/board/<task-id>/folder/file?path=report.md'
+```
+
+---
+
 ## `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>`
 
-Serves the files in a task's worktree as a static website, so the task drawer's **Preview** can show the page an agent built next to the diff. It only serves files: it never runs a build or a dev server. The drawer checks for a preview every 10 seconds while it is open.
+Serves the files in a task's worktree, or in the task's own folder when it has no worktree, as a static website, so the task drawer's **Preview** can show the page an agent built. It only serves files: it never runs a build or a dev server. The drawer checks for a preview every 10 seconds while it is open.
 
 - `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>` serve the same tree. A folder (including the bare route) serves its `index.html`. A folder URL without a trailing slash answers `302` to the same URL with a `/` added (the base path and query are kept), so the page's relative links resolve.
-- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no `..`, symlinks, hard-linked files, backslashes or control characters, and at most 1024 characters. Leading slashes are dropped, so `preview//index.html` is the worktree's `index.html`, never a path from the root of the disk.
+- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no `..`, symlinks, hard-linked files, backslashes or control characters, and at most 1024 characters. Leading slashes are dropped, so `preview//index.html` is the `index.html` at the top of the worktree or task folder, never a path from the root of the disk.
 - `Content-Type` comes from a fixed list: `html`/`htm`, `css`, `js`/`mjs`, `json`/`map`, `txt` and `md` (as `text/plain`), `svg`, `png`, `jpg`/`jpeg`, `gif`, `webp`, `avif`, `ico`, `woff`/`woff2`, `ttf`, `otf`, `mp4`, `webm`, `wasm`. Anything else is sent as `application/octet-stream`, which a browser downloads rather than runs.
 - Every file is sent with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and streamed.
 - Every response, redirects and errors included, carries `Content-Security-Policy: sandbox allow-same-origin`.
@@ -1639,7 +1687,7 @@ The page is served from the dashboard's own origin, so a script in it could call
 { "ok": false, "error": "No such file in the workspace." }
 ```
 
-**`404 Not Found`**: `{ "ok": false, "error": "<message>" }`, where the message is `workspace not_found` or `workspace gone` (no usable worktree), `No index.html in that directory.`, or `Not a file.`
+**`404 Not Found`**: `{ "ok": false, "error": "<message>" }`, where the message is `workspace not_found`, `workspace gone` or `workspace unreadable` (no usable worktree or task folder), `No index.html in that directory.`, or `Not a file.`
 
 **`413 Payload Too Large`**: a file over 8 MB: `{ "ok": false, "error": "That file is too large to preview." }`
 
@@ -1648,7 +1696,7 @@ The page is served from the dashboard's own origin, so a script in it could call
 ### Example
 
 ```bash
-# The worktree's index.html (follow the redirect to preview/)
+# The task's index.html (follow the redirect to preview/)
 curl -L http://localhost:18790/api/board/<task-id>/preview
 
 # One asset

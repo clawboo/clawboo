@@ -32,7 +32,7 @@ A per-agent route goes to the source that owns the agent; an unknown id goes to 
 | GET    | `/api/agents/:agentId/files/:name`        | Read one agent file                                           | No      |
 | PUT    | `/api/agents/:agentId/files/:name`        | Write one agent file                                          | No      |
 | GET    | `/api/agents/:agentId/sessions`           | List the agent's sessions                                     | No      |
-| GET    | `/api/agents/:agentId/workspaces`         | The agent's task worktrees and its team folder                | No      |
+| GET    | `/api/agents/:agentId/workspaces`         | The agent's task worktrees, task folders and team folder      | No      |
 | GET    | `/api/agents/:agentId/team-folder/tree`   | One directory level of the agent's team folder                | No      |
 | GET    | `/api/agents/:agentId/team-folder/file`   | One file from the agent's team folder                         | No      |
 | GET    | `/api/agents/:agentId/screenshot`         | The newest browser screenshot for this agent                  | No      |
@@ -717,7 +717,7 @@ curl http://localhost:18790/api/agents/<agent-id>/sessions
 
 ## `GET /api/agents/:agentId/workspaces`
 
-The task worktrees of this agent's assigned tasks, newest first, and the agent's team folder. The agent's **Workspace** tab uses it to pick what to show, and to say so when the agent has nothing.
+The task worktrees of this agent's assigned tasks, newest first, the folders of its tasks that have no worktree, and the agent's team folder. The agent's **Computer** tab uses it to pick what to show, and to say so when the agent has nothing.
 
 Archived workspaces are left out. `onDisk: false` marks a checkout that was paused or cleaned up: the row and the branch remain, but the files are gone, and the tab says so rather than showing an empty tree. The files themselves come from the `/api/board/:taskId/workspace/*` routes on the [Board API](/reference/rest-api/board).
 
@@ -744,6 +744,15 @@ Archived workspaces are left out. `onDisk: false` marks a checkout that was paus
       "updatedAt": 1756000000000
     }
   ],
+  "taskFolders": [
+    {
+      "taskId": "t_91ab",
+      "title": "Draft the pricing page copy",
+      "taskStatus": "done",
+      "path": "/Users/you/clawboo-work/teams/4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b/tasks/t_91ab",
+      "updatedAt": 1755990000000
+    }
+  ],
   "teamFolder": {
     "teamId": "4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
     "path": "/Users/you/clawboo-work/teams/4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
@@ -752,7 +761,9 @@ Archived workspaces are left out. `onDisk: false` marks a checkout that was paus
 }
 ```
 
-`teamFolder` is the folder the agent's runs start in when they have no worktree: its team's folder, or `teams/_no-team` with `teamId: null` for an agent with no team, in the [work folder](/operating/data-and-state#the-work-folder). `onDisk` is `false` until a run creates it. It is `null` for an OpenClaw agent. An agent with no worktree-backed tasks returns an empty `workspaces` list.
+`taskFolders` lists the own folders of the agent's assigned tasks that have no worktree, newest first: each one that is on disk and either holds a file or belongs to a task that is `in_progress` or `in_review`. It looks at the agent's 200 newest tasks with no worktree and lists at most 50 folders. An older task's folder is still readable through the folder routes, and the task drawer shows it. The folder is `<team folder>/tasks/<task id>`. Its files come from the `/api/board/:taskId/folder/*` routes in [The task folder file view](/reference/rest-api/board#the-task-folder-file-view). Folders are not git checkouts, so they have no branch, change badges or diff.
+
+`teamFolder` is the folder the agent's other runs start in (team-chat turns that hold no task, and its own chat): its team's folder, or `teams/_no-team` with `teamId: null` for an agent with no team, in the [work folder](/operating/data-and-state#the-work-folder). `onDisk` is `false` until a run creates it. It is `null` for an OpenClaw agent. An agent with no worktree-backed tasks returns an empty `workspaces` list, and one with no task folder to show an empty `taskFolders` list.
 
 **`500 Internal Server Error`**:
 
@@ -770,7 +781,7 @@ curl http://localhost:18790/api/agents/<agent-id>/workspaces
 
 ## `GET /api/agents/:agentId/team-folder/tree` and `GET /api/agents/:agentId/team-folder/file`
 
-Read-only views of the agent's team folder, behind the **Team folder** choice on its **Workspace** tab. The folder comes from the agent's row, never from the request. Both routes take the same `dir` and `path` query values, keep every path inside the folder the same way, and answer with the same shapes as the task worktree routes in [The workspace file view](/reference/rest-api/board#the-workspace-file-view). There is no diff or git status, because the folder is not a git checkout.
+Read-only views of the agent's team folder, behind the **Team folder** choice on its **Computer** tab. The folder comes from the agent's row, never from the request. Both routes take the same `dir` and `path` query values, keep every path inside the folder the same way, and answer with the same shapes as the task worktree routes in [The workspace file view](/reference/rest-api/board#the-workspace-file-view). There is no diff or git status, because the folder is not a git checkout.
 
 - **Path params**: `agentId`.
 - **`404`** `{ "ok": false, "error": "workspace not found", "reason": "not_found" }`: an unknown agent, or one whose runtime gets no team folder (OpenClaw).
