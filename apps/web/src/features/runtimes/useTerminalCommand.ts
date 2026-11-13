@@ -21,11 +21,13 @@ async function readCommand(tool: TerminalTool): Promise<string | null> {
 /**
  * How a person types `tool` in their own terminal, as the server reports it:
  * the full path of the launcher when Clawboo installed the runtime into its
- * runtimes folder (which is not on their PATH), else the bare name. Read each
- * time a component that shows it mounts (an install may have happened since);
- * the bare name until it arrives, or when the read fails.
+ * runtimes folder (which is not on their PATH), else the bare name. Read when a
+ * component that shows it mounts, and again whenever `refreshKey` changes: a
+ * component that stays mounted while the runtime is installed (a row whose setup
+ * runs inside it) passes what changes then, such as whether it is connected. The
+ * bare name until the first read arrives, or when a read fails.
  */
-export function useTerminalCommand(tool: TerminalTool): string {
+export function useTerminalCommand(tool: TerminalTool, refreshKey?: unknown): string {
   const [command, setCommand] = useState<string>(tool)
   useEffect(() => {
     let live = true
@@ -34,12 +36,12 @@ export function useTerminalCommand(tool: TerminalTool): string {
         if (live && c) setCommand(c)
       })
       .catch(() => {
-        // Keep the bare name.
+        // Keep what was read last.
       })
     return () => {
       live = false
     }
-  }, [tool])
+  }, [tool, refreshKey])
   return command
 }
 

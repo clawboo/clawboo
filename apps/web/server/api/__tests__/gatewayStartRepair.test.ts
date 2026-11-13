@@ -30,10 +30,26 @@ vi.mock('../../lib/processManager', () => ({
   isProcessAlive: (pid: number) => pmState.alive.has(pid),
   probeGatewayPort: async () => pmState.reachable,
 }))
+const ocState = vi.hoisted(() => ({
+  /** The install folder of Clawboo's own copy when the command was read. */
+  installFolder: undefined as string | undefined,
+  marks: [] as unknown[][],
+}))
 vi.mock('../../lib/openclawDetect', () => ({
   detectOpenClaw: async () => ({ installed: true, path: '/bin/openclaw', version: '2026.9.2' }),
-  openclawInvocation: () => ({ command: '/bin/openclaw', args: [], shell: false }),
+  openclawInvocation: () => ({
+    command: '/bin/openclaw',
+    args: [],
+    shell: false,
+    ...(ocState.installFolder ? { installFolder: ocState.installFolder } : {}),
+  }),
   invalidateOpenClawCache: () => {},
+}))
+vi.mock('../../lib/runtimeFolder', async (orig) => ({
+  ...(await orig<typeof import('../../lib/runtimeFolder')>()),
+  markInstallInUse: (...args: unknown[]) => {
+    ocState.marks.push(args)
+  },
 }))
 vi.mock('../../lib/agentSource', () => ({ getRegistry: () => ({ reconnect: async () => {} }) }))
 vi.mock('../../lib/cwdGuard', () => ({ liveCwd: () => '/live/dir' }))
@@ -53,7 +69,7 @@ class FakeChild extends EventEmitter {
 /** What each spawned process does, in launch order. */
 type Script = (child: FakeChild, logPath: string) => void
 const spawnState = vi.hoisted(() => ({
-  calls: [] as { cmd: string; args: string[]; opts: Record<string, unknown> }[],
+  calls: [] as { cmd: string; args: string[]; opts: Record<string, unknown>; pid: number }[],
   scripts: [] as unknown[],
   nextPid: 5000,
 }))
@@ -62,8 +78,8 @@ vi.mock('node:child_process', async (orig) => {
   return {
     ...real,
     spawn: (cmd: string, args: string[], opts: Record<string, unknown>) => {
-      spawnState.calls.push({ cmd, args, opts })
       const child = new FakeChild(spawnState.nextPid++)
+      spawnState.calls.push({ cmd, args, opts, pid: child.pid })
       pmState.alive.add(child.pid)
       child.on('exit', () => pmState.alive.delete(child.pid))
       child.on('close', () => pmState.alive.delete(child.pid))
@@ -147,6 +163,8 @@ describe('Gateway start that needs `openclaw doctor --fix`', () => {
     pmState.alive.clear()
     spawnState.calls = []
     spawnState.scripts = []
+    ocState.installFolder = undefined
+    ocState.marks = []
   })
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
@@ -168,6 +186,25 @@ describe('Gateway start that needs `openclaw doctor --fix`', () => {
     expect(steps).toContain('repairing')
     expect(frames.at(-1)).toMatchObject({ type: 'complete', success: true })
     expect(frames.filter((f) => f['type'] === 'error')).toEqual([])
+  })
+
+  it('marks each launch with the install folder its command was read from', async () => {
+    // Clawboo's own copy, read as install v1; an update committed during the
+    // repair makes another folder current, but this Gateway still runs v1.
+    ocState.installFolder = '20261111-150401'
+    spawnState.scripts = [failingGateway(MIGRATION_FAILURE), doctor(0), healthyGateway]
+    await start()
+    const gatewayPids = spawnState.calls.filter((c) => c.args[0] === 'gateway').map((c) => c.pid)
+    expect(gatewayPids).toHaveLength(2)
+    expect(ocState.marks.map((m) => [m[0], m[1], m[3]])).toEqual(
+      gatewayPids.map((pid) => ['openclaw', pid, '20261111-150401']),
+    )
+  })
+
+  it('marks nothing for a copy on PATH', async () => {
+    spawnState.scripts = [healthyGateway]
+    await start()
+    expect(ocState.marks).toEqual([])
   })
 
   it('stops after one repair when OpenClaw still asks for it', async () => {

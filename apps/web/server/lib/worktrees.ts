@@ -88,7 +88,7 @@ import {
   agentWriteFile,
 } from './agentUser/agentFs'
 import { isAgentUserMode } from './agentUser/config'
-import { exportTaskBranch, mirrorPathFor, syncMirror } from './agentUser/mirror'
+import { checkedOutAt, exportTaskBranch, mirrorPathFor, syncMirror } from './agentUser/mirror'
 import { installAgentWorktreeIo, isInAgentSpace } from './agentUser/worktreeIo'
 import { getDb } from './db'
 import { emitEvent } from './obs'
@@ -257,14 +257,49 @@ async function prepareMirror(repoPath: string, ref: string): Promise<MirrorReady
  * Before a task's checkout is rebuilt from its branch: a branch only the user's
  * repository has (the task last ran before agents had their own user, or the
  * mirror was removed) is copied into the mirror. A branch the mirror has holds
- * the agent's work and is left as it is.
+ * the agent's work and is kept, unless the user's branch has moved on from it
+ * (work committed while agents ran as the server's user, such as the save of a
+ * checkout the server made): then the mirror's branch is moved up to the
+ * user's, and a branch that moved on in both is refused.
  */
 async function bringBranchIntoMirror(
   repoPath: string,
   branch: string,
 ): Promise<{ ok: true } | { ok: false; why: string }> {
   const mirror = mirrorPathFor(repoPath)
-  if ((await mirrorExists(repoPath)) && (await branchTip(mirror, branch)) !== null) {
+  const inMirror = (await mirrorExists(repoPath)) ? await branchTip(mirror, branch) : null
+  if (inMirror !== null) {
+    const inUser = await branchTip(repoPath, branch)
+    // Where the last export put it, or behind the agent's work: the mirror's
+    // branch is the task's, even one the agent has rewritten since.
+    if (
+      inUser === null ||
+      inUser === (await lastExported(repoPath, branch)) ||
+      (await isAncestorIn(mirror, inUser, inMirror))
+    ) {
+      return { ok: true }
+    }
+    const why = await mirrorCannotCarry(repoPath, inUser)
+    if (why) return { ok: false, why }
+    await syncMirror(repoPath, inUser)
+    if (!(await isAncestorIn(mirror, inMirror, inUser))) {
+      return {
+        ok: false,
+        why: `${branch} in ${repoPath} and in the agent's copy each have commits the other does not, so the task cannot go on from either until a person merges them`,
+      }
+    }
+    // A checkout on the branch moves with it, or git refuses; else (none, or a
+    // registration whose folder is gone, which the rebuild clears) the branch
+    // moves only from the commit read above. Where the checkout is comes from
+    // the mirror, which the agent can write: only a folder in agent space is
+    // taken, so the merge runs through the agent host as the agent user, never
+    // as the server in a folder the agent named.
+    const at = await checkedOutAt(mirror, `refs/heads/${branch}`)
+    if (at !== null && isInAgentSpace(at) && (await agentStat(at)) !== null) {
+      await execGit(at, ['merge', '--ff-only', '--quiet', inUser])
+    } else {
+      await execGit(mirror, ['update-ref', `refs/heads/${branch}`, inUser, inMirror])
+    }
     return { ok: true }
   }
   const tip = await branchTip(repoPath, branch)
@@ -287,14 +322,52 @@ async function hasCommit(repoPath: string, commit: string): Promise<boolean> {
   }
 }
 
+/** True when `ancestor` is `commit` or comes before it in `repo`. A commit
+ *  `repo` does not have is not. */
+async function isAncestorIn(repo: string, ancestor: string, commit: string): Promise<boolean> {
+  if (!(await hasCommit(repo, ancestor))) return false
+  try {
+    await execGit(repo, ['merge-base', '--is-ancestor', ancestor, commit])
+    return true
+  } catch (err) {
+    if (err instanceof GitError && err.exitCode === 1) return false
+    throw err
+  }
+}
+
+/** Where the user's repository keeps the commit the last export of `branch`
+ *  put there. Kept by the server in the user's repository, not in the mirror:
+ *  it decides whether a branch may be replaced or deleted, so the agent must
+ *  not be able to write it. */
+const exportedRef = (branch: string): string => `refs/clawboo-exported/${branch}`
+
+/** The commit the last export of `branch` put in the user's repository, or null. */
+async function lastExported(repoPath: string, branch: string): Promise<string | null> {
+  try {
+    const out = (
+      await execGit(repoPath, [
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        `${exportedRef(branch)}^{commit}`,
+      ])
+    ).trim()
+    return isCommitId(out) ? out : null
+  } catch (err) {
+    if (err instanceof GitError && err.exitCode === 1 && !err.stderr.trim()) return null
+    throw err
+  }
+}
+
 /**
  * Bring a task branch out of the agent's mirror into the user's repository
  * under the same name, so committed work is never only in agent space and the
  * board's diff and merge read the user's repository as they always have.
  * Nothing moves when the user's branch is already there. The user's branch is
- * replaced, as the one shared branch is without isolation, unless it is at a
- * commit the mirror has never had: someone committed to it in their own
- * repository, and that is never overwritten (this throws instead).
+ * replaced, as the one shared branch is without isolation, when it is where
+ * an earlier export put it or comes before the task's work. Anything else is
+ * someone's own work (a commit of theirs on the branch, or the branch moved to
+ * a commit of another task's) and is never overwritten: this throws instead.
  */
 async function exportFromMirror(repoPath: string, worktree: Worktree): Promise<void> {
   const mirror = mirrorPathFor(repoPath)
@@ -302,16 +375,29 @@ async function exportFromMirror(repoPath: string, worktree: Worktree): Promise<v
   if (tip === null) return
   const theirs = await branchTip(repoPath, worktree.branch)
   if (theirs === tip) return
-  if (theirs !== null && !(await hasCommit(mirror, theirs))) {
+  // Not where the last export put it: the task's work must contain it. Asked
+  // of the mirror first, for a quick refusal, and then decided by the server in
+  // the user's repository once the work has arrived there, since the agent can
+  // make its own copy answer anything.
+  const mustContain =
+    theirs !== null && theirs !== (await lastExported(repoPath, worktree.branch)) ? theirs : null
+  if (mustContain !== null && !(await isAncestorIn(mirror, mustContain, tip))) {
     throw new Error(
-      `${worktree.branch} in ${repoPath} has commits the agent's copy does not, so it was left as it is`,
+      `${worktree.branch} in ${repoPath} has commits the task's branch in the agent's copy does not, so it was left as it is`,
     )
   }
   // The scaffold commit's parent is the commit the task started from, which the
   // user's repository has: only what came after it travels.
   const base = await commitIn(mirror, `${worktree.baseCommit}^`)
   // `theirs` is what was checked above: the branch moves only from it.
-  await exportTaskBranch(repoPath, worktree.branch, base, theirs)
+  const moved = await exportTaskBranch(repoPath, worktree.branch, base, theirs, { mustContain })
+  // The work has arrived: a failure to note where only costs a later export
+  // over a rewritten branch, never this one.
+  if (moved !== null) {
+    await execGit(repoPath, ['update-ref', exportedRef(worktree.branch), moved]).catch(
+      () => undefined,
+    )
+  }
 }
 
 /** {@link exportFromMirror}, after committing what is in the checkout when
@@ -349,7 +435,13 @@ async function exportOrBlock(
   taskId: string,
   repoPath: string,
   worktree: Worktree,
-  opts: { commitFirst?: boolean } = {},
+  opts: {
+    commitFirst?: boolean
+    /** Whether the task is still the caller's to move, asked after the export
+     *  (which waits on git and the host). When not, a failure is noted, as a
+     *  pause's is, and the task is left to whoever has it now. */
+    owns?: () => boolean
+  } = {},
 ): Promise<string | null> {
   try {
     if (opts.commitFirst) await commitWorktreeWork(mirrorPathFor(repoPath), worktree)
@@ -357,6 +449,15 @@ async function exportOrBlock(
     return null
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err)
+    if (opts.owns && !opts.owns()) {
+      addComment(
+        db,
+        taskId,
+        `The task's work could not be brought into ${repoPath}: ${why}. It is kept in the agent's copy of the repository and is brought over when the task is next paused or completed.`,
+        'system',
+      )
+      return getTask(db, taskId)?.status ?? 'unknown'
+    }
     const r = updateStatus(db, taskId, 'blocked', { waitingOn: { kind: 'failure' } })
     if (r.ok) {
       emitEvent(db, {
@@ -377,14 +478,23 @@ async function exportOrBlock(
 }
 
 /** After a task with nothing to land is cleaned up: delete the copy of its
- *  branch an earlier pause brought into the user's repository. Only one the
- *  mirror also holds, so a branch with commits made in the user's repository is
- *  kept; `branch -D` keeps one that is checked out there. Best-effort. */
-async function dropExportedBranch(repoPath: string, branch: string): Promise<void> {
+ *  branch an earlier pause brought into the user's repository. Only while it
+ *  is at a commit this task put there (`ours`: what the last export moved it
+ *  to, and the task's own tip read before the cleanup), so a branch with
+ *  someone's commits is kept; never one checked out there; and only from the
+ *  commit looked at, so one moved meanwhile is kept too. Best-effort. */
+async function dropExportedBranch(
+  repoPath: string,
+  branch: string,
+  ours: (string | null)[],
+): Promise<void> {
   try {
     const theirs = await branchTip(repoPath, branch)
-    if (theirs === null || !(await hasCommit(mirrorPathFor(repoPath), theirs))) return
-    await execGit(repoPath, ['branch', '-D', branch])
+    const exported = await lastExported(repoPath, branch)
+    if (theirs === null || ![...ours, exported].includes(theirs)) return
+    if ((await checkedOutAt(repoPath, `refs/heads/${branch}`)) !== null) return
+    await execGit(repoPath, ['update-ref', '-d', `refs/heads/${branch}`, theirs])
+    await execGit(repoPath, ['update-ref', '-d', exportedRef(branch)])
   } catch {
     /* best-effort */
   }
@@ -1040,6 +1150,11 @@ export async function actOnTaskWorkspace(
     }
   }
 
+  // The task's own tip, read before the cleanup below can remove its branch: a
+  // copy of the branch at this commit in the user's repository is the task's.
+  const ownTip = agent
+    ? await branchTip(mirrorPathFor(ws.repoPath), ws.branch).catch(() => null)
+    : null
   const complete = await completeWorktree(checkoutRepo, worktree, roots)
   // Comparing the diff waits on git, and the run can lose the task meanwhile.
   if (!runStillOpen()) {
@@ -1074,7 +1189,7 @@ export async function actOnTaskWorkspace(
       // The branch is gone from the mirror. A copy an earlier pause brought into
       // the user's repository goes too, as the one shared branch would without
       // isolation.
-      if (agent) await dropExportedBranch(ws.repoPath, ws.branch)
+      if (agent) await dropExportedBranch(ws.repoPath, ws.branch, [ownTip])
     }
     return { ok: true, action: 'complete', complete, taskStatus }
   }
@@ -1084,8 +1199,21 @@ export async function actOnTaskWorkspace(
   // check reads the scaffold commit there, the board's diff and merge use it,
   // and committed work is never only in agent space.
   if (agent) {
-    const blocked = await exportOrBlock(db, taskId, ws.repoPath, worktree, { commitFirst: true })
-    if (blocked !== null) return { ok: true, action: 'complete', complete, taskStatus: blocked }
+    const blocked = await exportOrBlock(db, taskId, ws.repoPath, worktree, {
+      commitFirst: true,
+      owns: runStillOpen,
+    })
+    // Bringing the work over waits on git and the host: the run can lose the
+    // task meanwhile, and a newer run's task is not this check's to enter.
+    if (blocked !== null || !runStillOpen()) {
+      return {
+        ok: true,
+        action: 'complete',
+        complete,
+        taskStatus: blocked ?? getTask(db, taskId)?.status ?? 'unknown',
+        ...(runStillOpen() ? {} : { superseded: true }),
+      }
+    }
   }
 
   // Verify ON + dirty diff: land in_review, run the verification gate, then gate `done`.
@@ -1163,14 +1291,21 @@ export async function actOnTaskWorkspace(
   // A reviewer commits the work it reviews: that commit is brought over too,
   // and the task does not land without it.
   if (agent) {
-    const blocked = await exportOrBlock(db, taskId, ws.repoPath, worktree)
-    if (blocked !== null) {
+    const stillThisChecks = (): boolean =>
+      getTask(db, taskId)?.status === 'in_review' && runStillOpen()
+    const blocked = await exportOrBlock(db, taskId, ws.repoPath, worktree, {
+      owns: stillThisChecks,
+    })
+    // As before the check: the export waited, and the verdict is applied only
+    // to a task still this check's.
+    if (blocked !== null || !stillThisChecks()) {
       return {
         ok: true,
         action: 'complete',
         complete,
-        taskStatus: blocked,
+        taskStatus: blocked ?? getTask(db, taskId)?.status ?? 'unknown',
         verified: verdict.status,
+        ...(stillThisChecks() || blocked === 'blocked' ? {} : { superseded: true }),
       }
     }
   }

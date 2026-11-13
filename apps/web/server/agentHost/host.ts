@@ -52,6 +52,17 @@ const SIGNALS = new Set(['SIGTERM', 'SIGKILL', 'SIGINT', 'SIGHUP', 'SIGQUIT', 'S
 /** How much of a command's output the host returns from its own checks. */
 const CHECK_OUTPUT_CHARS = 64 * 1024
 
+/** Whether this process runs with no_new_privs (Linux), under which a setuid
+ *  or setgid file gives an agent nothing. */
+function hasNoNewPrivs(): boolean {
+  if (process.platform !== 'linux') return false
+  try {
+    return /^NoNewPrivs:\s*1\s*$/m.test(fs.readFileSync('/proc/self/status', 'utf8'))
+  } catch {
+    return false
+  }
+}
+
 /** Who the host is, as the kernel says. */
 export function hostIdentity(): Omit<HelloFrame, 't' | 'v'> {
   const info = os.userInfo()
@@ -249,6 +260,14 @@ async function findInodes(
   const matches: string[] = []
   const privileged: string[] = []
   const me = typeof process.getuid === 'function' ? BigInt(process.getuid()) : -1n
+  // setgid gives the file's group, whoever owns the file: harmless only for a
+  // group this user is already in.
+  const myGroups = new Set<bigint>(
+    [
+      ...(typeof process.getgid === 'function' ? [process.getgid()] : []),
+      ...(typeof process.getgroups === 'function' ? process.getgroups() : []),
+    ].map((g) => BigInt(g)),
+  )
   let seen = 0
   let rootDev: bigint
   try {
@@ -285,10 +304,11 @@ async function findInodes(
         ) {
           matches.push(p)
         }
-        // setuid (04000) or setgid (02000), owned by anyone but this user.
-        if ((st.mode & 0o6000n) !== 0n && st.uid !== me && privileged.length < MAX_SEARCH_MATCHES) {
-          privileged.push(p)
-        }
+        // setuid (04000) for another owner, or setgid (02000) for a group this
+        // user is not in.
+        const setuid = (st.mode & 0o4000n) !== 0n && st.uid !== me
+        const setgid = (st.mode & 0o2000n) !== 0n && !myGroups.has(st.gid)
+        if ((setuid || setgid) && privileged.length < MAX_SEARCH_MATCHES) privileged.push(p)
       }
     }
   }
@@ -336,6 +356,22 @@ export function serveConnection(
   opts: { onEnd?: () => void } = {},
 ): HostConnection {
   const procs = new Map<string, Proc>()
+  // Groups whose leader has closed while other members still run (a member
+  // with output of its own keeps no pipe open). `killTree` and `stopAll` still
+  // reach them, as the server's own `killProcessTree` reaches a local group
+  // after its leader is gone. A group id is not handed out again while any
+  // member lives; an entry is dropped once its group is found empty (every
+  // few seconds, at each spawn and at the end), which bets, as
+  // `killProcessTree` does, that the number is not reissued in between.
+  const survivors = new Map<string, Proc>()
+  const pruneSurvivors = (): void => {
+    for (const [id, s] of survivors) {
+      const pid = s.child.pid
+      if (!pid || !trySignal(-pid, 0)) survivors.delete(id)
+    }
+  }
+  const pruneTimer = setInterval(pruneSurvivors, 5_000)
+  pruneTimer.unref()
   /** Paused because the connection to the server is congested. */
   const paused = new Set<Readable>()
   /** Paused because the server's buffer for that process is full. */
@@ -378,7 +414,9 @@ export function serveConnection(
   }
 
   const stopAll = (): void => {
-    for (const p of procs.values()) void killTree(p, 3_000)
+    pruneSurvivors()
+    for (const p of [...procs.values(), ...survivors.values()]) void killTree(p, 3_000)
+    survivors.clear()
   }
 
   const handleSpawn = (id: number, f: Record<string, unknown>): void => {
@@ -414,6 +452,10 @@ export function serveConnection(
     }
     const entry: Proc = { child, group }
     procs.set(proc, entry)
+    // A pid handed out again means the group it led is gone, though the new
+    // child's own group now answers to it.
+    for (const [k, s] of survivors) if (s.child.pid === child.pid) survivors.delete(k)
+    pruneSurvivors()
     reply(id, { pid: child.pid })
     child.stdout?.on('data', (d: Buffer) =>
       send({ t: 'ev', proc, ev: 'out', data: d.toString('base64') }),
@@ -430,6 +472,7 @@ export function serveConnection(
     child.on('exit', (code, signal) => send({ t: 'ev', proc, ev: 'exit', code, signal }))
     child.on('close', (code, signal) => {
       procs.delete(proc)
+      if (group && child.pid && trySignal(-child.pid, 0)) survivors.set(proc, entry)
       send({ t: 'ev', proc, ev: 'close', code, signal })
     })
   }
@@ -474,7 +517,10 @@ export function serveConnection(
           return reply(id, { delivered: p ? p.child.kill(sig as NodeJS.Signals) : false })
         }
         case 'killTree': {
-          const p = procs.get(String(f['proc'] ?? ''))
+          const procId = String(f['proc'] ?? '')
+          // A survivor stays listed until its group is empty, so the end of
+          // the connection stops it again if this grace outlasts the host.
+          const p = procs.get(procId) ?? survivors.get(procId)
           const grace = Number(f['graceMs'])
           if (p)
             await killTree(
@@ -507,7 +553,11 @@ export function serveConnection(
           const data = Buffer.from(String(f['data'] ?? ''), 'base64')
           if (data.length > MAX_WRITE_BYTES)
             throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
-          writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777)
+          // Agent space is the agent user's alone: a private file whose mode
+          // cannot be set is refused, not written readable by others.
+          writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777, {
+            strictOwnerOnly: true,
+          })
           return reply(id, {})
         }
         case 'fs.append': {
@@ -583,7 +633,10 @@ export function serveConnection(
         case 'inodes': {
           const targets = Array.isArray(f['targets']) ? (f['targets'] as InodeRef[]) : []
           const max = Math.max(1, Math.min(Number(f['maxEntries']) || 200_000, 2_000_000))
-          return reply(id, await findInodes(String(f['root']), targets, max))
+          return reply(id, {
+            ...(await findInodes(String(f['root']), targets, max)),
+            noNewPrivs: hasNoNewPrivs(),
+          })
         }
         case 'privCheck': {
           const server = String(f['serverUser'] ?? '')
@@ -600,6 +653,16 @@ export function serveConnection(
             const r = await runCheck(cmd, args)
             attempts.push({ what, ran: r.ran, succeeded: r.ran && r.exitCode === 0 })
           }
+          // A rule for one command (a shell as the server user, say) lets none
+          // of the tries above run. sudo lists the rules without a password
+          // only when one of them needs none, so a listing that succeeds is a
+          // rule that works.
+          const listing = await runCheck('sudo', ['-n', '-l'])
+          attempts.push({
+            what: 'sudo -l',
+            ran: listing.ran,
+            succeeded: listing.ran && listing.exitCode === 0,
+          })
           const cron = await runCheck('crontab', ['-l'])
           const crontab = !cron.ran
             ? 'absent'
@@ -641,6 +704,7 @@ export function serveConnection(
   input.on('data', (chunk: string) => split(chunk))
   const end = (): void => {
     if (ended) return
+    clearInterval(pruneTimer)
     stopAll()
     ended = true
     opts.onEnd?.()

@@ -40,7 +40,7 @@ Clawboo does not ship the SDK, because its Claude Code binary adds about 210 MB 
 
 You should see the **Claude Code** row read **Needs key**, or **Connected** if an Anthropic key is already saved. A Claude Code run loads the SDK and starts the SDK's own `claude` binary, which came with the SDK in the step above, so there is nothing more to install. A `claude` CLI on your `PATH` is not used and does not count: without the SDK the row reads **Not installed**.
 
-If the install finishes with "Installed, but the Agent SDK's own `<platform>-<arch>` binary is missing from it, so Claude Code cannot run", npm left out the SDK's platform package, which is an optional dependency, and the row still reads **Not installed**. Check that npm may install optional dependencies, then click **Install** again.
+If the install ends with "The Agent SDK installed without its own `<platform>-<arch>` binary, so Claude Code could not run on it and nothing was changed", npm left out the SDK's platform package, which is an optional dependency. Clawboo keeps no such install, so whatever ran Claude Code before still does. Check that npm may install optional dependencies, then click **Install** again.
 
 </Step>
 
