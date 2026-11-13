@@ -28,6 +28,7 @@
 import {
   claimScheduledRun,
   countScheduledRunsInFlight,
+  getSetting,
   listArmedRuns,
   listQueuedRuns,
   markRunRunning,
@@ -36,6 +37,7 @@ import {
   reconcileScheduledRuns,
   recordRunOutcome,
   requeuePausedFire,
+  setSetting,
   type ClawbooDb,
   type DbScheduledRun,
 } from '@clawboo/db'
@@ -94,10 +96,23 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     ((run: DbScheduledRun) => dispatchRoutine(run, { db, mcpBaseUrl: deps.mcpBaseUrl ?? null }))
   const held = deps.held ?? ((): boolean => engineHold().isHeld())
   const gateway = deps.gateway
-  // When this ticker first found each queued fire due and waiting for the
-  // Gateway (see gatewayWait). In memory on purpose: after a restart the
-  // connection is coming up again, so the wait starts again too.
-  const waitingSince = new Map<string, number>()
+  // When each queued fire was first found due and waiting for the Gateway (see
+  // gatewayWait). Kept in the settings table too, so a restart continues a wait
+  // rather than granting a fresh one: otherwise a host that stops an engine while
+  // a fire waits and starts it again for that fire would do so forever, and the
+  // fire would neither run nor fail.
+  const waitingSince = readGatewayWaits(db)
+  let waitsWritten = JSON.stringify(Object.fromEntries(waitingSince))
+  const saveGatewayWaits = (): void => {
+    const next = JSON.stringify(Object.fromEntries(waitingSince))
+    if (next === waitsWritten) return
+    try {
+      setSetting(db, GATEWAY_WAITS_KEY, next)
+      waitsWritten = next
+    } catch (err) {
+      deps.log.warn({ err }, 'Routines: could not save Gateway waits (they restart on a restart)')
+    }
+  }
   // The queued rows a claim may take now, and when the first Gateway wait ends.
   // A queued row a pause holds back stays queued, and counts for neither the claim
   // nor the timer: it would spin the timer at a delay of 0. The pause's lift
@@ -131,6 +146,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     }
     // A fire that no longer waits (claimed, connected, gone) starts afresh next time.
     for (const id of waitingSince.keys()) if (!seen.has(id)) waitingSince.delete(id)
+    saveGatewayWaits()
     return { claimable, waitEndsAt }
   }
   const claimableRuns = (): DbScheduledRun[] => scanQueued().claimable
@@ -410,8 +426,26 @@ export function getRoutinesTicker(): RoutinesTicker | null {
   return singleton
 }
 
+/** Where the ticker keeps when each fire started waiting for the Gateway. */
+export const GATEWAY_WAITS_KEY = 'routines.gatewayWaitsSince'
+
+function readGatewayWaits(db: ClawbooDb): Map<string, number> {
+  const waits = new Map<string, number>()
+  try {
+    const parsed: unknown = JSON.parse(getSetting(db, GATEWAY_WAITS_KEY) ?? '{}')
+    if (parsed && typeof parsed === 'object') {
+      for (const [id, since] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof since === 'number' && Number.isFinite(since)) waits.set(id, since)
+      }
+    }
+  } catch {
+    // An unreadable record only means the waits start again.
+  }
+  return waits
+}
+
 /** The server's own Gateway connection, as a due OpenClaw routine waits on it. */
-function serverGateway(): GatewayState {
+export function serverGateway(): GatewayState {
   return {
     configured: () => getRegistry().source.isConfigured(),
     connected: () => getRegistry().source.isConnected(),
@@ -430,7 +464,7 @@ export interface RoutinesDue {
   at: number | null
   /** Routines with a next run that may start: armed, or due and not yet fired. */
   count: number
-  /** Fires under way: claimed, or dispatched and not finished. */
+  /** Fires under way: waiting for the Gateway, claimed, or dispatched and not finished. */
   inFlight: number
 }
 
@@ -440,12 +474,18 @@ export interface RoutinesDue {
  * run, and a queued one (due now). Left out: a paused routine, one parked after a
  * failure, a spent one-time routine, one on an archived team, and one a pause holds
  * back (it fires when a person lifts the pause). A routine waiting for the Gateway
- * counts as due now. An engine hold is not read: it lives in memory, and the
+ * counts as due now, and as a fire under way when `gateway` is given. An engine
+ * hold is not read: it lives in memory, and the
  * process a host stops and starts again holds nothing.
  */
-export function routinesDue(db: ClawbooDb, nowMs: number): RoutinesDue {
+export function routinesDue(
+  db: ClawbooDb,
+  nowMs: number,
+  gateway: GatewayState | null = null,
+): RoutinesDue {
   let at: number | null = null
   let count = 0
+  let waiting = 0
   const consider = (time: number): void => {
     count += 1
     if (at === null || time < at) at = time
@@ -453,10 +493,12 @@ export function routinesDue(db: ClawbooDb, nowMs: number): RoutinesDue {
   for (const run of listQueuedRuns(db)) {
     if (routineStartRefusal(db, run) !== null) continue
     consider(Math.min(run.nextRunAt ?? nowMs, nowMs))
+    // Waiting for the Gateway: it has begun, and runs or fails within the wait.
+    if (gateway && routineNeedsGateway(db, run, gateway)) waiting += 1
   }
   for (const run of listArmedRuns(db)) {
     if (run.nextRunAt == null || routineStartRefusal(db, run) !== null) continue
     consider(run.nextRunAt)
   }
-  return { at, count, inFlight: countScheduledRunsInFlight(db) }
+  return { at, count, inFlight: countScheduledRunsInFlight(db) + waiting }
 }

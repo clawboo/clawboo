@@ -9,7 +9,7 @@ import path from 'node:path'
 import { createDb, openDb, type ClawbooDb } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { checkDatabase, checkDatabaseInThread } from '../dbCheck'
+import { checkDatabase } from '../dbCheck'
 
 let dir: string
 let file: string
@@ -35,11 +35,8 @@ describe('checkDatabase', () => {
   it('runs the quick and the full check in a worker and passes a sound database', async () => {
     const db = createDb(file)
     open.push(db)
-    expect(await checkDatabase(db, file, 'quick_check')).toEqual({ verdict: 'ok', offThread: true })
-    expect(await checkDatabase(db, file, 'integrity_check')).toEqual({
-      verdict: 'ok',
-      offThread: true,
-    })
+    expect(await checkDatabase(file, 'quick_check')).toEqual({ ran: true, verdict: 'ok' })
+    expect(await checkDatabase(file, 'integrity_check')).toEqual({ ran: true, verdict: 'ok' })
   })
 
   it('reports damage SQLite finds in the file', async () => {
@@ -58,23 +55,20 @@ describe('checkDatabase', () => {
     writeSync(fd, Buffer.alloc(pageSize, 0xab), 0, pageSize, pageSize * 5)
     closeSync(fd)
 
-    const db = openDb(file)
-    open.push(db)
-    const result = await checkDatabase(db, file, 'quick_check')
-    expect(result.offThread).toBe(true)
-    expect(result.verdict).not.toBe('ok')
+    const result = await checkDatabase(file, 'quick_check')
+    expect(result.ran).toBe(true)
+    expect(result.ran && result.verdict).not.toBe('ok')
   })
 
-  it('falls back to the given connection when the worker cannot open the file', async () => {
-    const db = createDb(file)
-    open.push(db)
-    const result = await checkDatabase(db, path.join(dir, 'missing.db'), 'quick_check')
-    expect(result).toEqual({ verdict: 'ok', offThread: false })
+  it('says the check could not run, rather than running it on the main thread, when the worker cannot open the file', async () => {
+    const result = await checkDatabase(path.join(dir, 'missing.db'), 'quick_check')
+    expect(result.ran).toBe(false)
   })
 
-  it('checkDatabaseInThread reads the verdict on the calling thread', () => {
+  it('says the check could not run when it outlasts its time limit', async () => {
     const db = createDb(file)
     open.push(db)
-    expect(checkDatabaseInThread(db, 'quick_check')).toBe('ok')
+    const result = await checkDatabase(file, 'integrity_check', { timeoutMs: 1 })
+    expect(result).toEqual({ ran: false, reason: 'timed out after 0 s' })
   })
 })

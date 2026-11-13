@@ -41,5 +41,5 @@ export {
   redactValue,
   redactJsonString,
   REDACTION_MASK,
-  SAFE_COUNT_KEYS as REDACTION_SAFE_KEYS,
+  redactionSafeKeys,
 } from './redact'

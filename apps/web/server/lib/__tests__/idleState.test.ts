@@ -8,7 +8,14 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { engineIdleStateSchema } from '@clawboo/control-client'
-import { createDb, registerScheduledRun, setSetting, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  createDb,
+  queueDueRuns,
+  registerScheduledRun,
+  setSetting,
+  type ClawbooDb,
+} from '@clawboo/db'
 import {
   SCHEDULE_SOURCE_NOT_CONFIGURED,
   type ScheduleReadResult,
@@ -25,8 +32,10 @@ import {
   takeControl,
   viewerDetached,
 } from '../desktop/control'
+import type { PlacedGateway } from '../gatewayPlace'
 import { IDLE_SOURCE_READ_TIMEOUT_MS, buildIdleState } from '../idleState'
 import { createPresence, setPresenceForTests } from '../presence'
+import type { GatewayState } from '../routines/gatewayWait'
 import { SCHEDULER_TIME_ZONE_KEY } from '../routines/timeZone'
 
 let dir: string
@@ -94,17 +103,32 @@ function routine(nextRunAt: number): void {
   if (!result.ok) throw new Error(result.reason)
 }
 
-async function build(src: ScheduleSource, gatewayIsRemote = false) {
+interface BuildOptions {
+  place?: PlacedGateway | null | (() => PlacedGateway | null)
+  listening?: 'open' | 'closed' | 'unknown'
+  gateway?: GatewayState | null
+}
+
+async function build(src: ScheduleSource, opts: BuildOptions = {}) {
+  const place = opts.place ?? null
   const state = await buildIdleState({
     db,
     now: () => NOW,
     sources: () => [src],
-    gatewayIsRemote: () => gatewayIsRemote,
+    gatewayPlace: typeof place === 'function' ? place : () => place,
+    probe: async () => opts.listening ?? 'unknown',
+    gateway: opts.gateway ?? null,
   })
   // Whatever it says, it says it in the published shape.
   expect(engineIdleStateSchema.safeParse(state).success).toBe(true)
   return state
 }
+
+const disconnected = (reason = 'gateway_disconnected'): ScheduleReadResult => ({
+  records: [],
+  status: { sourceId: 'openclaw-gateway-cron', ok: false, degraded: true, reason, at: NOW },
+})
+const here: PlacedGateway = { place: 'here', host: '127.0.0.1', port: 18789 }
 
 describe('idle answer: next due', () => {
   it('takes the earliest time across the routines and a readable Gateway', async () => {
@@ -206,10 +230,42 @@ describe('idle answer: next due', () => {
 
   it('a Gateway on another machine is off: its cron runs whether or not this engine sleeps', async () => {
     const read = vi.fn(async () => ok([record(NOW + 60_000)]))
-    const state = await build(source(read), true)
+    const state = await build(source(read), {
+      place: { place: 'elsewhere', host: '192.168.1.21', port: 18789 },
+    })
     expect(read).not.toHaveBeenCalled()
     expect(state.nextDue.sources[1]).toMatchObject({ state: 'off', reason: 'remote', at: null })
     expect(state.nextDue.at).toBeNull()
+  })
+
+  it('a Gateway set up here with nothing listening is off, not unknown: it fires nothing', async () => {
+    const state = await build(
+      source(async () => disconnected()),
+      { place: here, listening: 'closed' },
+    )
+    expect(state.nextDue.sources[1]).toMatchObject({ state: 'off', reason: 'gateway_stopped' })
+    expect(state.nextDue.complete).toBe(true)
+  })
+
+  it('a Gateway that is listening but not connected yet stays unknown', async () => {
+    const state = await build(
+      source(async () => disconnected()),
+      { place: here, listening: 'open' },
+    )
+    expect(state.nextDue.sources[1]).toMatchObject({ state: 'unknown' })
+    expect(state.nextDue.complete).toBe(false)
+  })
+
+  it('a placement that throws only leaves the Gateway unplaced, never fails the answer', async () => {
+    const state = await build(
+      source(async () => ok([record(NOW + 60_000)])),
+      {
+        place: () => {
+          throw new Error('no network interfaces here')
+        },
+      },
+    )
+    expect(state.nextDue.sources[1]).toMatchObject({ state: 'ok', at: NOW + 60_000 })
   })
 
   it('a source that throws, against its own contract, reads as unknown', async () => {
@@ -251,5 +307,48 @@ describe('idle answer: people', () => {
     expect((await build(nobodyDue())).people.present).toBe(true)
     t += 1
     expect((await build(nobodyDue())).people.present).toBe(false)
+  })
+})
+
+describe('idle answer: work', () => {
+  it('counts a due OpenClaw routine waiting for the Gateway as a fire under way', async () => {
+    db.insert(agents)
+      .values({
+        id: 'oc',
+        name: 'oc',
+        gatewayId: 'oc',
+        sourceId: 'openclaw',
+        runtime: 'openclaw',
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .run()
+    const result = registerScheduledRun(db, {
+      agentId: 'oc',
+      teamId: null,
+      cronSpec: '0 9 * * *',
+      taskTemplate: JSON.stringify({ title: 'Daily', kind: 'research', priority: 0 }),
+      nextRunAt: NOW - 60_000,
+    })
+    if (!result.ok) throw new Error(result.reason)
+    queueDueRuns(db, NOW)
+    const waiting: GatewayState = { configured: () => true, connected: () => false }
+    const state = await build(
+      source(async () => disconnected()),
+      { gateway: waiting },
+    )
+    // A host must not stop the engine now, only to start it again for this fire.
+    expect(state.work.routinesInFlight).toBe(1)
+    expect(state.nextDue.sources[0]).toMatchObject({ at: NOW - 60_000 })
+
+    const connected: GatewayState = { configured: () => true, connected: () => true }
+    expect(
+      (
+        await build(
+          source(async () => disconnected()),
+          { gateway: connected },
+        )
+      ).work.routinesInFlight,
+    ).toBe(0)
   })
 })

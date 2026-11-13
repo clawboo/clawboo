@@ -35,7 +35,8 @@ export const idleWorkSchema = z.object({
   }),
   /** Team-chat work checks under way or waiting for the team folder. */
   checks: z.number().int().nonnegative(),
-  /** Routine fires under way (claimed, or dispatched and not finished). */
+  /** Routine fires under way: waiting for the Gateway to connect, claimed, or
+   *  dispatched and not finished. */
   routinesInFlight: z.number().int().nonnegative(),
   /** True while a hold is placed: no new agent run starts. */
   held: z.boolean(),

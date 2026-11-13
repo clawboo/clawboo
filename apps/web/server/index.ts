@@ -101,7 +101,7 @@ import {
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { resolveBootAccessToken } from './lib/bootAccessToken'
-import { runBootProbe } from './lib/bootProbe'
+import { runBootProbe, startBackgroundFullDatabaseCheck } from './lib/bootProbe'
 import { sweepLeftoverBudgetHolds } from './lib/budgetHold'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
@@ -1220,6 +1220,14 @@ async function main() {
           await refreshConnectedApps(BROKERED_TOOLKITS).catch(() => undefined)
         })
         .catch(() => undefined)
+    })
+
+    // ── Full database check ───────────────────────────────────────────────────
+    // The boot probe below runs SQLite's quick check; the full one, with its index
+    // and UNIQUE checks, runs off the main thread a couple of minutes after the
+    // start when the last one is a day old, then daily (see bootProbe).
+    safeStart('database-full-check', () => {
+      startBackgroundFullDatabaseCheck({ log })
     })
 
     // ── Compiled-code cache ───────────────────────────────────────────────────

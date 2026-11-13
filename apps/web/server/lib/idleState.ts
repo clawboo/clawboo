@@ -12,12 +12,13 @@
 // states, so a source that is not set up never reads as one that could not be
 // read:
 //   ok       read now; `at` is its earliest next run, or null with none
-//   off      not in use: nothing set up (no Gateway configured, say), or its jobs
-//            run somewhere this engine's stopping does not stop (a Gateway on
-//            another machine)
-//   unknown  in use but not readable now (a Gateway still connecting after a
-//            wake, or one that is set up and stopped); `at` is the earliest next
-//            run it reported before, if one is still ahead
+//   off      not in use: nothing set up (no Gateway configured, say), its jobs
+//            run somewhere this engine's stopping does not stop (a Gateway at
+//            another machine's address), or nothing is listening for it (a
+//            Gateway that is set up and stopped)
+//   unknown  in use but not readable now (a Gateway running that this engine
+//            is still connecting to after a wake); `at` is the earliest next run
+//            it reported before, if one is still ahead
 // The engine's own routines are read from the ledger with the ticker's rules
 // (see routinesDue), not from the merged schedules list, which also lists paused
 // routines and ones on archived teams.
@@ -42,7 +43,9 @@ import { getRegistry } from './agentSource'
 import { getDb } from './db'
 import { screensInPersonControl } from './desktop/control'
 import { presence } from './presence'
-import { routinesDue } from './routines/ticker'
+import { placeGateway, probeListening, type PlacedGateway } from './gatewayPlace'
+import type { GatewayState } from './routines/gatewayWait'
+import { routinesDue, serverGateway } from './routines/ticker'
 import { readSchedulerTimeZone } from './routines/timeZone'
 import { getScheduleMultiplexer } from './scheduleSource/registry'
 import { teamChecksInFlight } from './teamChat/teamOrchestrator'
@@ -58,8 +61,12 @@ export interface IdleStateDeps {
   now?: () => number
   /** The schedule sources besides the engine's own routines. */
   sources?: () => readonly ScheduleSource[]
-  /** True when the configured OpenClaw Gateway runs on another machine. */
-  gatewayIsRemote?: () => boolean
+  /** Where the configured OpenClaw Gateway runs, or null when none is set up. */
+  gatewayPlace?: () => PlacedGateway | null
+  /** Whether anything listens at the Gateway's address. */
+  probe?: (host: string, port: number) => Promise<'open' | 'closed' | 'unknown'>
+  /** The Gateway connection due OpenClaw routines wait for; null to count no waits. */
+  gateway?: GatewayState | null
 }
 
 /** The presence record, with a person who holds an agent's screen counted as here. */
@@ -145,9 +152,19 @@ async function readSource(
   nowMs: number,
   deps: IdleStateDeps,
 ): Promise<IdleDueSource> {
-  if (source.id === GATEWAY_CRON_SOURCE_ID && deps.gatewayIsRemote?.()) {
-    // Its cron fires on the Gateway's own machine whether or not this engine sleeps.
-    return { id: source.id, state: 'off', at: null, count: 0, timeZone: null, reason: 'remote' }
+  // Where the Gateway runs. Reading this machine's names can fail on some hosts;
+  // that only leaves the Gateway unplaced, and its jobs are read as usual.
+  let placed: PlacedGateway | null = null
+  if (source.id === GATEWAY_CRON_SOURCE_ID) {
+    try {
+      placed = deps.gatewayPlace?.() ?? null
+    } catch {
+      placed = null
+    }
+    if (placed?.place === 'elsewhere') {
+      // Its cron fires on the Gateway's own machine whether or not this engine sleeps.
+      return { id: source.id, state: 'off', at: null, count: 0, timeZone: null, reason: 'remote' }
+    }
   }
   const result = await withTimeout(source)
   if (result === 'timeout') {
@@ -169,6 +186,28 @@ async function readSource(
       count: 0,
       timeZone: null,
       reason: result.status.reason,
+    }
+  }
+  // Set up but not connected. If nothing listens at the Gateway's address, no
+  // Gateway is running there to fire its jobs, so the source is off rather than
+  // unknown: otherwise a Gateway left stopped would keep the answer incomplete for
+  // good. One still starting reads as stopped for the seconds until it listens.
+  if (placed && deps.probe) {
+    let listening: 'open' | 'closed' | 'unknown' = 'unknown'
+    try {
+      listening = await deps.probe(placed.host, placed.port)
+    } catch {
+      listening = 'unknown'
+    }
+    if (listening === 'closed') {
+      return {
+        id: source.id,
+        state: 'off',
+        at: null,
+        count: 0,
+        timeZone: null,
+        reason: 'gateway_stopped',
+      }
     }
   }
   // What it sent last, if it sent anything: only times still ahead, since a cache
@@ -210,9 +249,9 @@ function defaultSources(): readonly ScheduleSource[] {
   return getScheduleMultiplexer().list()
 }
 
-function defaultGatewayIsRemote(): boolean {
+function defaultGatewayPlace(): PlacedGateway | null {
   const source = getRegistry().source
-  return source.isConfigured() && !source.isOnThisMachine()
+  return source.isConfigured() ? placeGateway(source.gatewayUrl()) : null
 }
 
 export async function buildIdleState(deps: IdleStateDeps = {}): Promise<EngineIdleState> {
@@ -225,7 +264,9 @@ export async function buildIdleState(deps: IdleStateDeps = {}): Promise<EngineId
   try {
     const db = deps.db ?? getDb()
     timeZone = readSchedulerTimeZone(db).timeZone
-    const due = routinesDue(db, at)
+    // A fire waiting for the Gateway is work about to run, so it counts with the
+    // fires under way: a host that stopped the engine now would only start it again.
+    const due = routinesDue(db, at, deps.gateway === undefined ? serverGateway() : deps.gateway)
     inFlight = due.inFlight
     routines = { id: ROUTINES_SOURCE_ID, state: 'ok', at: due.at, count: due.count, timeZone }
   } catch (err) {
@@ -240,7 +281,8 @@ export async function buildIdleState(deps: IdleStateDeps = {}): Promise<EngineId
   }
   const nextDue = await nextDueState(routines, timeZone, at, {
     ...deps,
-    gatewayIsRemote: deps.gatewayIsRemote ?? defaultGatewayIsRemote,
+    gatewayPlace: deps.gatewayPlace ?? defaultGatewayPlace,
+    probe: deps.probe ?? probeListening,
   })
   return { at, people: peopleState(), work: workState(inFlight), nextDue }
 }

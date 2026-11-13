@@ -112,13 +112,13 @@ Every schedule from every source, with each one's `teamName` and `agentName` fil
     sourceId: 'clawboo-routine' | 'openclaw-gateway-cron' | 'hermes-gateway-jobs'
     ok: boolean
     degraded: boolean
-    reason?: string // 'gateway_disconnected', 'gateway_stopped', 'stale_cache', 'not_configured', or an error message
+    reason?: string // 'gateway_disconnected', 'gateway_stopped', 'stale_cache', 'profile_unreadable', 'not_configured', or an error message
     at: number      // epoch ms of this read
   }>
 }
 ```
 
-The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs. When the Hermes gateway is not running, the Hermes jobs source reports `reason: 'gateway_stopped'` with no cache, or `'stale_cache'`; a profile it could not read while the gateway runs makes it degraded with that error as the reason. With no Hermes agents, or no Hermes that Clawboo installed, it reports `{ ok: false, degraded: false, reason: 'not_configured' }` and no jobs.
+The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs. When the Hermes gateway is not running, the Hermes jobs source reports `reason: 'gateway_stopped'` with no cache, or `'stale_cache'`; a profile it could not read while the gateway runs makes it degraded with `reason: 'profile_unreadable'`, and that profile's jobs are left out. With no Hermes agents, or no Hermes that Clawboo installed, it reports `{ ok: false, degraded: false, reason: 'not_configured' }` and no jobs.
 
 ### Example
 
@@ -311,7 +311,7 @@ For a Gateway cron job:
 For a Hermes job:
 
 - **Pause and resume** become Hermes's `POST .../jobs/<job-id>/pause` and `/resume` on the agent's profile.
-- **A change** sends the changed `label` (as the job's name), `cronSpec` and prompt (`payload.prompt`, else `payload.message`) to Hermes as a `PATCH` on the job, with the same schedule rules as on create; the Routine-only fields are ignored. A job's model, provider or folder cannot be changed through the API.
+- **A change** sends the changed `label` (as the job's name), `cronSpec` and prompt (`payload.prompt`, else `payload.message`) to Hermes as a `PATCH` on the job, with the same schedule rules as on create. A change that sets `target`, `teamId` or `taskTemplate`, or names another `agentId`, is refused with **400** `invalid_routine_target`: a Hermes job stays with its agent and runs a prompt. A job's model, provider or folder cannot be changed through the API.
 - **The id is checked first.** It must be `<profile>.<job-id>` with a 12-character hex job id, for a profile that belongs to a Clawboo Hermes agent; otherwise the answer is **404** `unknown_schedule`, as it is when Hermes has no such job. A change Hermes refuses answers **400** `invalid_routine_target`. The same holds for delete and run.
 
 - **Path params**: `id` (composite schedule id).

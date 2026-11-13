@@ -96,6 +96,17 @@ describe('presence', () => {
     expect(p.state()).toMatchObject({ present: false, lastActedAt: 10_000_000 })
   })
 
+  it('a beat from before a long sleep is not recent, though the monotonic clock slept too', () => {
+    let wall = 10_000_000
+    let mono = 0
+    const p = createPresence({ now: () => wall, monotonic: () => mono })
+    p.beat('tab-a', { visible: true, focused: true, acted: true })
+    // Ten hours asleep: the wall clock moves on, the monotonic clock barely does.
+    wall += 10 * 3_600_000
+    mono += 10_000
+    expect(p.state()).toMatchObject({ present: false, focusedTabs: 0 })
+  })
+
   it('counts an action the server saw itself', () => {
     const c = clock()
     const p = createPresence(c)

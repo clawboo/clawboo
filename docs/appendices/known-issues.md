@@ -87,7 +87,7 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** Clawboo does not limit which settings files Claude Code loads. Every Claude Code agent reads what your own `claude` command reads: your user settings and memory in `~/.claude`, plus any `.claude` settings and `CLAUDE.md` in the folder it works in. All Claude Code agents share them.
 
-**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. In releases after 0.6.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user, each with a Claude Code home of its own. See [Claude Code](/runtimes/claude-code).
+**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. In releases after 0.6.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user; all Claude Code agents then share that user's one `~/.claude`, which is not yours. See [Claude Code](/runtimes/claude-code).
 
 **Status:** fixed in 0.6.0. From 0.6.0, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
 

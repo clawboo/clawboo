@@ -105,7 +105,7 @@ Lists every runtime with its capabilities, live health, and install and credenti
     id: string
     name: string
     healthBin: string | null
-    packageManager: 'npm' | 'pip' | 'release' | null
+    packageManager: 'npm' | 'release' | null
     installCommand: string | null
     builtIn: boolean
     authKind: 'api-key' | 'oauth' | 'none'

@@ -18,16 +18,18 @@ import { accessSync, constants as fsConstants, existsSync, mkdirSync, statSync }
 
 import { isGatewayConfigured, resolveClawbooDir, loadSettings } from '@clawboo/config'
 import {
+  getSetting,
   listTableNames,
   missingSchemaColumns,
   SchemaUpgradeError,
+  setSetting,
   type ClawbooDb,
 } from '@clawboo/db'
 import { getProxyDeviceIdentityPath } from '@clawboo/gateway-proxy'
 import { MCP_SERVER_NAMES } from '@clawboo/mcp'
 
 import { getRegistry } from './agentSource'
-import { checkDatabase } from './dbCheck'
+import { checkDatabase, type DbCheckKind, type DbCheckResult } from './dbCheck'
 import { getDb, getDbPath } from './db'
 import { DEFAULTS } from './defaults'
 import { probeMcpServer } from './mcpSupervisor'
@@ -344,9 +346,41 @@ async function probeOtel(): Promise<CheckOutcome> {
   }
 }
 
+/** What the database check found, as a boot check outcome. */
+function integrityOutcome(kind: DbCheckKind, result: DbCheckResult, dbPath: string): CheckOutcome {
+  const which = kind === 'integrity_check' ? 'integrity check' : 'quick integrity check'
+  if (!result.ran) {
+    return {
+      ok: false,
+      message: `SQLite ${which} could not run; Re-run probe tries again`,
+      detail: result.reason,
+    }
+  }
+  return result.verdict === 'ok'
+    ? { ok: true, message: `SQLite ${which} passed`, detail: dbPath }
+    : { ok: false, message: `SQLite ${which} FAILED`, detail: `PRAGMA ${kind}: ${result.verdict}` }
+}
+
+/** Failed checks split into degraded and fatal. A database check that could not
+ *  run is degraded, never fatal. */
+function classify(
+  checks: BootCheck[],
+  integrityNotRun: boolean,
+): { degraded: string[]; fatal: string[] } {
+  const isFatal = (c: BootCheck): boolean =>
+    FATAL_IDS.has(c.id) && !(c.id === 'databaseIntegrity' && integrityNotRun)
+  return {
+    degraded: checks.filter((c) => !c.ok && !isFatal(c)).map((c) => c.id),
+    fatal: checks.filter((c) => !c.ok && isFatal(c)).map((c) => c.id),
+  }
+}
+
 /** Run the full boot probe. `port` is the actual listening port (for the api-port
  *  file match check); omit it to skip that check (e.g. when probing pre-listen). */
 async function runBootProbeInner(input: BootProbeInput = {}): Promise<BootReport> {
+  // A database check that could not run says nothing about the database: it
+  // degrades the report instead of failing it.
+  let integrityNotRun = false
   const startedAt = new Date()
   const clawbooHome = resolveClawbooDir(process.env)
   const dbPath = getDbPath()
@@ -394,15 +428,10 @@ async function runBootProbeInner(input: BootProbeInput = {}): Promise<BootReport
           detail: dbOpenError ?? '',
         }
       const kind = input.fullDatabaseCheck ? 'integrity_check' : 'quick_check'
-      const { verdict } = await checkDatabase(db, dbPath, kind)
-      const which = input.fullDatabaseCheck ? 'integrity check' : 'quick integrity check'
-      return verdict === 'ok'
-        ? { ok: true, message: `SQLite ${which} passed`, detail: dbPath }
-        : {
-            ok: false,
-            message: `SQLite ${which} FAILED`,
-            detail: `PRAGMA ${kind}: ${verdict}`,
-          }
+      const result = await checkDatabase(dbPath, kind)
+      if (!result.ran) integrityNotRun = true
+      else if (kind === 'integrity_check') noteFullDatabaseCheck(db)
+      return integrityOutcome(kind, result, dbPath)
     }),
   )
   checks.push(
@@ -495,8 +524,7 @@ async function runBootProbeInner(input: BootProbeInput = {}): Promise<BootReport
   // 9. OTel exporter (only when configured).
   checks.push(await runCheck('otelExporterReachable', () => probeOtel()))
 
-  const degraded = checks.filter((c) => !c.ok && !FATAL_IDS.has(c.id)).map((c) => c.id)
-  const fatal = checks.filter((c) => !c.ok && FATAL_IDS.has(c.id)).map((c) => c.id)
+  const { degraded, fatal } = classify(checks, integrityNotRun)
 
   const report: BootReport = {
     startedAt,
@@ -525,4 +553,88 @@ async function runBootProbeInner(input: BootProbeInput = {}): Promise<BootReport
   }
   lastReport = report
   return report
+}
+
+// ─── The full database check, in the background ──────────────────────────────
+
+/** Settings key: when the last full database check ran, epoch ms. */
+export const FULL_DATABASE_CHECK_AT_KEY = 'health.fullDatabaseCheckAt'
+/** The background full check runs at most this often. */
+export const FULL_DATABASE_CHECK_EVERY_MS = 24 * 60 * 60_000
+/** A background full check that could not run is tried again after this long. */
+const FULL_DATABASE_CHECK_RETRY_MS = 60 * 60_000
+
+function noteFullDatabaseCheck(db: ClawbooDb): void {
+  try {
+    setSetting(db, FULL_DATABASE_CHECK_AT_KEY, String(Date.now()))
+  } catch {
+    // Only means the next background check comes sooner.
+  }
+}
+
+interface FullCheckLog {
+  info: (obj: object, msg: string) => void
+  error: (obj: object, msg: string) => void
+}
+
+/**
+ * The boot probe runs SQLite's quick check, which leaves out the index
+ * cross-check and the UNIQUE checks. So the full check also runs in the
+ * background, off the main thread: `delayMs` after the start when the last full
+ * check (a person's Re-run probe counts) is a day old or there has been none, then
+ * once a day while the server runs. What it finds replaces the database line of the
+ * last report, so System Health and `/api/health` show it. Returns a stop function.
+ */
+export function startBackgroundFullDatabaseCheck(
+  opts: { delayMs?: number; log?: FullCheckLog } = {},
+): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let stopped = false
+  const schedule = (ms: number): void => {
+    if (stopped) return
+    timer = setTimeout(() => void run(), Math.max(0, ms))
+    timer.unref?.()
+  }
+  const run = async (): Promise<void> => {
+    let db: ClawbooDb
+    try {
+      db = getDb()
+    } catch {
+      schedule(FULL_DATABASE_CHECK_RETRY_MS)
+      return
+    }
+    const last = Number(getSetting(db, FULL_DATABASE_CHECK_AT_KEY) ?? 0) || 0
+    const wait = last + FULL_DATABASE_CHECK_EVERY_MS - Date.now()
+    if (wait > 0) {
+      schedule(wait)
+      return
+    }
+    const result = await checkDatabase(getDbPath(), 'integrity_check')
+    if (!result.ran) {
+      schedule(FULL_DATABASE_CHECK_RETRY_MS)
+      return
+    }
+    noteFullDatabaseCheck(db)
+    if (result.verdict === 'ok') {
+      opts.log?.info({}, 'Database: full integrity check passed')
+    } else {
+      opts.log?.error(
+        { verdict: result.verdict },
+        'Database: full integrity check FAILED; see System Health (/api/health)',
+      )
+    }
+    if (lastReport) {
+      const outcome = integrityOutcome('integrity_check', result, getDbPath())
+      const checks = lastReport.checks.map((c) =>
+        c.id === 'databaseIntegrity' ? { ...c, ...outcome, detail: outcome.detail } : c,
+      )
+      lastReport = { ...lastReport, checks, ...classify(checks, false) }
+    }
+    schedule(FULL_DATABASE_CHECK_EVERY_MS)
+  }
+  schedule(opts.delayMs ?? 2 * 60_000)
+  return () => {
+    stopped = true
+    if (timer) clearTimeout(timer)
+  }
 }

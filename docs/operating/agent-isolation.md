@@ -21,13 +21,17 @@ By default, Claude Code, Codex, Hermes and Clawboo Native's commands run as your
 
 It is off unless you set it. An install without the setting runs exactly as before.
 
+<Note>
+Available in releases after 0.6.0. Clawboo 0.6.0 and older ignore `CLAWBOO_AGENT_USER`, and agents keep running as you. Run `clawboo --version` to see yours.
+</Note>
+
 ## What it protects, and what it does not
 
 With the setting on, a prompt-injected agent can no longer:
 
 - read the vault's key and the vault, and with them every saved provider key, website login and 1Password token;
 - read or change Clawboo's database: the board, approvals, budgets, routines and connector grants;
-- read the secret behind its MCP attach links, and so sign itself as another agent;
+- read the secret Clawboo signs MCP attach links with, so it cannot make itself a link with another agent's identity or a privilege it was not given;
 - read the access token and answer its own approval card through the API;
 - read your own logins (`~/.openclaw/.env`, `~/.codex`, `~/.hermes`, `~/.claude`, `~/.ssh`), as long as your home folder is closed to other users (see [Before you start](#before-you-start));
 - plant a git hook in your repository that runs as you later: task checkouts come from a copy of the repository the agent user owns;
@@ -41,6 +45,7 @@ It does **not**:
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
 - protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins, and a [website login](/using/website-logins) Clawboo filled into its page;
 - keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder, and on Linux one agent's programs can open another agent's display;
+- keep one agent from acting as another on Clawboo's MCP servers. An agent's attach links are long-lived links that carry their own credential, and another agent can read them in that agent's runtime home (they share the agent user), or on the command line of a Claude Code run;
 - change what Clawboo's tools allow. Agents still reach the board, memory and team chat through Clawboo's MCP servers, and approvals, grants and budgets still apply;
 - cover OpenClaw agents. They run inside the OpenClaw Gateway, as whoever started it. Use OpenClaw's own sandbox for them;
 - protect you from running an agent's output yourself, such as merging its branch and running it;
@@ -70,17 +75,18 @@ Agents keep every tool. They reach Clawboo's MCP servers over HTTP on `127.0.0.1
 
 ### Where things live
 
-| What                                                    | Where, with the setting on                    | Owner and mode     |
-| ------------------------------------------------------- | --------------------------------------------- | ------------------ |
-| Clawboo's data folder (`~/.clawboo`)                    | unchanged                                     | you, `0700`        |
-| The database, the vault, settings, the token            | unchanged                                     | you, `0600`        |
-| The work folder (team and task folders, task checkouts) | `<agent home>/work`, or `CLAWBOO_WORK_DIR`    | agent user, `0700` |
-| Each agent's runtime home (`CODEX_HOME`, `HERMES_HOME`) | `<agent home>/runtimes/<runtime>/<agent>`     | agent user, `0700` |
-| Claude Code's settings and sessions                     | the agent user's own `~/.claude`              | agent user         |
-| Each agent's browser profile                            | `<agent home>/browser-profiles/`              | agent user, `0700` |
-| Each agent's display: its VNC socket and X cookie       | `<agent home>/desktops/<hash>`                | agent user, `0700` |
-| The agent user's copy of each repository                | `<work folder>/mirrors/<repository hash>.git` | agent user         |
-| Clawboo Native's conversation history                   | unchanged, in the data folder                 | you                |
+| What                                                      | Where, with the setting on                                     | Owner and mode                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Clawboo's data folder (`~/.clawboo`)                      | unchanged                                                      | you, `0700`                                                               |
+| The database, the vault, settings, the token              | unchanged                                                      | you, `0600`                                                               |
+| The work folder (team and task folders, task checkouts)   | `<agent home>/work`, or `CLAWBOO_WORK_DIR`                     | agent user, `0700`                                                        |
+| Each agent's runtime home (`CODEX_HOME`, `HERMES_HOME`)   | `<agent home>/runtimes/<runtime>/<agent>`                      | agent user, `0700`                                                        |
+| Claude Code's settings and sessions                       | the agent user's own `~/.claude`                               | agent user                                                                |
+| Each agent's browser profile                              | `<agent home>/browser-profiles/`                               | agent user, `0700`                                                        |
+| Each agent's display: its VNC socket and X cookie         | `<agent home>/desktops/<hash>`                                 | agent user, `0700`                                                        |
+| The agent user's copy of each repository                  | `<work folder>/mirrors/<repository hash>.git`                  | agent user                                                                |
+| Installed runtimes (Claude Code, Codex, Hermes, OpenClaw) | `CLAWBOO_RUNTIMES_DIR`, outside your home and the agent user's | you (or root), `0755`: the agent user runs them, nobody else changes them |
+| Clawboo Native's conversation history                     | unchanged, in the data folder                                  | you                                                                       |
 
 `<agent home>` is the agent user's home folder: `/var/lib/clawboo-agent` on Linux and `/var/clawboo-agent` on macOS with the setup commands below.
 
@@ -98,12 +104,12 @@ Repositories that use Git LFS or submodules cannot be carried by a bundle, so co
 
 ### Stopping agents
 
-Clawboo stops every process the agent user runs when it starts (that also reaps anything a crashed server left), when the agent host stops answering for 5 seconds (it then starts a new one), and when it stops. So the agent user must belong to one Clawboo install. A second install sharing it would have its agents stopped too.
+Clawboo stops every process the agent user runs when it starts (that also reaps anything a crashed server left), when the agent host stops answering for 5 seconds, and when it stops. On a computer it then starts a new agent host; in a container the server exits instead, and `clawboo-launch` stops every agent process so the container's restart policy starts both again. So the agent user must belong to one Clawboo install. A second install sharing it would have its agents stopped too.
 
 ## Before you start
 
 - **An access token.** Clawboo refuses to start without one, because without it any program on the computer, agents included, can use Clawboo's API. The per-install token every install has is enough; only setting `STUDIO_ACCESS_TOKEN` to an empty value turns it off.
-- **Runtimes the agent user can run.** Node, Clawboo itself and each runtime (Claude Code, Codex, Hermes) must be installed where every user can run them, such as `/usr/local`, `/opt` or Homebrew. A runtime installed under your home (with nvm, say) cannot run as another user: the startup check lists it, and its runs fail with the path that is out of reach. The runtimes Clawboo installs for you, Hermes among them, go in its [runtimes folder](/operating/data-and-state#the-runtimes-folder), `~/clawboo-runtimes` by default, which is under your home: set `CLAWBOO_RUNTIMES_DIR` to a folder every user can run and only you can change, such as one under `/opt`.
+- **Runtimes the agent user can run.** Node, Clawboo itself and each runtime (Claude Code, Codex, Hermes) must be where every user can run them. Clawboo installs runtimes, Hermes among them, into its [runtimes folder](/operating/data-and-state#the-runtimes-folder), `~/clawboo-runtimes` by default (`<CLAWBOO_HOME>-runtimes` when you set `CLAWBOO_HOME`), which is inside your home: once you close your home (below), the agent user cannot reach it. Before you turn the setting on, set `CLAWBOO_RUNTIMES_DIR` to a folder outside your home and the agent user's, such as `/opt/clawboo-runtimes`, owned by you with mode `0755` (the setup commands below make it), run Clawboo on a Node every user can run (Homebrew, `/usr/local`, or the desktop app's own), and install the runtimes again from the Runtimes page. A runtime the agent user cannot run is listed by the startup check, and its runs fail with the path that is out of reach.
 - **Your home folder closed to other users.** On macOS your home is readable by the `staff` group; run `chmod 750 ~`. On Linux, `chmod 750 ~` too. Clawboo warns at every start while the agent user can list your home.
 - **Sign-ins for the agent user.** API keys you save in Clawboo reach each run in its environment, as before. Your own Codex and Hermes sign-ins are not shared with the agents: they are yours, and the agent user cannot read them. Sign in for the agents from the Runtimes page (that sign-in runs as the agent user and is kept in its home), or give the runtime an API key; until you do, a subscription run says so instead of starting. Claude Code uses the agent user's own `~/.claude`: give it an API key, or a long-lived token from `claude setup-token` set as `CLAUDE_CODE_OAUTH_TOKEN` in Clawboo's environment.
 
@@ -129,15 +135,22 @@ echo clawboo-agent | sudo tee -a /etc/cron.deny /etc/at.deny >/dev/null
 
 Here `alice` is the user Clawboo runs as. The rule only lets that user start processes as the less privileged agent user, which is why it names no commands. The last line keeps the agent user from scheduling jobs that would run after Clawboo stops its agents. Where `setpriv` is installed (most Linux systems), Clawboo starts the agent host with `no_new_privs`, so no agent process can become another user through a setuid program. The agent user gets a real shell (Codex and Claude Code run commands in it) but no password, so nobody can log in as it, and no sudo rights at all: Clawboo refuses to start if it has any.
 
-Then check the setup, and start Clawboo with the setting:
+Then close your home, make the runtimes folder (see [Before you start](#before-you-start)), check the setup, and start Clawboo with the setting:
 
 ```bash
-CLAWBOO_AGENT_USER=clawboo-agent clawboo agent-user check
+chmod 750 ~
+sudo install -d -o "$(id -un)" -m 755 /opt/clawboo-runtimes
 ```
 
 ```bash
-CLAWBOO_AGENT_USER=clawboo-agent clawboo
+CLAWBOO_RUNTIMES_DIR=/opt/clawboo-runtimes CLAWBOO_AGENT_USER=clawboo-agent clawboo agent-user check
 ```
+
+```bash
+CLAWBOO_RUNTIMES_DIR=/opt/clawboo-runtimes CLAWBOO_AGENT_USER=clawboo-agent clawboo
+```
+
+Install the runtimes again from the Runtimes page once Clawboo runs with `CLAWBOO_RUNTIMES_DIR`, so they land where the agent user can run them.
 
 ## Set it up on macOS
 
@@ -151,7 +164,20 @@ sudo sysadminctl -addUser _clawboo -fullName "Clawboo agents" -UID 499 -GID 499 
 sudo install -d -o _clawboo -g _clawboo -m 700 /var/clawboo-agent /var/clawboo-agent/work
 ```
 
-The sudoers rule goes in `/private/etc/sudoers.d/clawboo`, checked with `sudo visudo -c`. Then run `chmod 750 ~`, check, and start with `CLAWBOO_AGENT_USER=_clawboo`.
+The sudoers rule goes in `/private/etc/sudoers.d/clawboo`, checked with `sudo visudo -c`. The plan then closes your home and keeps the role account from scheduling jobs of its own, which would run after Clawboo stops its agents:
+
+```bash
+chmod 750 ~
+echo _clawboo | sudo tee -a /usr/lib/cron/cron.deny /usr/lib/cron/at.deny >/dev/null
+```
+
+Make the runtimes folder (see [Before you start](#before-you-start)), check, and start with the setting:
+
+```bash
+sudo install -d -o "$(id -un)" -m 755 /opt/clawboo-runtimes
+CLAWBOO_RUNTIMES_DIR=/opt/clawboo-runtimes CLAWBOO_AGENT_USER=_clawboo clawboo agent-user check
+CLAWBOO_RUNTIMES_DIR=/opt/clawboo-runtimes CLAWBOO_AGENT_USER=_clawboo clawboo
+```
 
 A role account has no login keychain, so Claude Code cannot use the subscription sign-in kept in your keychain. Give Claude Code an API key, or a long-lived token from `claude setup-token` as `CLAUDE_CODE_OAUTH_TOKEN` (see [Before you start](#before-you-start)).
 
@@ -161,7 +187,7 @@ Hardened containers run with `--security-opt no-new-privileges`, which rules out
 
 ```bash
 CLAWBOO_SERVER_USER=clawboo CLAWBOO_AGENT_USER=clawboo-agent \
-CLAWBOO_HOME=/data CLAWBOO_WORK_DIR=/work \
+CLAWBOO_HOME=/data CLAWBOO_WORK_DIR=/work CLAWBOO_RUNTIMES_DIR=/opt/clawboo-runtimes \
   sh "$(npm root -g)/clawboo/dist/clawboo-launch"
 ```
 
@@ -173,7 +199,7 @@ The launcher:
 4. starts the server as the server user with `CLAWBOO_AGENT_USER` and `CLAWBOO_AGENT_HOST_SOCKET` set and its environment otherwise unchanged; the agent host gets only `PATH`, `HOME`, the locale and the socket path;
 5. when either process exits, stops the other and every process the agent user owns, and exits, so the container's restart policy starts both again.
 
-Before it connects, the server checks the folder's and the socket's owners and modes, and refuses anything else. Keep the data folder and the work folder apart: two volumes, or two top-level folders on one volume with different owners, such as `/data` and `/work`. For the strongest split, run the agent host in a second container that mounts only the work folder, joined to the server's by the socket on a shared volume.
+Before it connects, the server checks the folder's and the socket's owners and modes, and refuses anything else. Keep the data folder and the work folder apart: two volumes, or two top-level folders on one volume with different owners, such as `/data` and `/work`. Install the runtimes into a folder outside both, owned by root or the server user and writable by no one else, and name it with `CLAWBOO_RUNTIMES_DIR` (for example `/opt/clawboo-runtimes`, made when the image is built). The launcher and the agent host both run in the one container.
 
 ## What the startup check proves
 

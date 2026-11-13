@@ -55,41 +55,51 @@ export interface Presence {
   state(): PresenceState
 }
 
+/** A moment on both clocks, so a window can be measured on either. */
+interface Stamp {
+  wall: number
+  tick: number
+}
+
 interface TabRecord {
   focused: boolean
-  /** When its latest beat arrived, on the monotonic clock. */
-  tick: number
+  /** When its latest beat arrived. */
+  at: Stamp
 }
 
 export interface PresenceClock {
   /** Wall-clock time, epoch ms: what `lastSeenAt` and `lastActedAt` report. */
   now?: () => number
-  /** A clock that only moves forward, for the windows. Defaults to `performance.now`;
-   *  with only `now` given (a test's fake clock), that is used for both. */
+  /** A clock that only moves forward. Defaults to `performance.now`; with only
+   *  `now` given (a test's fake clock), that is used for both. */
   monotonic?: () => number
 }
 
 export function createPresence(deps: PresenceClock = {}): Presence {
   const now = deps.now ?? ((): number => Date.now())
-  // The windows are measured on a clock that only moves forward, so a wall clock
-  // set back (a sync after a sleep) cannot keep a person present for the time it
-  // moved.
   const monotonic = deps.monotonic ?? (deps.now ? deps.now : (): number => performance.now())
+  const stamp = (): Stamp => ({ wall: now(), tick: monotonic() })
+  // How long ago `then` was, as the larger of the two clocks' answers. The
+  // monotonic clock never runs backwards, so a wall clock set back cannot stretch
+  // a window; but it stops while the computer sleeps, so the wall clock, which
+  // does not, keeps a beat from before a long sleep from reading as recent.
+  const since = (then: Stamp, at: Stamp): number =>
+    Math.max(at.tick - then.tick, at.wall - then.wall)
   const tabs = new Map<string, TabRecord>()
   let lastFocusedAt: number | null = null
-  let lastActedAt: number | null = null
-  let lastActedTick: number | null = null
+  let lastActed: Stamp | null = null
 
-  const prune = (tick: number): void => {
-    for (const [id, tab] of tabs) if (tick - tab.tick >= PRESENCE_TTL_MS) tabs.delete(id)
+  const prune = (at: Stamp): void => {
+    for (const [id, tab] of tabs) if (since(tab.at, at) >= PRESENCE_TTL_MS) tabs.delete(id)
   }
 
   const state = (): PresenceState => {
-    const tick = monotonic()
-    prune(tick)
+    const at = stamp()
+    prune(at)
     let focusedTabs = 0
     for (const tab of tabs.values()) if (tab.focused) focusedTabs += 1
-    const actedRecently = lastActedTick !== null && tick - lastActedTick < PRESENCE_TTL_MS
+    const actedRecently = lastActed !== null && since(lastActed, at) < PRESENCE_TTL_MS
+    const lastActedAt = lastActed?.wall ?? null
     const lastSeenAt =
       lastFocusedAt === null
         ? lastActedAt
@@ -100,24 +110,24 @@ export function createPresence(deps: PresenceClock = {}): Presence {
   }
 
   const act = (): void => {
-    lastActedAt = now()
-    lastActedTick = monotonic()
+    lastActed = stamp()
   }
 
   return {
     beat(tabId, beat) {
       const focused = beat.visible && beat.focused
+      const at = stamp()
       // A Map keeps insertion order, so re-inserting makes this tab the newest and
       // the first key is always the stalest.
       tabs.delete(tabId)
-      tabs.set(tabId, { focused, tick: monotonic() })
+      tabs.set(tabId, { focused, at })
       while (tabs.size > PRESENCE_MAX_TABS) {
         const stalest = tabs.keys().next().value
         if (stalest === undefined) break
         tabs.delete(stalest)
       }
-      if (focused) lastFocusedAt = now()
-      if (beat.acted) act()
+      if (focused) lastFocusedAt = at.wall
+      if (beat.acted) lastActed = at
       return state()
     },
     acted: act,
