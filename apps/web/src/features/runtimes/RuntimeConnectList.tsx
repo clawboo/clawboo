@@ -390,8 +390,9 @@ function OpenClawRow({
   onChanged: () => void | Promise<void>
 }) {
   const [userExpanded, setUserExpanded] = useState(false)
-  // The full path when Clawboo installed OpenClaw: it is not on the PATH.
-  const openclaw = useTerminalCommand('openclaw')
+  // The full path when Clawboo installed OpenClaw: it is not on the PATH. Read
+  // again once it connects, since the setup that installs it runs in this row.
+  const openclaw = useTerminalCommand('openclaw', !!config.connected)
   const testId = 'runtime-list-row-openclaw'
   const openRow = useCallback(() => setUserExpanded(true), [])
   useFocusedRow('openclaw', testId, openRow)

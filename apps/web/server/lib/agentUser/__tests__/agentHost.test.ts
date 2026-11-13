@@ -5,9 +5,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { childEnvFor } from '../../../agentHost/host'
+import { killProcessTree } from '../../runtimes/killTree'
 import { AgentHostError } from '../client'
 import { encodeFrame } from '../protocol'
 import {
@@ -129,6 +130,90 @@ describe.runIf(posix)('agent host protocol', () => {
       }
     }
     expect(alive).toBe(false)
+  })
+
+  /** A group whose leader has closed while a member with output of its own
+   *  (none of the leader's pipes) runs on; the member's pid. */
+  async function groupWithClosedLeader(command = 'sleep 30'): Promise<{
+    p: ReturnType<InProcessHost['client']['spawn']>
+    member: number
+  }> {
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: ['-c', `${command} </dev/null >/dev/null 2>&1 & echo $!`],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group: true,
+    })
+    const out = collect(p.stdout)
+    await closed(p)
+    const member = Number((await out).trim())
+    expect(isAlive(member)).toBe(true)
+    return { p, member }
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function gone(pid: number, withinMs = 2_000): Promise<boolean> {
+    for (let i = 0; i < withinMs / 20; i++) {
+      if (!isAlive(pid)) return true
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    return false
+  }
+
+  it('stops a group after its leader closed, as a connector teardown asks', async () => {
+    // A connector's teardown closes its session first (the leader exits once
+    // its input ends), then stops the tree.
+    const { p, member } = await groupWithClosedLeader()
+    try {
+      killProcessTree(p, { graceMs: 200 })
+      expect(await gone(member)).toBe(true)
+      // The stop is answered under the request's own id.
+      await expect(
+        h.client.request({ op: 'killTree', proc: p.id, graceMs: 0 }, { timeoutMs: 2_000 }),
+      ).resolves.toMatchObject({ ok: true })
+    } finally {
+      if (isAlive(member)) process.kill(member, 'SIGKILL')
+    }
+  })
+
+  it('stops such a group again when the server goes away during a long stop', async () => {
+    // A member that ignores SIGTERM, asked to stop with a grace longer than
+    // the host lives after the server goes: the end of the connection must
+    // still reach it.
+    const ready = path.join(dir, 'ignoring-term')
+    const { p, member } = await groupWithClosedLeader(
+      `sh -c 'trap "" TERM; touch ${ready}; exec sleep 30'`,
+    )
+    try {
+      for (let i = 0; i < 100 && !fs.existsSync(ready); i++)
+        await new Promise((r) => setTimeout(r, 20))
+      killProcessTree(p, { graceMs: 60_000 })
+      await new Promise((r) => setTimeout(r, 200))
+      expect(isAlive(member)).toBe(true)
+      h.client.close()
+      expect(await gone(member, 6_000)).toBe(true)
+    } finally {
+      if (isAlive(member)) process.kill(member, 'SIGKILL')
+    }
+  }, 15_000)
+
+  it('stops a group whose leader closed when the server goes away', async () => {
+    const { member } = await groupWithClosedLeader()
+    try {
+      h.client.close()
+      expect(await gone(member)).toBe(true)
+    } finally {
+      if (isAlive(member)) process.kill(member, 'SIGKILL')
+    }
   })
 
   it('reads and writes files without following a link at the end of the path', async () => {
@@ -276,8 +361,97 @@ describe.runIf(posix)('agent host protocol', () => {
       'doas',
       'sudo -u nobody',
       'doas -u nobody',
+      'sudo -l',
     ])
     expect(['allowed', 'denied', 'absent']).toContain(res.crontab)
+  })
+
+  it('counts a sudo rule for one command, which none of the tries can run', async () => {
+    // A sudo that allows one shell as another user: `true` is refused, the
+    // listing works.
+    const bin = path.join(dir, 'bin')
+    fs.mkdirSync(bin)
+    fs.writeFileSync(
+      path.join(bin, 'sudo'),
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "-n" ] && [ "$2" = "-l" ]; then',
+        '  echo "User agent may run the following commands on host:"',
+        '  echo "    (alice) NOPASSWD: /bin/sh"',
+        '  exit 0',
+        'fi',
+        'echo "sudo: a password is required" >&2',
+        'exit 1',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`)
+    try {
+      const res = await h.client.request(
+        { op: 'privCheck', serverUser: 'alice' },
+        { timeoutMs: 60_000 },
+      )
+      expect(res.attempts.filter((a) => a.succeeded).map((a) => a.what)).toEqual(['sudo -l'])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('counts a setgid file for a group the agent user is not in, whoever owns it', async () => {
+    const tree = path.join(dir, 'tree')
+    fs.mkdirSync(tree)
+    const file = path.join(tree, 'tool')
+    fs.writeFileSync(file, '#!/bin/sh\n')
+    fs.chownSync(file, process.getuid?.() ?? 0, process.getgid?.() ?? 0)
+    fs.chmodSync(file, 0o2755)
+    expect(fs.statSync(file).mode & 0o2000).toBe(0o2000)
+    // Its group is this user's: nothing to give.
+    const own = await h.client.request({ op: 'inodes', root: tree, targets: [], maxEntries: 100 })
+    expect(own.privileged).toEqual([])
+    // The same file, for a host whose user is not in that group.
+    // Optional on `process` (POSIX only), so typed here as present.
+    const ids = process as { getgid: () => number; getgroups: () => number[] }
+    const gid = vi.spyOn(ids, 'getgid').mockReturnValue(2_000_000_000)
+    const groups = vi.spyOn(ids, 'getgroups').mockReturnValue([])
+    try {
+      const res = await h.client.request({
+        op: 'inodes',
+        root: tree,
+        targets: [],
+        maxEntries: 100,
+      })
+      expect(res.privileged).toEqual([file])
+    } finally {
+      gid.mockRestore()
+      groups.mockRestore()
+    }
+  })
+
+  it('refuses a private file whose mode cannot be set, and keeps others', async () => {
+    const chmod = vi.spyOn(fs, 'fchmodSync').mockImplementation(() => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    })
+    try {
+      await expect(
+        h.client.request({
+          op: 'fs.write',
+          path: path.join(dir, 'secret'),
+          data: Buffer.from('s').toString('base64'),
+          mode: 0o600,
+        }),
+      ).rejects.toMatchObject({ code: 'EPERM' })
+      expect(fs.readdirSync(dir).filter((n) => n.includes('secret'))).toEqual([])
+      await h.client.request({
+        op: 'fs.write',
+        path: path.join(dir, 'shared'),
+        data: Buffer.from('s').toString('base64'),
+        mode: 0o644,
+      })
+      expect(fs.readFileSync(path.join(dir, 'shared'), 'utf8')).toBe('s')
+    } finally {
+      chmod.mockRestore()
+    }
   })
 
   it('refuses a signal it does not know', async () => {

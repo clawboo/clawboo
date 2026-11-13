@@ -84,6 +84,14 @@ export const MAX_STATUS_ENTRIES = 2000
  * throwing helper barriers nothing and every `lstat`/`readdir`/`open` below was
  * reported as reached by user input. Each site therefore proves its own
  * containment immediately before it acts.
+ *
+ * Where the root itself is a valid answer (a listing of the top level), the
+ * comparison is two unconditional tests rather than one test the root skips:
+ * `abs.startsWith(root)` holds for the root too, and `abs === root ||
+ * abs.startsWith(prefix)` then keeps a sibling out. A guard only counts for the
+ * uses that every path to them passes through, and with an
+ * `if (abs !== root) { ... }` wrapper the root's path went round the test, so
+ * every use after it read as unchecked.
  */
 function rootPrefixOf(realRoot: string): string {
   return realRoot.endsWith(path.sep) ? realRoot : `${realRoot}${path.sep}`
@@ -145,12 +153,13 @@ export async function resolveWorkspaceRelPath(
   }
   const abs = path.resolve(realRoot, wanted)
   const rootPrefix = rootPrefixOf(realRoot)
-  // Nested, not `&&`: a guard's outcome propagates through `&&` only when it is
-  // TRUE, and the branch that reaches the filesystem here is the FALSE one.
-  if (abs !== realRoot) {
-    if (!abs.startsWith(rootPrefix)) {
-      throw new WorkspacePathError('The path escapes the workspace.')
-    }
+  // Both unconditional (see rootPrefixOf): the first covers the root itself, the
+  // second keeps a sibling out.
+  if (!abs.startsWith(realRoot)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  if (abs !== realRoot && !abs.startsWith(rootPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
   }
 
   let st
@@ -165,10 +174,11 @@ export async function resolveWorkspaceRelPath(
   }
   // Follow any symlinked ancestor directories and re-check containment.
   const real = await realpath(abs)
-  if (real !== realRoot) {
-    if (!real.startsWith(rootPrefix)) {
-      throw new WorkspacePathError('The path resolves outside the workspace.')
-    }
+  if (!real.startsWith(realRoot)) {
+    throw new WorkspacePathError('The path resolves outside the workspace.')
+  }
+  if (real !== realRoot && !real.startsWith(rootPrefix)) {
+    throw new WorkspacePathError('The path resolves outside the workspace.')
   }
   return { abs: real, realRoot }
 }
@@ -256,10 +266,13 @@ async function resolveInAgentSpace(
   const lexRoot = path.resolve(root)
   const abs = path.resolve(lexRoot, wanted)
   const rootPrefix = rootPrefixOf(lexRoot)
-  if (abs !== lexRoot) {
-    if (!abs.startsWith(rootPrefix)) {
-      throw new WorkspacePathError('The path escapes the workspace.')
-    }
+  // Both unconditional (see rootPrefixOf): the first covers the root itself, the
+  // second keeps a sibling out.
+  if (!abs.startsWith(lexRoot)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  if (abs !== lexRoot && !abs.startsWith(rootPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
   }
   // The host makes these folders as real folders. A link at the root is the
   // agent's doing, and following it would serve some other folder as this one.
@@ -560,10 +573,11 @@ export async function listDirAt(
     exactRoot: opts.exactRoot ?? false,
   })
   const sinkPrefix = rootPrefixOf(realRoot)
-  if (abs !== realRoot) {
-    if (!abs.startsWith(sinkPrefix)) {
-      throw new WorkspacePathError('The path escapes the workspace.')
-    }
+  if (!abs.startsWith(realRoot)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  if (abs !== realRoot && !abs.startsWith(sinkPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
   }
   if (isAgentUserMode()) return listInAgentSpace(abs, relDir, maxEntries)
   const st = await lstat(abs)
@@ -620,10 +634,11 @@ export async function readFileAt(
     exactRoot: opts.exactRoot ?? false,
   })
   const sinkPrefix = rootPrefixOf(realRoot)
-  if (abs !== realRoot) {
-    if (!abs.startsWith(sinkPrefix)) {
-      throw new WorkspacePathError('The path escapes the workspace.')
-    }
+  if (!abs.startsWith(realRoot)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  if (abs !== realRoot && !abs.startsWith(sinkPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
   }
   if (isAgentUserMode()) {
     // Enough for the binary sniff and for what is shown; `more` says whether
@@ -830,10 +845,11 @@ export async function workspaceFileDiff(
     mustExist: false,
   })
   const sinkPrefix = rootPrefixOf(realRoot)
-  if (abs !== realRoot) {
-    if (!abs.startsWith(sinkPrefix)) {
-      throw new WorkspacePathError('The path escapes the workspace.')
-    }
+  if (!abs.startsWith(realRoot)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  if (abs !== realRoot && !abs.startsWith(sinkPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
   }
   // A DIRECTORY must be refused. git's pathspec matches by prefix, so `.` or
   // `src` would return a whole-subtree diff from a route that promises one

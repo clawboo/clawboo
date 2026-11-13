@@ -686,23 +686,24 @@ function pidAlive(pid: number): boolean {
 }
 
 /**
- * Record that process `pid` runs the current install of `id`, so pruning keeps
- * that install while the process lives, however many updates come in between.
- * For long-lived processes such as a Gateway; best effort.
+ * Record that process `pid` runs an install of `id`, so pruning keeps that
+ * install while the process lives, however many updates come in between. For
+ * long-lived processes such as a Gateway; best effort. `folder` is the install
+ * folder the process was started from (`OwnedRuntimeLaunch.record.folder`, read
+ * when its command was): an update committed in between leaves the current
+ * install, the default, naming a folder the process does not run.
  */
 export function markInstallInUse(
   id: string,
   pid: number,
   env: NodeJS.ProcessEnv = process.env,
+  folder?: string,
 ): void {
-  const record = readRuntimeInstall(id, env)
-  if (!record || !Number.isInteger(pid) || pid <= 0) return
+  if (!Number.isInteger(pid) || pid <= 0) return
+  const name = folder ?? readRuntimeInstall(id, env)?.folder
+  if (!name || !INSTALL_LABEL_RE.test(name)) return
   try {
-    writeAtomic(
-      path.join(runtimeInstallDir(id, env), `${IN_USE_PREFIX}${pid}`),
-      record.folder,
-      0o644,
-    )
+    writeAtomic(path.join(runtimeInstallDir(id, env), `${IN_USE_PREFIX}${pid}`), name, 0o644)
   } catch {
     // Not recorded: pruning then keeps only the current and previous installs.
   }
@@ -897,19 +898,26 @@ function isTrustedRunTarget(p: string, root: string, executable: boolean): boole
 
 /**
  * A command outside the runtimes folder, such as the Node that installed a
- * runtime: writable by its owner only, and owned by this user, root, or whoever
- * owns the Node this server runs on (who could change the server itself just
- * as well).
+ * runtime. The Node this server runs on is trusted whatever its modes: whoever
+ * can change that file changes the server itself the next time it starts, so
+ * refusing it here would guard nothing, and would stop every runtime on a
+ * machine whose Node others can write (a CI runner image that opens up its tool
+ * cache, say). Any other command must be writable by its owner only, and owned
+ * by this user, root, or whoever owns the Node this server runs on (who could
+ * change the server itself just as well).
  */
 function isTrustedOutsideTarget(st: Stats): boolean {
+  let serverNode: Stats | null
+  try {
+    serverNode = statSync(process.execPath)
+  } catch {
+    serverNode = null
+  }
+  if (serverNode && serverNode.dev === st.dev && serverNode.ino === st.ino) return true
   if ((st.mode & 0o022) !== 0) return false
   const uid = typeof process.getuid === 'function' ? process.getuid() : null
   if (uid === null || st.uid === uid || st.uid === 0) return true
-  try {
-    return statSync(process.execPath).uid === st.uid
-  } catch {
-    return false
-  }
+  return serverNode !== null && serverNode.uid === st.uid
 }
 
 /**

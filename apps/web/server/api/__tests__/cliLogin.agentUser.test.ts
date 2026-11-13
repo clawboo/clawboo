@@ -188,9 +188,18 @@ describe.runIf(posix)('in-app sign-in with agents on their own OS user', () => {
     const m = sseRes()
     cliLoginPOST(req('hermes'), m.res)
     await until(() => m.ended())
-    expect(m.events()).toContainEqual(
-      expect.objectContaining({ type: 'complete', success: false, loggedIn: false }),
-    )
+    const failed = m
+      .events()
+      .find(
+        (e) =>
+          (e as { type?: string; success?: boolean }).type === 'complete' &&
+          (e as { success?: boolean }).success === false,
+      ) as { loggedIn?: boolean; message?: string } | undefined
+    expect(failed?.loggedIn).toBe(false)
+    // The way out is signing in again here, not a command that would sign the
+    // person in, in their own terminal.
+    expect(failed?.message).toMatch(/Sign in again from here/)
+    expect(failed?.message).not.toMatch(/in your terminal, then re-check/)
   })
 
   it("sees the agents' login while the CLI still runs, and stops it", async () => {
