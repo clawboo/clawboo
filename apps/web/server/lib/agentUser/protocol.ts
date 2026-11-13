@@ -168,10 +168,14 @@ export interface HostReplies {
     unreadable?: string[]
   }
   privCheck: {
-    /** Each attempt and whether it SUCCEEDED (exit 0). */
-    attempts: { what: string; ran: boolean; succeeded: boolean }[]
+    /** Each attempt and whether it SUCCEEDED (exit 0). `unchecked`: sudo said
+     *  no_new_privs stops it from running, so the attempt tells nothing. */
+    attempts: { what: string; ran: boolean; succeeded: boolean; unchecked?: boolean }[]
     /** Whether the agent user may schedule its own jobs (`crontab -l` not refused). */
     crontab: 'allowed' | 'denied' | 'absent'
+    /** The host runs with no_new_privs (Linux), under which no sudo or doas
+     *  rule can be tried. Absent from an older host. */
+    noNewPrivs?: boolean
   }
   canExec: { results: { path: string; ok: boolean; code?: string }[] }
 }
