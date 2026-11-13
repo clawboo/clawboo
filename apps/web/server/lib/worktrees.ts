@@ -479,19 +479,15 @@ async function exportOrBlock(
 
 /** After a task with nothing to land is cleaned up: delete the copy of its
  *  branch an earlier pause brought into the user's repository. Only while it
- *  is at a commit this task put there (`ours`: what the last export moved it
- *  to, and the task's own tip read before the cleanup), so a branch with
- *  someone's commits is kept; never one checked out there; and only from the
- *  commit looked at, so one moved meanwhile is kept too. Best-effort. */
-async function dropExportedBranch(
-  repoPath: string,
-  branch: string,
-  ours: (string | null)[],
-): Promise<void> {
+ *  is where the last export put it, as the server recorded in the user's
+ *  repository, so a branch with someone's commits is kept (nothing the mirror
+ *  says counts: the agent can point its own branch at anyone's commit); never
+ *  one checked out there; and only from the commit looked at, so one moved
+ *  meanwhile is kept too. Best-effort. */
+async function dropExportedBranch(repoPath: string, branch: string): Promise<void> {
   try {
     const theirs = await branchTip(repoPath, branch)
-    const exported = await lastExported(repoPath, branch)
-    if (theirs === null || ![...ours, exported].includes(theirs)) return
+    if (theirs === null || theirs !== (await lastExported(repoPath, branch))) return
     if ((await checkedOutAt(repoPath, `refs/heads/${branch}`)) !== null) return
     await execGit(repoPath, ['update-ref', '-d', `refs/heads/${branch}`, theirs])
     await execGit(repoPath, ['update-ref', '-d', exportedRef(branch)])
@@ -1150,11 +1146,6 @@ export async function actOnTaskWorkspace(
     }
   }
 
-  // The task's own tip, read before the cleanup below can remove its branch: a
-  // copy of the branch at this commit in the user's repository is the task's.
-  const ownTip = agent
-    ? await branchTip(mirrorPathFor(ws.repoPath), ws.branch).catch(() => null)
-    : null
   const complete = await completeWorktree(checkoutRepo, worktree, roots)
   // Comparing the diff waits on git, and the run can lose the task meanwhile.
   if (!runStillOpen()) {
@@ -1189,7 +1180,7 @@ export async function actOnTaskWorkspace(
       // The branch is gone from the mirror. A copy an earlier pause brought into
       // the user's repository goes too, as the one shared branch would without
       // isolation.
-      if (agent) await dropExportedBranch(ws.repoPath, ws.branch, [ownTip])
+      if (agent) await dropExportedBranch(ws.repoPath, ws.branch)
     }
     return { ok: true, action: 'complete', complete, taskStatus }
   }
