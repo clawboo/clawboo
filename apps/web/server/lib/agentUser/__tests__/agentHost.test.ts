@@ -428,6 +428,35 @@ describe.runIf(posix)('agent host protocol', () => {
     }
   })
 
+  it.runIf(process.getuid?.() !== 0)(
+    'names every folder the search could not enter, rather than call the search complete',
+    async () => {
+      const tree = path.join(dir, 'tree')
+      const closed = path.join(tree, 'closed')
+      const listOnly = path.join(tree, 'list-only')
+      fs.mkdirSync(closed, { recursive: true })
+      fs.mkdirSync(listOnly)
+      fs.writeFileSync(path.join(closed, 'notes.txt'), 'x')
+      fs.writeFileSync(path.join(listOnly, 'notes.txt'), 'x')
+      fs.chmodSync(closed, 0o000)
+      // Listed, but its entries cannot be looked at.
+      fs.chmodSync(listOnly, 0o400)
+      try {
+        const res = await h.client.request({
+          op: 'inodes',
+          root: tree,
+          targets: [],
+          maxEntries: 100,
+        })
+        expect(res.truncated).toBe(false)
+        expect([...(res.unreadable ?? [])].sort()).toEqual([closed, listOnly])
+      } finally {
+        fs.chmodSync(closed, 0o700)
+        fs.chmodSync(listOnly, 0o700)
+      }
+    },
+  )
+
   it('refuses a private file whose mode cannot be set, and keeps others', async () => {
     const chmod = vi.spyOn(fs, 'fchmodSync').mockImplementation(() => {
       throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
@@ -530,6 +559,47 @@ describe.runIf(posix)('agent host client, against a hostile host', () => {
     await closed(p)
     expect(events).toEqual(['spawn:4242', 'exit:0'])
     expect(await out).toBe('hi')
+  })
+
+  it('lets the host go on only when every stream that filled has drained', async () => {
+    const { client, toServer, toHost } = startFakeHost()
+    const p = client.spawn({
+      command: 'x',
+      args: [],
+      env: {},
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group: true,
+    })
+    const req = await new Promise<{ id: number; proc: string }>((resolve) =>
+      toHost.once('data', (d: Buffer) => resolve(JSON.parse(d.toString()))),
+    )
+    const frames: string[] = []
+    toHost.on('data', (d: Buffer) => frames.push(d.toString()))
+    const count = (t: string): number => frames.join('').split(`"t":"${t}"`).length - 1
+    // More than either stream holds (64 KiB by default), on both, with nobody
+    // reading yet.
+    const big = Buffer.alloc(200_000, 120).toString('base64')
+    const ev = (name: string): string =>
+      JSON.stringify({ t: 'ev', proc: req.proc, ev: name, data: big })
+    toServer.write(
+      [JSON.stringify({ t: 'res', id: req.id, ok: true, pid: 4242 }), ev('out'), ev('err')].join(
+        '\n',
+      ) + '\n',
+    )
+    for (let i = 0; i < 100 && count('pause') === 0; i++)
+      await new Promise((r) => setTimeout(r, 10))
+    expect(count('pause')).toBe(1)
+
+    // stdout drains; stderr is still full, so the host must keep holding.
+    p.stdout?.resume()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(count('resume')).toBe(0)
+
+    p.stderr?.resume()
+    for (let i = 0; i < 100 && count('resume') === 0; i++)
+      await new Promise((r) => setTimeout(r, 10))
+    expect(count('resume')).toBe(1)
+    client.close()
   })
 
   it('closes every process it started when the host goes away', async () => {
