@@ -8,26 +8,34 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { SCRUB_SAFE_KEYS, scrubSecrets } from '@clawboo/db'
-import { REDACTION_SAFE_KEYS, redactObject } from '@clawboo/logger'
-
-const sorted = (keys: ReadonlySet<string>): string[] => [...keys].sort()
+import { scrubSafeKeys, scrubSecrets } from '@clawboo/db'
+import { redactionSafeKeys, redactObject } from '@clawboo/logger'
 
 describe('safe keys: display mask and storage scrub', () => {
   it('hold the same keys, author fields included', () => {
-    expect(sorted(REDACTION_SAFE_KEYS)).toEqual(sorted(SCRUB_SAFE_KEYS))
-    expect(sorted(SCRUB_SAFE_KEYS)).toEqual(
+    expect(redactionSafeKeys()).toEqual(scrubSafeKeys())
+    expect(scrubSafeKeys()).toEqual(
       expect.arrayContaining(['author', 'authoragentid', 'authors', 'authortype']),
     )
   })
 
   it('keep every listed author key readable through both layers', () => {
-    const authorKeys = sorted(SCRUB_SAFE_KEYS).filter((k) => k.startsWith('author'))
+    const authorKeys = scrubSafeKeys().filter((k) => k.startsWith('author'))
     expect(authorKeys.length).toBeGreaterThan(0)
     for (const key of authorKeys) {
       const record = { [key]: 'value' }
       expect(scrubSecrets(record)).toEqual(record)
       expect(redactObject(record)).toEqual(record)
     }
+  })
+
+  it('hand out copies, so a caller cannot widen what is let through', () => {
+    const copy = scrubSafeKeys()
+    copy.push('authorization')
+    redactionSafeKeys().push('authorization')
+    expect(scrubSafeKeys()).not.toContain('authorization')
+    expect(redactionSafeKeys()).not.toContain('authorization')
+    expect(scrubSecrets({ authorization: 'Basic abc' })).not.toEqual({ authorization: 'Basic abc' })
+    expect(redactObject({ authorization: 'Basic abc' })).not.toEqual({ authorization: 'Basic abc' })
   })
 })

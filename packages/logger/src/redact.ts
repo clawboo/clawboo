@@ -34,7 +34,7 @@ const SENSITIVE_KEY_RE =
 // masked: add a new one explicitly when it becomes a real field. Must hold
 // exactly what @clawboo/db's scrub.ts SAFE_COUNT_KEYS holds, so the storage and
 // display layers agree; a server test compares the two.
-export const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
+const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
   'tokens',
   'inputtokens',
   'outputtokens',
@@ -49,6 +49,13 @@ export const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
   'authortype',
   'authoragentid',
 ])
+
+/** The keys the display mask lets through although they contain a secret-looking
+ *  word, as a sorted copy: the set itself stays private, so no caller can widen
+ *  what is let through for the rest of the process. */
+export function redactionSafeKeys(): string[] {
+  return [...SAFE_COUNT_KEYS].sort()
+}
 
 // A PEM private key block is masked by its own scan (below) rather than by a
 // pattern in the list, so the multi-line block still wins before any of the
