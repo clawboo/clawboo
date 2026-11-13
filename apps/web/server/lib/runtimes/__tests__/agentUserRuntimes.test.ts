@@ -31,6 +31,7 @@ import { createCodexAppServerDriver } from '../codexAppServerDriver'
 import { prepareCodexHome } from '../codexDriver'
 import { probeCodexAppServer } from '../codexModels'
 import { HermesGatewaySupervisor } from '../hermes/gateway'
+import { provisionProfile } from '../hermes/profiles'
 import { resolveHermesRunSettings } from '../hermes/runSettings'
 import { detectProvider, provisionHermesHome } from '../hermesHome'
 import { listNativeSkills } from '../hermesSkills'
@@ -384,17 +385,29 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
       providerHint: 'openai-codex',
     })
     expect(out.seededAuth).toBe(true)
-    const run = await resolveHermesRun(
-      OPTS,
-      { providerHint: 'openai-codex', model: 'gpt-x', apiKeyEnv: keyed },
-      out,
-    )
-    expect(run.pickedProvider).toBe('openai-codex')
 
     // A run on its key gets no login copied in.
     const onKey = path.join(agentHome, 'runtimes', 'hermes', 'on-key')
     expect((await provisionHermesHome(onKey, { hasApiKey: true })).seededAuth).toBe(false)
     expect(fs.existsSync(path.join(onKey, 'auth.json'))).toBe(false)
+
+    // The same in a gateway profile.
+    const gatewayHome = path.join(agentHome, 'runtimes', 'hermes', 'gateway')
+    const profile = (name: string, providerHint: string | null) =>
+      provisionProfile({
+        gatewayHome,
+        profile: name,
+        legacyHome: null,
+        key: 'p'.repeat(64),
+        cwd: null,
+        providerEnv: keyed,
+        mcpServers: null,
+        providerHint,
+      })
+    const pickedProfile = await profile('cb-picked', 'openai-codex')
+    expect(fs.readFileSync(path.join(pickedProfile.dir, 'auth.json'), 'utf8')).toBe(agentsAuth)
+    const keyProfile = await profile('cb-on-key', null)
+    expect(fs.existsSync(path.join(keyProfile.dir, 'auth.json'))).toBe(false)
   })
 
   it("reads the managed home's subscription login through the host", async () => {
