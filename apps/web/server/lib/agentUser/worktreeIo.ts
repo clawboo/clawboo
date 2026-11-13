@@ -93,6 +93,28 @@ function gitPaths(cwd: string, args: readonly string[]): string[] {
   return out
 }
 
+/** Variables that point git at a repository, index or object store other than
+ *  the one `cwd` finds. Inherited from the server (one started from a git hook
+ *  has GIT_DIR set), they would send the agent's git somewhere else. */
+const GIT_LOCATION_ENV = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_NAMESPACE',
+  'GIT_PREFIX',
+]
+
+/** The environment of git run through the host: every agent process's, without
+ *  the repository-location variables, and never asking for a password. */
+function hostGitEnv(): Record<string, string> {
+  const env = buildChildEnv({ GIT_TERMINAL_PROMPT: '0' })
+  for (const name of GIT_LOCATION_ENV) delete env[name]
+  return env as Record<string, string>
+}
+
 /**
  * `git <args>` in `cwd`, as the agent user. The same limits as the local call
  * (timeout, output cap) and the same failure: any error is a `GitError` with
@@ -120,7 +142,7 @@ function hostGit(cwd: string, args: string[]): Promise<string> {
         command: 'git',
         args,
         cwd,
-        env: buildChildEnv({ GIT_TERMINAL_PROMPT: '0' }),
+        env: hostGitEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: false,
         windowsHide: true,

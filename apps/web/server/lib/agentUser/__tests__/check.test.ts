@@ -369,6 +369,29 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
     expect(failed(r)?.message).toMatch(/chmod u\+rx/)
   })
 
+  it.each([
+    ['the host has no_new_privs', { noNewPrivs: true }, false],
+    ['sudo said no_new_privs stopped it', {}, true],
+  ])(
+    'says the privileges were not checked, not "none", when %s',
+    async (_why, extra, unchecked) => {
+      override('privCheck', {
+        attempts: [
+          { what: 'sudo', ran: true, succeeded: false, ...(unchecked ? { unchecked: true } : {}) },
+          { what: 'sudo -l', ran: true, succeeded: false },
+        ],
+        crontab: 'denied',
+        ...extra,
+      })
+      const r = await runAgentUserCheck(config, deps)
+      expect(r.ok).toBe(true)
+      const step = r.steps.find((s) => s.name === 'agent privileges')
+      expect(step?.level).toBe('warn')
+      expect(step?.message).toMatch(/^not checked: .*no_new_privs/)
+      expect(step?.message).toContain(`sudo -l -U ${config.user}`)
+    },
+  )
+
   it('refuses an agent user with a sudo rule it can use', async () => {
     override('privCheck', {
       attempts: [
