@@ -4,7 +4,11 @@
 import type { Request, Response } from 'express'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const state = vi.hoisted(() => ({ keySyncs: 0, connected: [] as string[], removed: [] as string[] }))
+const state = vi.hoisted(() => ({
+  keySyncs: 0,
+  connected: [] as string[],
+  removed: [] as string[],
+}))
 
 vi.mock('../../lib/providerKeys', () => ({
   connectProviderKey: (id: string) => state.connected.push(id),
