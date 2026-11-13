@@ -198,9 +198,9 @@ A budget set to hard cap pauses work at 100% of its limit; the default mode only
 | How long control lasts with no key or click               | 10 minutes                                               | No                              | `apps/web/server/lib/desktop/control.ts:26`          |
 | How long a link works                                     | View link 8 hours, control link 1 hour, at most 24 hours | Per link, from 1 minute         | `apps/web/server/lib/desktop/links.ts:34,40`         |
 | Links per agent                                           | 20; another is refused until one is revoked              | No                              | `apps/web/server/lib/desktop/links.ts:43`            |
-| People watching                                           | 8 per agent, 32 in all; links get 6, 24 and 2 per link   | No                              | `apps/web/server/lib/desktop/liveView.ts:57-64`      |
-| Pictures of a browser without a display, while watched    | One a second, sent only when the page changed            | No                              | `apps/web/server/lib/desktop/liveView.ts:49`         |
-| Input events in one request                               | 256                                                      | No                              | `apps/web/server/lib/desktop/liveView.ts:67`         |
+| People watching                                           | 8 per agent, 32 in all; links get 6, 24 and 2 per link   | No                              | `apps/web/server/lib/desktop/liveView.ts:63-70`      |
+| Pictures of a browser without a display, while watched    | One a second, sent only when the page changed            | No                              | `apps/web/server/lib/desktop/liveView.ts:55`         |
+| Input events in one request                               | 256                                                      | No                              | `apps/web/server/lib/desktop/liveView.ts:73`         |
 
 ## Network and HTTP
 
@@ -244,7 +244,7 @@ Over a rate limit the server answers 429 with a `Retry-After` header. The [REST 
 | A person counts as here after a focused tab's beat or an action     | 60 seconds                                                                                | No                                            | `apps/web/server/lib/presence.ts:27`                      |
 | Tabs the presence record remembers                                  | 64; one more drops the stalest                                                            | No                                            | `apps/web/server/lib/presence.ts:29`                      |
 | The dashboard's presence beat, while its tab is visible and focused | Every 20 seconds; stops after 15 minutes with no click, key, wheel or touch               | No                                            | `apps/web/src/features/presence/presenceBeater.ts:14,16`  |
-| `GET /api/system/idle`: wait for one schedule source                | 3 seconds, then that source reads `unknown`                                               | No                                            | `apps/web/server/lib/idleState.ts:39`                     |
+| `GET /api/system/idle`: wait for one schedule source                | 3 seconds, then that source reads `unknown`                                               | No                                            | `apps/web/server/lib/idleState.ts:51`                     |
 | Write of Node's compiled-code cache after a start                   | 15 seconds                                                                                | `NODE_COMPILE_CACHE` (where; the CLI sets it) | `apps/web/server/index.ts:1220`                           |
 
 ## Updates and monitoring

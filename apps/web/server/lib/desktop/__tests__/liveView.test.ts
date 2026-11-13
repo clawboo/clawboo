@@ -353,6 +353,122 @@ describe('live view of an agent display', () => {
   })
 })
 
+describe('while a person has taken over', () => {
+  /** One update of the given regions, sent on to every watcher that may see it. */
+  async function changed(rfb: FakeRfb, rects: { x: number; y: number; w: number; h: number }[]) {
+    vi.advanceTimersByTime(100)
+    rfb.update(rects)
+    vi.advanceTimersByTime(100)
+    await settle()
+  }
+
+  it('sends the screen only to the view that took over, and the whole screen to the rest after hand back', async () => {
+    const { rfb } = fakeDisplay('a')
+    const mine = sink()
+    const dash = sink()
+    const ro = mintLink('a', 'view').link
+    const watcher = sink()
+    const me = live.openViewer('a', { kind: 'dashboard' }, mine.sink)
+    live.openViewer('a', { kind: 'dashboard' }, dash.sink)
+    live.openViewer('a', { kind: 'link', linkId: ro.id, linkKind: 'view' }, watcher.sink)
+    await changed(rfb, [{ x: 0, y: 0, w: 4, h: 2 }])
+    for (const w of [mine, dash, watcher]) expect(w.of('rects')).toHaveLength(1)
+
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'take')
+    for (const w of [dash, watcher])
+      expect(w.of('control').at(-1)?.data).toMatchObject({ state: 'other' })
+    await changed(rfb, [{ x: 1, y: 0, w: 1, h: 1 }])
+    await changed(rfb, [{ x: 2, y: 1, w: 1, h: 1 }])
+    expect(mine.of('rects')).toHaveLength(3)
+    for (const w of [dash, watcher]) expect(w.of('rects')).toHaveLength(1)
+
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'release')
+    vi.advanceTimersByTime(100)
+    await settle()
+    for (const w of [dash, watcher]) {
+      expect(w.of('control').at(-1)?.data).toMatchObject({ state: 'agent' })
+      expect(w.of('rects')).toHaveLength(2)
+      expect(w.of('rects')[1]?.data['rects']).toEqual([
+        expect.objectContaining({ x: 0, y: 0, w: 4, h: 2 }),
+      ])
+    }
+  })
+
+  it('never sends a picture made just before the take over to anyone but the holder', async () => {
+    const { rfb } = fakeDisplay('a')
+    const mine = sink()
+    const other = sink()
+    const me = live.openViewer('a', { kind: 'dashboard' }, mine.sink)
+    live.openViewer('a', { kind: 'dashboard' }, other.sink)
+    rfb.update([{ x: 0, y: 0, w: 4, h: 2 }])
+    // Being compressed while the take over lands.
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'take')
+    await settle()
+    expect(mine.of('rects')).toHaveLength(1)
+    expect(other.of('rects')).toHaveLength(0)
+  })
+
+  it('gives a view opened during a take over no picture until it is handed back', async () => {
+    const { rfb } = fakeDisplay('a')
+    const me = live.openViewer('a', { kind: 'dashboard' }, sink().sink)
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'take')
+    const late = sink()
+    live.openViewer('a', { kind: 'dashboard' }, late.sink)
+    expect(late.of('control').at(-1)?.data).toMatchObject({ state: 'other' })
+    await changed(rfb, [{ x: 0, y: 0, w: 4, h: 2 }])
+    expect(late.of('rects')).toHaveLength(0)
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'release')
+    await settle()
+    expect(late.of('rects')[0]?.data['rects']).toEqual([
+      expect.objectContaining({ x: 0, y: 0, w: 4, h: 2 }),
+    ])
+  })
+
+  it('hides from the view it was taken from when another person takes over', async () => {
+    const { rfb } = fakeDisplay('a')
+    const first = sink()
+    const second = sink()
+    const a = live.openViewer('a', { kind: 'dashboard' }, first.sink)
+    const b = live.openViewer('a', { kind: 'dashboard' }, second.sink)
+    live.setControl('a', a.viewerId, { kind: 'dashboard' }, 'take')
+    await changed(rfb, [{ x: 0, y: 0, w: 4, h: 2 }])
+    expect([first.of('rects').length, second.of('rects').length]).toEqual([1, 0])
+    live.setControl('a', b.viewerId, { kind: 'dashboard' }, 'take')
+    await settle()
+    // The new holder gets the whole screen at once; the old one nothing more.
+    expect(second.of('rects')[0]?.data['rects']).toEqual([
+      expect.objectContaining({ x: 0, y: 0, w: 4, h: 2 }),
+    ])
+    await changed(rfb, [{ x: 1, y: 1, w: 1, h: 1 }])
+    expect(first.of('rects')).toHaveLength(1)
+    expect(second.of('rects')).toHaveLength(2)
+  })
+
+  it('sends a browser picture only to the holder while the display is gone', async () => {
+    const { display } = fakeDisplay('a')
+    const mine = sink()
+    const other = sink()
+    const me = live.openViewer('a', { kind: 'dashboard' }, mine.sink)
+    live.openViewer('a', { kind: 'dashboard' }, other.sink)
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'take')
+    live.setBrowserCaptureForTests(async () => ({
+      data: 'AAAA',
+      mimeType: 'image/jpeg',
+      toolName: 'browser_take_screenshot',
+    }))
+    displayState.displays.delete('a')
+    for (const fn of displayState.listeners) fn('a', null)
+    void display
+    await tick()
+    expect(mine.of('image')).toHaveLength(1)
+    expect(other.of('image')).toHaveLength(0)
+    live.setControl('a', me.viewerId, { kind: 'dashboard' }, 'release')
+    vi.advanceTimersByTime(live.BROWSER_FRAME_INTERVAL_MS)
+    await tick()
+    expect(other.of('image')).toHaveLength(1)
+  })
+})
+
 describe('places for watchers', () => {
   it('lets one link open two views at most, and keeps places for the dashboard', () => {
     fakeDisplay('a')

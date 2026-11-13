@@ -193,4 +193,31 @@ describe('ComputerScreen', () => {
     send('control', { state: 'other', canControl: true })
     expect(await screen.findByText('A person has control')).toBeTruthy()
   })
+
+  it('covers the screen while a person elsewhere holds it, and shows it again when they hand back', async () => {
+    await openOnDisplay()
+    const canvas = await screen.findByLabelText("The agent's screen")
+    await waitFor(() => expect(canvas.className).not.toMatch(/invisible/))
+    expect(screen.queryByTestId('computer-screen-hidden')).toBeNull()
+
+    send('control', { state: 'other', canControl: true })
+    expect((await screen.findByTestId('computer-screen-hidden')).textContent).toMatch(
+      /taken over this screen/,
+    )
+    expect(canvas.className).toMatch(/invisible/)
+
+    send('control', { state: 'agent', canControl: true })
+    await waitFor(() => expect(screen.queryByTestId('computer-screen-hidden')).toBeNull())
+    expect(canvas.className).not.toMatch(/invisible/)
+  })
+
+  it('covers the screen in a view opened while a person elsewhere holds it', async () => {
+    render(<ComputerScreen target={{ kind: 'dashboard', agentId: 'a1' }} />)
+    await waitFor(() => expect(calls.push).not.toBeNull())
+    send('hello', { viewerId: 'v-3' })
+    send('source', { source: 'display', width: 4, height: 2 })
+    send('control', { state: 'other', canControl: true })
+    expect(await screen.findByTestId('computer-screen-hidden')).toBeTruthy()
+    expect(screen.queryByText('Connecting to the agent’s screen…')).toBeNull()
+  })
 })

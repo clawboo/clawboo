@@ -65,13 +65,18 @@ function ensureSweep(): void {
   sweep.unref()
 }
 
+/** Whether a hold has run out: its view gone past the grace, or no input from it. */
+function lapsed(c: Controller, t: number): boolean {
+  const gone = c.detachedAt !== null && t - c.detachedAt >= RECONNECT_GRACE_MS
+  const idle = t - c.lastInputAt >= IDLE_LAPSE_MS
+  return gone || idle
+}
+
 /** Return control to the agent wherever its holder has gone or gone quiet. */
 export function sweepLapsed(): void {
   const t = now()
   for (const [agentId, c] of controllers) {
-    const gone = c.detachedAt !== null && t - c.detachedAt >= RECONNECT_GRACE_MS
-    const idle = t - c.lastInputAt >= IDLE_LAPSE_MS
-    if (gone || idle) {
+    if (lapsed(c, t)) {
       controllers.delete(agentId)
       emit(agentId)
     }
@@ -85,6 +90,20 @@ export function sweepLapsed(): void {
 /** The person in control of this agent's computer, or null when the agent is. */
 export function controllerOf(agentId: string): Controller | null {
   return controllers.get(agentId) ?? null
+}
+
+/**
+ * How many agents' screens a person holds now. A person driving an agent's
+ * screen is using this server even when no tab of theirs sends a presence beat
+ * (a control link's page sends none), so the idle read counts them as here.
+ * Read-only: a hold that has run out is not counted, though the sweep may not
+ * have handed it back yet.
+ */
+export function screensInPersonControl(): number {
+  const t = now()
+  let held = 0
+  for (const c of controllers.values()) if (!lapsed(c, t)) held += 1
+  return held
 }
 
 /** Whether a person holds this agent's computer, so its own tools must wait. */

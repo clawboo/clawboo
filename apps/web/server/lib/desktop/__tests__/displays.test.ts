@@ -240,6 +240,23 @@ describe('acquireDisplay', () => {
     expect(wm.env['XAUTHORITY']).toBe(d!.xauthFile)
   })
 
+  it('starts Xvnc with -displayfd, no X over TCP, all local sockets kept, and -nopn', async () => {
+    await displays.acquireDisplay('agent-1', 'browser:x')
+    const { args } = spawned.calls.find((c) => c.command === '/opt/tigervnc/Xvnc')!
+    const valuesOf = (flag: string) => args.flatMap((a, i) => (a === flag ? [args[i + 1]] : []))
+    // The display number comes back on stdout, never picked by us.
+    expect(valuesOf('-displayfd')).toEqual(['1'])
+    // TCP is off, and only TCP: `-nolisten local` would give up the abstract
+    // socket, whose name another user could then take and catch the display's
+    // next client.
+    expect(valuesOf('-nolisten')).toEqual(['tcp'])
+    expect(args).not.toContain('local')
+    expect(args).not.toContain('-listen')
+    // A display number one of whose sockets is taken is not used in part.
+    expect(args).toContain('-nopn')
+    expect(args).not.toContain('-pn')
+  })
+
   it("gives the display's bus and window manager no desktop session, a home in its folder, settings in memory", async () => {
     displays.setDisplayBinaryLookupForTests((name) =>
       name === 'Xvnc'

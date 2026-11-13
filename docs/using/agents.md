@@ -104,10 +104,11 @@ The **Browser** card shows what the agent sees, live, while it has a browser ope
 On an agent's own screen (Linux), click **Take over** to use it yourself, for example to sign in to a site for the agent, answer a two-factor prompt, or get past a check meant for people. While you have control:
 
 - your mouse and keys go to the agent's screen, and the screen shows a highlighted edge. The agent's own programs share that screen, so type a password there only for an agent you trust;
+- nobody else watching sees the screen, on the dashboard or through a link: their views say a person has taken over, and show the screen again when you hand it back;
 - the agent's own browser tools wait: each call tells it a person is using its computer and to wait or ask you in chat;
 - the agent's browser is not closed for being idle.
 
-Click **Hand back** when you are done. Control also goes back to the agent when you close the view (after 30 seconds, so a dropped connection can come back), or after 10 minutes without a key or a click from you. One person has control at a time; someone who takes over after you gets it, and your view says **A person has control**.
+Click **Hand back** when you are done. Control also goes back to the agent when you close the view (after 30 seconds, so a dropped connection can come back), or after 10 minutes without a key or a click from you. One person has control at a time; someone who takes over after you gets it, and your view says **A person has control** and stops showing the screen until they hand it back.
 
 Whoever may use an agent can use what it holds. Taking over its screen means using its browser's saved sign-ins, and anything its OS user can reach, through a file dialog for example. So the access to decide is who may use each agent: everyone who can open your Clawboo can use every agent, and a link (below) gives someone one agent's screen. If someone should not use an agent's sign-ins, do not give them that agent.
 

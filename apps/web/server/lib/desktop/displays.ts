@@ -541,8 +541,14 @@ async function startDisplay(
         '-1',
         '-SecurityTypes',
         'None',
+        // No X over TCP. Its local sockets stay, the abstract one included:
+        // without it (`-nolisten local`) another user could take that name
+        // and catch the next program that opens this display.
         '-nolisten',
         'tcp',
+        // A display number where any of those sockets cannot be made (another
+        // program already holds it) is not used, rather than used without it.
+        '-nopn',
         '-geometry',
         `${width}x${height}`,
         '-depth',

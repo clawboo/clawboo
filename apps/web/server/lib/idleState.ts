@@ -3,6 +3,11 @@
 // Served by GET /api/system/idle. Read-only: it writes nothing, starts nothing,
 // and reading it is not presence.
 //
+// A person is here when the presence record says so (see presence.ts), or while
+// a person holds an agent's screen (Take over): someone driving an agent's
+// screen through a control link's page sends no presence beat, and stopping the
+// engine would cut them off mid-sign-in.
+//
 // The next due time is read from every schedule source, each in one of three
 // states, so a source that is not set up never reads as one that could not be
 // read:
@@ -17,7 +22,13 @@
 // (see routinesDue), not from the merged schedules list, which also lists paused
 // routines and ones on archived teams.
 
-import type { EngineIdleState, IdleDueSource, IdleNextDue, IdleWork } from '@clawboo/control-client'
+import type {
+  EngineIdleState,
+  IdleDueSource,
+  IdleNextDue,
+  IdlePeople,
+  IdleWork,
+} from '@clawboo/control-client'
 import type { ClawbooDb } from '@clawboo/db'
 import {
   SCHEDULE_SOURCE_NOT_CONFIGURED,
@@ -29,6 +40,7 @@ import {
 import { engineHoldState } from '../api/systemHold'
 import { getRegistry } from './agentSource'
 import { getDb } from './db'
+import { screensInPersonControl } from './desktop/control'
 import { presence } from './presence'
 import { routinesDue } from './routines/ticker'
 import { readSchedulerTimeZone } from './routines/timeZone'
@@ -48,6 +60,12 @@ export interface IdleStateDeps {
   sources?: () => readonly ScheduleSource[]
   /** True when the configured OpenClaw Gateway runs on another machine. */
   gatewayIsRemote?: () => boolean
+}
+
+/** The presence record, with a person who holds an agent's screen counted as here. */
+function peopleState(): IdlePeople {
+  const people = presence().state()
+  return screensInPersonControl() > 0 ? { ...people, present: true } : people
 }
 
 /** The hold route's answer, plus the work checks and routine fires it folds in. */
@@ -224,5 +242,5 @@ export async function buildIdleState(deps: IdleStateDeps = {}): Promise<EngineId
     ...deps,
     gatewayIsRemote: deps.gatewayIsRemote ?? defaultGatewayIsRemote,
   })
-  return { at, people: presence().state(), work: workState(inFlight), nextDue }
+  return { at, people: peopleState(), work: workState(inFlight), nextDue }
 }

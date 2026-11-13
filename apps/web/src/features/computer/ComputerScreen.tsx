@@ -5,6 +5,10 @@
 // take over: the agent's browser and desktop tools then wait, and this view
 // sends the person's mouse and keys until they hand it back. Where the agent
 // has only its browser (a Mac, Windows), it is a view of that browser.
+//
+// While another person has taken over, the server sends this view no pictures,
+// so nobody else sees what they type there: the screen is covered until it is
+// handed back, and the whole screen arrives again then.
 
 import {
   useCallback,
@@ -164,6 +168,9 @@ export function ComputerScreen({
   // changed, so a canvas mounted late would miss the rest of the screen.
   const showFallback =
     idleFallback !== undefined && state.status === 'idle' && state.lastFrameAt === null
+  // Another person has the screen: no pictures come, and the last one shown is
+  // from before they took it.
+  const screenHidden = state.control === 'other' && state.status !== 'ended'
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-3" data-testid="computer-screen">
@@ -238,7 +245,7 @@ export function ComputerScreen({
           }
           className={[
             'max-h-full max-w-full rounded-md object-contain',
-            state.lastFrameAt === null ? 'invisible' : '',
+            state.lastFrameAt === null || screenHidden ? 'invisible' : '',
             inControl ? 'cursor-crosshair outline outline-2 outline-amber' : '',
           ].join(' ')}
           onMouseMove={onPointer}
@@ -252,10 +259,21 @@ export function ComputerScreen({
             if (inControl) e.preventDefault()
           }}
         />
-        {showFallback && (
-          <div className="absolute inset-0 flex min-h-0 flex-col bg-background">{idleFallback}</div>
+        {screenHidden ? (
+          <p
+            className="absolute max-w-[42ch] px-6 text-center text-[12px] leading-relaxed text-muted-foreground"
+            data-testid="computer-screen-hidden"
+          >
+            A person has taken over this screen. It shows here again when they hand it back.
+          </p>
+        ) : (
+          showFallback && (
+            <div className="absolute inset-0 flex min-h-0 flex-col bg-background">
+              {idleFallback}
+            </div>
+          )
         )}
-        {state.lastFrameAt === null && !showFallback && (
+        {state.lastFrameAt === null && !showFallback && !screenHidden && (
           <p className="absolute max-w-[42ch] px-6 text-center text-[12px] leading-relaxed text-muted-foreground">
             {state.status === 'ended'
               ? state.endedReason
@@ -264,13 +282,15 @@ export function ComputerScreen({
                 : 'Connecting to the agent’s screen…'}
           </p>
         )}
-        {(state.status === 'ended' || state.status === 'idle') && state.lastFrameAt !== null && (
-          <p className="absolute bottom-2 rounded-md bg-background/90 px-2 py-1 text-[12px] text-muted-foreground">
-            {state.status === 'ended'
-              ? state.endedReason
-              : 'The browser is closed now. This is the last picture of it.'}
-          </p>
-        )}
+        {(state.status === 'ended' || state.status === 'idle') &&
+          state.lastFrameAt !== null &&
+          !screenHidden && (
+            <p className="absolute bottom-2 rounded-md bg-background/90 px-2 py-1 text-[12px] text-muted-foreground">
+              {state.status === 'ended'
+                ? state.endedReason
+                : 'The browser is closed now. This is the last picture of it.'}
+            </p>
+          )}
       </div>
     </div>
   )

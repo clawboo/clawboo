@@ -7,6 +7,12 @@
 // through its browser's own screenshot tool, about once a second; that view is
 // for watching only.
 //
+// WHILE A PERSON HAS TAKEN OVER, only the view that took over gets pictures:
+// what they type on the agent's screen (a password, a code) is theirs. Every
+// other view, on the dashboard or through a link, is told a person has control
+// (`control` with `other`) and gets no `rects` or `image` until it is handed
+// back, then the whole screen at once.
+//
 // BACKPRESSURE. Each watcher keeps a list of regions it has not been sent yet.
 // A watcher whose connection is backed up is skipped until it drains, and its
 // regions merge meanwhile, so a slow phone gets fewer, larger pictures of the
@@ -146,7 +152,15 @@ function wire(): void {
     const hub = hubs.get(agentId)
     if (!hub) return
     letGoOfInput(hub)
-    for (const v of hub.viewers) v.sink.send('control', controlStateFor(v, controller))
+    // The browser's next picture goes to everyone who may see it now.
+    if (hub.browserTimer) hub.lastFrameHash = null
+    for (const v of hub.viewers) {
+      v.sink.send('control', controlStateFor(v, controller))
+      // A view another person's take over hides gets nothing more; one it no
+      // longer hides is owed the whole screen.
+      if (screenHiddenFrom(v)) hideFrom(v)
+      else if (v.needsFull) pump(hub, v)
+    }
   })
   onLinkEnded((linkId) => {
     releaseControlByLink(linkId)
@@ -172,6 +186,20 @@ function letGoOfInput(hub: Hub): void {
   }
   hub.keysDown.clear()
   hub.pointer = { ...hub.pointer, b: 0 }
+}
+
+/** Whether another person has taken over this agent's screen, so this view
+ *  must not see it. Exactly the views told `other` in their `control` event. */
+function screenHiddenFrom(v: Viewer): boolean {
+  const c = controllerOf(v.agentId)
+  return c !== null && c.viewerId !== v.id
+}
+
+/** Drop what a hidden view was owed, and owe it the whole screen instead, for
+ *  when it may see it again. */
+function hideFrom(v: Viewer): void {
+  v.pending = []
+  v.needsFull = true
 }
 
 function canControl(v: Viewer): boolean {
@@ -330,8 +358,9 @@ function startBrowserPolling(hub: Hub): void {
       hub.browserState = 'showing'
       const payload = { mimeType: frame.mimeType, data: frame.data, ts: Date.now() }
       for (const v of hub.viewers) {
-        // A backed-up watcher misses this picture and gets the next one.
-        if (!v.waitingDrain) sendOrWait(hub, v, 'image', payload)
+        // A backed-up watcher misses this picture and gets the next one; a view
+        // another person's take over hides gets none.
+        if (!v.waitingDrain && !screenHiddenFrom(v)) sendOrWait(hub, v, 'image', payload)
       }
     } finally {
       hub.browserBusy = false
@@ -387,6 +416,10 @@ function pump(hub: Hub, v: Viewer): void {
   if (v.closed || v.waitingDrain || v.timer || v.encoding) return
   const display = hub.display
   if (!display) return
+  if (screenHiddenFrom(v)) {
+    hideFrom(v)
+    return
+  }
   const wait = v.lastSentAt + MIN_SEND_INTERVAL_MS - Date.now()
   if (wait > 0) {
     v.timer = setTimeout(() => {
@@ -415,6 +448,12 @@ function pump(hub: Hub, v: Viewer): void {
     .then((out) => {
       v.encoding = false
       if (v.closed) return
+      // Taken over by someone else while these were made: they are not sent,
+      // and the whole screen follows when it is handed back.
+      if (screenHiddenFrom(v)) {
+        hideFrom(v)
+        return
+      }
       sendOrWait(hub, v, 'rects', { width, height, rects: out })
       if (v.pending.length > 0 || v.needsFull) pump(hub, v)
     })

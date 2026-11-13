@@ -1045,6 +1045,8 @@ A host can stop the server when nobody is using it and start it again when it is
 
   A read never counts, whoever sent it, and neither does a request just because a sign-in proxy or an app link vouched for it: a proxy vouches for everything it forwards, a background tab's polling included.
 
+  A person who holds an agent's screen with [Take over](/using/agents#take-over) counts as here for as long as they hold it, from the dashboard or through a control link, whose page sends no beats.
+
 - **Is work going?** The same answer as `GET /api/system/hold` ([Drain and hold](#drain-and-hold)): `backgroundWork` is `present` while an agent run or a team chat's work check is going. `routinesInFlight` counts routine fires that have begun.
 - **When is scheduled work next due?** The earliest next run across every schedule: Clawboo's own routines, the cron jobs of an OpenClaw Gateway on this machine, and the jobs of a Hermes gateway Clawboo runs. Wake the server a minute before it.
 
@@ -1090,7 +1092,7 @@ Reads, which never count anyway. While its tab is visible the dashboard polls, d
 | Field                   | Type                                                                                                                           | Notes                                                                                                               |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `at`                    | `number`                                                                                                                       | The server's clock when it answered, epoch ms                                                                       |
-| `people.present`        | `boolean`                                                                                                                      | A visible, focused tab beat, or something a person did (see above), within the last 60 seconds                      |
+| `people.present`        | `boolean`                                                                                                                      | A focused tab beat or a person's action (see above) in the last 60 seconds, or a person holding an agent's screen   |
 | `people.lastSeenAt`     | `number \| null`                                                                                                               | The latest focused-tab beat or action, epoch ms; `null` when none since the server started                          |
 | `people.lastActedAt`    | `number \| The latest action: a beat's `acted`, or something a person did. Epoch ms; `null` when none since the server started |
 | `people.focusedTabs`    | `number`                                                                                                                       | Tabs whose latest beat said visible and focused                                                                     |
