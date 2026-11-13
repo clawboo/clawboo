@@ -247,6 +247,27 @@ describe.runIf(posix)('a run with neither the agents login nor an API key', () =
     expect(spawns).toHaveLength(0)
   })
 
+  it.each(['GEMINI_API_KEY', 'GOOGLE_API_KEY'])(
+    'lets a Hermes run on an ambient %s go on, and still refuses a Codex pick with no key',
+    async (name) => {
+      for (const k of ['OPENROUTER_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY']) {
+        vi.stubEnv(k, undefined)
+      }
+      vi.stubEnv('GEMINI_API_KEY', undefined)
+      vi.stubEnv('GOOGLE_API_KEY', undefined)
+      const profile = await provisionProfile(profileOpts())
+      const opts = { agentId: 'a1', sessionKey: 'agent:a1:team:t1', message: 'go' }
+      await expect(
+        resolveHermesRunSettings(opts, { providerHint: 'openai-codex' }, profile.dir),
+      ).rejects.toThrow(HERMES_AGENT_SIGN_IN_MESSAGE)
+
+      vi.stubEnv(name, 'g-test-key')
+      // Hermes's `auto` picks Gemini from it.
+      const run = await resolveHermesRunSettings(opts, {}, profile.dir)
+      expect(run.provider).toBeNull()
+    },
+  )
+
   it('lets a Hermes run with a provider key go on', async () => {
     const profile = await provisionProfile(
       profileOpts({ providerEnv: { OPENROUTER_API_KEY: 'sk-or-test' } }),
