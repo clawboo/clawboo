@@ -326,6 +326,18 @@ export async function checkedOutAt(repoPath: string, ref: string): Promise<strin
   return null
 }
 
+/** True when `commit` is `ref` or comes before it in `repoPath`. A commit
+ *  `repoPath` does not have is not; any other failure throws. */
+async function containsIn(repoPath: string, commit: string, ref: string): Promise<boolean> {
+  try {
+    await execGit(repoPath, ['merge-base', '--is-ancestor', commit, ref])
+    return true
+  } catch (err) {
+    if (err instanceof GitError && err.exitCode === 1) return false
+    throw err
+  }
+}
+
 /** Throw unless no checkout of `repoPath` has `ref` checked out. A fetch into a
  *  checked-out branch is refused by git; `update-ref` is not, and moving the
  *  branch under someone's working tree would make their files look changed. */
@@ -344,12 +356,18 @@ async function refuseCheckedOut(repoPath: string, ref: string): Promise<void> {
  * decided may be replaced (null: there must be no such branch); absent, the one
  * it is at now. The branch moves only from that commit (compare-and-swap), so a
  * commit someone made to it meanwhile is never overwritten.
+ *
+ * `mustContain`, when given, is a commit the task's work must have in its
+ * history. It is checked by the server in the user's repository, on the work
+ * as it arrived, before the branch moves: the mirror's own answer to that
+ * question is the agent's to give.
  */
 export async function exportTaskBranch(
   repoPath: string,
   branch: string,
   baseSha: string,
   expected?: string | null,
+  opts: { mustContain?: string | null } = {},
 ): Promise<string | null> {
   if (!/^[A-Za-z0-9._/-]{1,200}$/.test(branch) || branch.includes('..')) {
     throw new MirrorError(`unsafe branch name: ${branch}`)
@@ -357,6 +375,10 @@ export async function exportTaskBranch(
   if (!SHA_RE.test(baseSha)) throw new MirrorError(`not a commit id: ${baseSha}`)
   if (expected != null && !SHA_RE.test(expected)) {
     throw new MirrorError(`not a commit id: ${expected}`)
+  }
+  const mustContain = opts.mustContain ?? null
+  if (mustContain !== null && !SHA_RE.test(mustContain)) {
+    throw new MirrorError(`not a commit id: ${mustContain}`)
   }
   const mirror = mirrorPathFor(repoPath)
   const tip = (
@@ -412,6 +434,11 @@ export async function exportTaskBranch(
       pathArg(bundle),
       `+${want}:${staged}`,
     ])
+    if (mustContain !== null && !(await containsIn(repoPath, mustContain, staged))) {
+      throw new MirrorError(
+        `${want} in ${repoPath} has commits the task's branch does not, so it was left as it is`,
+      )
+    }
     // Checked again here, not only before the bundle: someone may have checked
     // the branch out (at the same commit) while it was being made and copied.
     // What is left is the moment between this check and the move.

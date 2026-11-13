@@ -103,6 +103,34 @@ describe.runIf(posix)('bringing a task branch out of the mirror', { timeout: 120
     expect(git(repo, 'for-each-ref', 'refs/clawboo-export/')).toBe('')
   })
 
+  it('refuses work that does not contain the commit the caller requires, checked in the user repository', async () => {
+    await agentCommit('first')
+    // A commit of someone's on the branch in their own repository, which the
+    // task's work does not have.
+    git(repo, 'branch', branch, base)
+    git(repo, 'checkout', '-q', branch)
+    fs.writeFileSync(path.join(repo, 'theirs.txt'), 'theirs\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'theirs')
+    git(repo, 'checkout', '-q', 'main')
+    const theirs = git(repo, 'rev-parse', branch)
+
+    const err = await exportTaskBranch(repo, branch, base, theirs, { mustContain: theirs }).catch(
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(MirrorError)
+    expect((err as Error).message).toMatch(/has commits the task's branch does not/)
+    expect(git(repo, 'rev-parse', branch)).toBe(theirs)
+    expect(git(repo, 'for-each-ref', 'refs/clawboo-export/')).toBe('')
+  })
+
+  it('brings work over that contains the commit the caller requires', async () => {
+    const tip = await agentCommit('first')
+    git(repo, 'branch', branch, base)
+    expect(await exportTaskBranch(repo, branch, base, base, { mustContain: base })).toBe(tip)
+    expect(git(repo, 'rev-parse', branch)).toBe(tip)
+  })
+
   it('refuses a malformed object from the mirror, and stores none of it', async () => {
     const tree = git(repo, 'rev-parse', `${base}^{tree}`)
     // A commit whose author line git's own checks refuse, made in the mirror.

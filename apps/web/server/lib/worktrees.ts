@@ -290,9 +290,12 @@ async function bringBranchIntoMirror(
     }
     // A checkout on the branch moves with it, or git refuses; else (none, or a
     // registration whose folder is gone, which the rebuild clears) the branch
-    // moves only from the commit read above.
+    // moves only from the commit read above. Where the checkout is comes from
+    // the mirror, which the agent can write: only a folder in agent space is
+    // taken, so the merge runs through the agent host as the agent user, never
+    // as the server in a folder the agent named.
     const at = await checkedOutAt(mirror, `refs/heads/${branch}`)
-    if (at !== null && (await agentStat(at)) !== null) {
+    if (at !== null && isInAgentSpace(at) && (await agentStat(at)) !== null) {
       await execGit(at, ['merge', '--ff-only', '--quiet', inUser])
     } else {
       await execGit(mirror, ['update-ref', `refs/heads/${branch}`, inUser, inMirror])
@@ -332,15 +335,17 @@ async function isAncestorIn(repo: string, ancestor: string, commit: string): Pro
   }
 }
 
-/** Where the mirror keeps the commit the last export of `branch` put in the
- *  user's repository. */
+/** Where the user's repository keeps the commit the last export of `branch`
+ *  put there. Kept by the server in the user's repository, not in the mirror:
+ *  it decides whether a branch may be replaced or deleted, so the agent must
+ *  not be able to write it. */
 const exportedRef = (branch: string): string => `refs/clawboo-exported/${branch}`
 
 /** The commit the last export of `branch` put in the user's repository, or null. */
 async function lastExported(repoPath: string, branch: string): Promise<string | null> {
   try {
     const out = (
-      await execGit(mirrorPathFor(repoPath), [
+      await execGit(repoPath, [
         'rev-parse',
         '--verify',
         '--quiet',
@@ -370,11 +375,13 @@ async function exportFromMirror(repoPath: string, worktree: Worktree): Promise<v
   if (tip === null) return
   const theirs = await branchTip(repoPath, worktree.branch)
   if (theirs === tip) return
-  if (
-    theirs !== null &&
-    theirs !== (await lastExported(repoPath, worktree.branch)) &&
-    !(await isAncestorIn(mirror, theirs, tip))
-  ) {
+  // Not where the last export put it: the task's work must contain it. Asked
+  // of the mirror first, for a quick refusal, and then decided by the server in
+  // the user's repository once the work has arrived there, since the agent can
+  // make its own copy answer anything.
+  const mustContain =
+    theirs !== null && theirs !== (await lastExported(repoPath, worktree.branch)) ? theirs : null
+  if (mustContain !== null && !(await isAncestorIn(mirror, mustContain, tip))) {
     throw new Error(
       `${worktree.branch} in ${repoPath} has commits the task's branch in the agent's copy does not, so it was left as it is`,
     )
@@ -383,11 +390,11 @@ async function exportFromMirror(repoPath: string, worktree: Worktree): Promise<v
   // user's repository has: only what came after it travels.
   const base = await commitIn(mirror, `${worktree.baseCommit}^`)
   // `theirs` is what was checked above: the branch moves only from it.
-  const moved = await exportTaskBranch(repoPath, worktree.branch, base, theirs)
+  const moved = await exportTaskBranch(repoPath, worktree.branch, base, theirs, { mustContain })
   // The work has arrived: a failure to note where only costs a later export
   // over a rewritten branch, never this one.
   if (moved !== null) {
-    await execGit(mirror, ['update-ref', exportedRef(worktree.branch), moved]).catch(
+    await execGit(repoPath, ['update-ref', exportedRef(worktree.branch), moved]).catch(
       () => undefined,
     )
   }
@@ -487,7 +494,7 @@ async function dropExportedBranch(
     if (theirs === null || ![...ours, exported].includes(theirs)) return
     if ((await checkedOutAt(repoPath, `refs/heads/${branch}`)) !== null) return
     await execGit(repoPath, ['update-ref', '-d', `refs/heads/${branch}`, theirs])
-    await execGit(mirrorPathFor(repoPath), ['update-ref', '-d', exportedRef(branch)])
+    await execGit(repoPath, ['update-ref', '-d', exportedRef(branch)])
   } catch {
     /* best-effort */
   }

@@ -711,6 +711,66 @@ describe.runIf(posix)('task checkouts under agent isolation', { timeout: 120_000
     expect(git(repo, 'rev-parse', branch)).toBe(later)
   })
 
+  it("never replaces a user branch the agent's copy says it exported", async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { worktreePath: wt, branch } = prov.worktree
+    fs.writeFileSync(path.join(wt, 'feature.txt'), 'agent work\n')
+    const later = await anotherTasksBase()
+    git(repo, 'branch', branch, later)
+    // The agent can write its own copy: it says the last export put the
+    // user's branch where it is now.
+    git(mirrorPathFor(repo), 'update-ref', `refs/clawboo-exported/${branch}`, later)
+
+    await actOnTaskWorkspace(taskId, 'pause')
+    expect(git(repo, 'rev-parse', branch)).toBe(later)
+    const notes = getComments(getDb(), taskId).map((c) => c.body)
+    expect(notes.some((b) => b.includes('could not be brought into'))).toBe(true)
+  })
+
+  it("an empty completion keeps a user branch the agent's copy says it exported", async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { branch } = prov.worktree
+    await actOnTaskWorkspace(taskId, 'pause')
+    expect((await resumeTaskWorkspace(taskId, { repoPath: repo })).ok).toBe(true)
+    const later = await anotherTasksBase()
+    git(repo, 'branch', '-f', branch, later)
+    git(mirrorPathFor(repo), 'update-ref', `refs/clawboo-exported/${branch}`, later)
+
+    const done = await actOnTaskWorkspace(taskId, 'complete')
+    expect(done.ok && done.action === 'complete' && done.complete.cleaned).toBe(true)
+    expect(git(repo, 'rev-parse', branch)).toBe(later)
+  })
+
+  it('resume never runs git as the server in a checkout the mirror names outside the work folder', async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { worktreePath: wt, branch } = prov.worktree
+    fs.writeFileSync(path.join(wt, 'agent.txt'), 'agent\n')
+    await actOnTaskWorkspace(taskId, 'pause')
+    git(repo, 'checkout', '-q', branch)
+    fs.writeFileSync(path.join(repo, 'theirs.txt'), 'theirs\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'theirs')
+    git(repo, 'checkout', '-q', 'main')
+    // The agent registers a checkout of the branch in a folder outside the
+    // work folder, one that exists.
+    const outside = path.join(dir, 'outside')
+    git(mirrorPathFor(repo), 'worktree', 'add', '-q', outside, branch)
+    localGit = []
+
+    // The rebuild then refuses, as the branch is checked out there.
+    expect(await resumeTaskWorkspace(taskId, { repoPath: repo })).toMatchObject({ ok: false })
+    // Nothing ran there as the server, and nothing in it moved.
+    expect(localGit.filter((c) => c.cwd === outside)).toEqual([])
+    expect(fs.existsSync(path.join(outside, 'theirs.txt'))).toBe(false)
+    expect(git(mirrorPathFor(repo), 'rev-parse', branch)).toBe(git(repo, 'rev-parse', branch))
+  })
+
   it('a completion whose run lost the task while its work was brought over leaves the task be', async () => {
     const taskId = newTask()
     setSetting(getDb(), teamVerifyCommandSettingKey('team1'), JSON.stringify({ command: 'exit 0' }))
