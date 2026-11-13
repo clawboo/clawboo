@@ -47,6 +47,10 @@ const STAGING = '.clawboo-copying'
 /** Files never carried into agent space (see `copyTree`). */
 const NEVER_COPIED = new Set(['auth.json', '.env'])
 
+/** Clawboo Native's runtime id, which names its homes' folder under `runtimes/`
+ *  (`runtimeIdentityHomePath('clawboo-native', ...)`; the descriptor's id). */
+export const NATIVE_RUNTIME_ID = 'clawboo-native'
+
 /** Every copy to make: runtime homes and team folders, by their folder names. */
 export function planCopyIn(opts: {
   dataDir: string
@@ -70,7 +74,7 @@ export function planCopyIn(opts: {
   for (const rt of realDirs(runtimes)) {
     // Clawboo Native's homes hold its conversation history, which stays in the
     // data folder: its model loop is server code and no agent process uses it.
-    if (rt === 'native') continue
+    if (rt === NATIVE_RUNTIME_ID) continue
     for (const agent of realDirs(path.join(runtimes, rt))) {
       items.push({
         from: path.join(runtimes, rt, agent),

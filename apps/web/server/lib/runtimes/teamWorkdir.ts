@@ -21,7 +21,7 @@
 // so `../..` from one is not the database. Older versions kept them under
 // `<clawboo home>/workspaces`; the boot move leaves a link there.
 
-import { mkdir } from 'node:fs/promises'
+import { lstat, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
@@ -189,4 +189,13 @@ export async function ensureTeamWorkdir(dir: string): Promise<void> {
     return
   }
   await mkdir(dir, { recursive: true, mode: 0o700 })
+  // `mkdir` succeeds on a link to a folder. A run's folder must be a real one:
+  // a teammate could swap a task's folder for a link, and a run's write jail
+  // would then follow it out (agentMkdir checks the same).
+  const st = await lstat(dir)
+  if (!st.isDirectory()) {
+    throw Object.assign(new Error(`${dir} is not a folder of its own (a link or a file)`), {
+      code: 'ENOTDIR',
+    })
+  }
 }

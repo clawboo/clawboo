@@ -8,8 +8,6 @@
 // GatewayClient + the proxy-device `signConnect`; tests pass a fake). This is the
 // "who exists" layer — it never touches RuntimeAdapter ("how they run").
 
-import os from 'node:os'
-
 import { foldToolsIntoAgentsMd, withBrowsingGuidance } from '@clawboo/protocol'
 import {
   agents,
@@ -56,37 +54,6 @@ function isLocalGateway(gatewayUrl: string | undefined): boolean {
   } catch {
     return false
   }
-}
-
-/**
- * Does the configured Gateway run on this machine, by any name? Loopback, or this
- * machine's own host name (with or without `.local`), or one of its own network
- * addresses. Wider than `isLocalGateway`, which decides what a loopback attach may
- * carry; this one decides whether stopping this machine stops the Gateway too, so a
- * name it cannot place reads as another machine.
- */
-export function isGatewayOnThisMachine(
-  gatewayUrl: string | undefined,
-  machine: { hostname: () => string; addresses: () => string[] } = {
-    hostname: () => os.hostname(),
-    addresses: () =>
-      Object.values(os.networkInterfaces())
-        .flat()
-        .map((i) => i?.address ?? '')
-        .filter(Boolean),
-  },
-): boolean {
-  if (!gatewayUrl) return false
-  let host: string
-  try {
-    host = new URL(gatewayUrl).hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  } catch {
-    return false
-  }
-  if (isLoopbackHost(host) || isLocalGateway(gatewayUrl)) return true
-  const bare = (name: string): string => name.toLowerCase().replace(/\.local$/, '')
-  if (bare(host) === bare(machine.hostname())) return true
-  return machine.addresses().some((a) => a.toLowerCase() === host)
 }
 
 // ── The subset of GatewayClient this source uses (the real client satisfies it;
@@ -325,9 +292,9 @@ export class OpenClawAgentSource implements AgentSource {
     return Boolean(this.deps.loadSettings().gatewayUrl?.trim())
   }
 
-  /** True when the configured Gateway runs on this machine, by any of its names. */
-  isOnThisMachine(): boolean {
-    return isGatewayOnThisMachine(this.deps.loadSettings().gatewayUrl)
+  /** The Gateway URL settings name (the default local address when none is set). */
+  gatewayUrl(): string | undefined {
+    return this.deps.loadSettings().gatewayUrl
   }
 
   /** True while the last connect failed for an auth-class reason (bad token /
