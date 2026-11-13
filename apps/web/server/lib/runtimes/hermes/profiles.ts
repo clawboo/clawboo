@@ -28,13 +28,14 @@
 
 import { createHmac, randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { createLogger } from '@clawboo/logger'
 import { parseDocument } from 'yaml'
 
 import {
+  agentList,
   agentMkdir,
   agentReadFile,
   agentRemove,
@@ -464,10 +465,11 @@ export interface ProvisionedProfile {
   mcpAttached: boolean
 }
 
-/** Whether a folder holds anything. */
+/** Whether a folder holds anything. Listed through the agent host when agents
+ *  run as their own OS user: the folder is theirs, and the server cannot read it. */
 async function hasEntries(dir: string): Promise<boolean> {
   try {
-    return (await readdir(dir)).length > 0
+    return (await agentList(dir, { max: 1 })).entries.length > 0
   } catch {
     return false
   }
@@ -690,12 +692,14 @@ export async function provisionGatewayHome(opts: {
   await agentWriteFile(path.join(opts.home, '.env'), renderGatewayEnv(opts))
 }
 
-/** The Clawboo profiles in the gateway home, by name. */
+/** The Clawboo profiles in the gateway home, by name. Listed through the agent
+ *  host when agents run as their own OS user: the gateway home is theirs, and
+ *  the server cannot read it. */
 export async function listClawbooProfiles(gatewayHome: string): Promise<string[]> {
   try {
-    const entries = await readdir(path.join(gatewayHome, 'profiles'), { withFileTypes: true })
+    const { entries } = await agentList(path.join(gatewayHome, 'profiles'))
     return entries
-      .filter((e) => e.isDirectory() && isClawbooProfile(e.name))
+      .filter((e) => e.type === 'dir' && isClawbooProfile(e.name))
       .map((e) => e.name)
       .sort()
   } catch {
