@@ -95,6 +95,11 @@ export const ENGINE_FEATURES = [
   // Drain and hold (/api/system/hold): stop starting new agent runs, then wait
   // for the ones in flight before a stop or an update.
   'system.hold',
+  // For a host that stops this engine when idle and starts it again on demand
+  // (GET /api/system/idle): whether a person is here, whether work is going, and
+  // when the next scheduled work is due. A client reports a person with
+  // POST /api/system/presence.
+  'system.idle',
   // Pause an agent, a team or a task tree, durably, until a person resumes it
   // (/api/pauses).
   'board.pause',

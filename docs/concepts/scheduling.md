@@ -66,13 +66,13 @@ An agent routine creates a new Board task for its agent on every fire, with the 
 | Time limit                    | Ended after 30 minutes of awake time with no activity     | 10 minutes of awake time for the whole run              |
 | Trace in Observability        | Yes                                                       | No                                                      |
 
-On OpenClaw, the Gateway must be connected, or the fire fails. A finished OpenClaw run gets a comment on its task saying it completed without verification. If a person moves the task's card out of In progress on the Board while it runs, the run stops at once. That counts as the outcome, not as a failure, and the routine stays on its schedule.
+On OpenClaw, a fire goes through the Gateway, for an agent routine on an OpenClaw agent and for a team routine whose message goes to one. A routine that falls due while the Gateway is set up but not connected waits for it, for up to 5 minutes from when Clawboo finds it due, and fires as soon as the connection is up. So a routine that came due while Clawboo was stopped or the computer was asleep still runs after the next start, when the Gateway connects a few seconds after Clawboo does. A **Run now** waits the same way. A Gateway still not connected after those 5 minutes fails the fire, as a failure that may pass (below). With no Gateway set up at all, the fire fails at once. A finished OpenClaw run gets a comment on its task saying it completed without verification. If a person moves the task's card out of In progress on the Board while it runs, the run stops at once. That counts as the outcome, not as a failure, and the routine stays on its schedule.
 
 The Routines dialog sets who a routine goes to, its schedule, its name and its instructions. The other task template fields are set only through the [Schedules API](/reference/rest-api/schedules): a repository path (`repoPath`), the task kind, the model, the priority, a per-run cost cap (`maxNodeCents`) and an existing task to bind to (`teamTaskId`). An agent routine made in the dashboard therefore has no repository. It runs as a research task without a worktree, the same way the agent works in team chat: see [What agents can do](/concepts/permissions) for where Claude Code, Codex and Hermes start in that case.
 
 ## When a fire fails
 
-A routine keeps its schedule through a run that failed for a reason that may pass by itself: a rate limit, a timeout, a provider error or a dropped connection (the `RateLimited`, `Timeout` and `ProviderError` classes in [Events and errors](/reference/events-and-errors#error-classes)). It records the error and runs at its next time; a success clears the error. The third such failure in a row stops it, and so does any failure of a one-time routine.
+A routine keeps its schedule through a run that failed for a reason that may pass by itself: a rate limit, a timeout, a provider error or a dropped connection, such as an OpenClaw Gateway that is not connected (the `RateLimited`, `Timeout` and `ProviderError` classes in [Events and errors](/reference/events-and-errors#error-classes)). It records the error and runs at its next time; a success clears the error. The third such failure in a row stops it, and so does any failure of a one-time routine.
 
 Any other failure stops the routine at once. Its dialog shows **Stopped after a failed run.** with the error, and it does not run again until you press **Resume**, which also starts the count of failures again. Common causes:
 
@@ -81,7 +81,6 @@ Any other failure stops the routine at once. Its dialog shows **Stopped after a 
 - a circuit breaker or a hard cap stopped an agent routine's run while it was still working (a Claude Code or Codex run whose last cost report crosses a hard cap keeps its result, and the paused budget refuses the routine's next run instead);
 - the runtime's sign-in or the provider account was refused, which shows as **Fix sign-in** on the set-aside task;
 - the run itself failed in a way that does not pass by waiting, or ran out of room;
-- the OpenClaw Gateway was not connected (OpenClaw agents only);
 - the agent was removed, or the team was deleted or archived. An agent routine outlives its team's deletion: it files its tasks with no team from then on, unless it runs one of the tasks that team left behind.
 
 The task that a failed agent fire created is moved to Blocked, so it waits in **Needs you**, with a comment saying the scheduled run failed, whether the routine runs again, and that the task was set aside. The routine files a fresh task on its next run. A task the routine is bound to is left as the run left it.

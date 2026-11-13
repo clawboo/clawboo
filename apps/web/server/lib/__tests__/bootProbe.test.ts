@@ -54,6 +54,30 @@ describe('runBootProbe (fresh install)', () => {
     expect(report.config.budgetHardCapUsdCents).toBeNull()
   })
 
+  it("runs SQLite's quick check at boot and the full check when a person asks for it", async () => {
+    const boot = await runBootProbe({ port: 18790 })
+    expect(checkById(boot, 'databaseIntegrity')).toMatchObject({
+      ok: true,
+      message: 'SQLite quick integrity check passed',
+    })
+    const recheck = await runBootProbe({ port: 18790, fullDatabaseCheck: true })
+    expect(checkById(recheck, 'databaseIntegrity')).toMatchObject({
+      ok: true,
+      message: 'SQLite integrity check passed',
+    })
+  })
+
+  it('a Re-run probe that arrives while the boot probe runs still gets the full check', async () => {
+    const boot = runBootProbe({ port: 18790 })
+    const recheck = runBootProbe({ port: 18790, fullDatabaseCheck: true })
+    expect(checkById(await boot, 'databaseIntegrity')?.message).toBe(
+      'SQLite quick integrity check passed',
+    )
+    expect(checkById(await recheck, 'databaseIntegrity')?.message).toBe(
+      'SQLite integrity check passed',
+    )
+  })
+
   it('writes the boot sentinel on first boot and decrypts it on the next (masterKeyOk)', async () => {
     const first = await runBootProbe({ port: 18790 })
     expect(first.resolved.masterKeyOk).toBe(true)

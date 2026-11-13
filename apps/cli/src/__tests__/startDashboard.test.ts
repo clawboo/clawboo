@@ -24,22 +24,27 @@ vi.mock('child_process', async (orig) => {
   }
 })
 
-import { launchDirEnv, serverWorkingDir, startDashboard } from '../lifecycle'
+import { compileCacheEnv, launchDirEnv, serverWorkingDir, startDashboard } from '../lifecycle'
 
 describe('the bundled server launch', () => {
   let home: string
   let savedHome: string | undefined
+  let savedCompileCache: string | undefined
 
   beforeEach(() => {
     forkState.calls = []
     home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clawboo-cli-cwd-')))
     savedHome = process.env['CLAWBOO_HOME']
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    savedCompileCache = process.env['NODE_COMPILE_CACHE']
+    delete process.env['NODE_COMPILE_CACHE']
   })
   afterEach(() => {
     vi.restoreAllMocks()
     if (savedHome === undefined) delete process.env['CLAWBOO_HOME']
     else process.env['CLAWBOO_HOME'] = savedHome
+    if (savedCompileCache === undefined) delete process.env['NODE_COMPILE_CACHE']
+    else process.env['NODE_COMPILE_CACHE'] = savedCompileCache
     fs.rmSync(home, { recursive: true, force: true })
   })
 
@@ -64,6 +69,15 @@ describe('the bundled server launch', () => {
 
     const env = opts['env'] as NodeJS.ProcessEnv
     expect(env['CLAWBOO_LAUNCH_DIR']).toBe(process.cwd())
+    // Node keeps the compiled bundle between starts, in the data folder.
+    expect(env['NODE_COMPILE_CACHE']).toBe(path.join(home, '.clawboo', 'cache', 'compile'))
+  })
+
+  it('keeps a compile cache the environment already names', () => {
+    expect(compileCacheEnv({ ...process.env, NODE_COMPILE_CACHE: '/somewhere/else' })).toEqual({})
+    expect(compileCacheEnv({ ...process.env, NODE_COMPILE_CACHE: '' })).toEqual({
+      NODE_COMPILE_CACHE: path.join(home, '.clawboo', 'cache', 'compile'),
+    })
   })
 
   it('falls back to the home directory when clawboo cannot create its own', () => {

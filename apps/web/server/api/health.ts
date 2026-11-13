@@ -46,7 +46,8 @@ export function healthGET(_req: Request, res: Response): void {
 }
 
 export function healthRecheckPOST(_req: Request, res: Response): void {
-  void runBootProbe({ port: resolvePort() })
+  // A person asked: the full SQLite integrity check, not the boot probe's quick one.
+  void runBootProbe({ port: resolvePort(), fullDatabaseCheck: true })
     .then((report) => res.json(serialize(report)))
     .catch((err: unknown) =>
       res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) }),

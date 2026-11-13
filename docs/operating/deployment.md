@@ -65,6 +65,7 @@ NODE_ENV=production node "$(npm root -g)/clawboo/dist/server.js"
 - **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder in the [work folder](/operating/data-and-state#the-work-folder), `~/clawboo-work/teams` by default.
 - **The dashboard files** come from the `ui` folder next to `server.js`. `CLAWBOO_UI_DIR` points somewhere else. If Clawboo cannot read `index.html` there, page loads answer `503` with "The Clawboo dashboard could not be read from disk. Check CLAWBOO_UI_DIR."
 - **MCP attach snippets.** To make the stdio snippets from `GET /api/mcp/config` name the bundled MCP programs, also set `CLAWBOO_MCP_BIN_DIR="$(npm root -g)/clawboo/dist/bin"`, as the launcher does.
+- **Faster starts.** The launcher sets `NODE_COMPILE_CACHE=~/.clawboo/cache/compile`, so Node keeps its compiled copy of the server between starts. Set it yourself to get the same, which matters most when something stops the server when idle and starts it on demand.
 - **Signing in.** Without `STUDIO_ACCESS_TOKEN`, the server locks itself with the per-install token in `~/.clawboo/access-token` of the user account it runs as. Run `clawboo open` as that user to open a signed-in browser, or `clawboo open --print` for a one-time link to open elsewhere.
 
 ### Run it as a service
@@ -237,6 +238,14 @@ Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere 
 - **A sign-in proxy for a team:** have Clawboo check the proxy's signed identity tokens, so approvals, chat and task moves record who did them. See [Run Clawboo behind a sign-in proxy](/guides/sso-proxy).
 
 [Reach Clawboo from another machine](/guides/self-host-securely) has the steps and the nginx, Caddy and Cloudflare Tunnel configs. On Clawboo 0.5.0 and older the `/api/mcp/` rule is required: see the advisory in the [Security model](/operating/security).
+
+## Stop it when nobody is using it
+
+A computer or service manager can stop Clawboo when it is idle and start it again on demand, so it does not run all day for a dashboard nobody has open. Clawboo is made for this:
+
+- **It says when it is idle.** `GET /api/system/idle` answers whether a person is at a dashboard (counted from the dashboard's presence beat, never from its polling), whether an agent run is going, and when the next routine or OpenClaw cron job is due. A stop script stops it once nobody has been there and nothing has run for a few minutes, after a [drain](/reference/rest-api/system#drain-and-hold), and starts it again a minute before the next due time. See [Sleep and wake](/reference/rest-api/system#sleep-and-wake).
+- **It starts quickly.** The startup checks run SQLite's quick integrity check in a background thread, so the server answers while they read the database; **Re-run probe** in **System Health** runs the full check. Right after a start, `/api/health` answers once those checks finish, while other routes, `/api/system/idle` among them, answer at once. Node keeps its compiled copy of the server between starts (see [Start the server directly](#start-the-server-directly)).
+- **It catches up once.** A routine whose time passed while Clawboo was stopped runs once when it starts again; missed times are not made up. A due OpenClaw routine waits up to 5 minutes for the Gateway to connect rather than failing on it.
 
 ## Check that it is running
 

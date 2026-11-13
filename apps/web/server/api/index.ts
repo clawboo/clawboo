@@ -42,6 +42,7 @@ import { operatorSettingsGET, operatorSettingsPUT } from './operatorSettings'
 import { systemCapabilitiesGET } from './systemCapabilities'
 import { pausesDELETE, pausesGET, pausesPOST } from './pauses'
 import { systemHoldDELETE, systemHoldGET, systemHoldPOST } from './systemHold'
+import { systemIdleGET, systemPresencePOST } from './systemIdle'
 import {
   teamsGET,
   teamsPOST,
@@ -333,6 +334,10 @@ router.delete('/api/pauses/:kind/:id', pausesDELETE)
 router.get('/api/system/hold', systemHoldGET)
 router.post('/api/system/hold', systemHoldPOST)
 router.delete('/api/system/hold/:owner', systemHoldDELETE)
+// For hosts that sleep and wake the engine: is a person here, is work going, and
+// when is the next scheduled work due. Only a presence beat counts as a person.
+router.get('/api/system/idle', systemIdleGET)
+router.post('/api/system/presence', systemPresencePOST)
 // Settings an administrator can pin (operator file or environment), and a
 // person's own value for the ones the dashboard offers. Pins are read-only here.
 router.get('/api/system/operator-settings', operatorSettingsGET)

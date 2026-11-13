@@ -28,6 +28,7 @@
 import { spawn } from 'node:child_process'
 
 import { liveCwd } from './cwdGuard'
+import { compileCacheEnvForSuccessor } from './compileCacheEnv'
 
 const FLUSH_DELAY_MS = 400
 
@@ -76,6 +77,8 @@ export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): boo
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    // The compile cache this server started with: the successor is this server too.
+    ...compileCacheEnvForSuccessor(),
     CLAWBOO_API_PORT: String(port),
     CLAWBOO_AWAIT_PORT: String(port),
     // With agents on their own OS user, this process stops every agent process

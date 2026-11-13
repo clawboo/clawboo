@@ -13,6 +13,8 @@ export {
   minNextRunAt,
   queueDueRuns,
   listQueuedRuns,
+  listArmedRuns,
+  countScheduledRunsInFlight,
   claimScheduledRun,
   markRunRunning,
   recordRunOutcome,

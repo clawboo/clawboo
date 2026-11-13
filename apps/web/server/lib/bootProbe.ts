@@ -18,7 +18,6 @@ import { accessSync, constants as fsConstants, existsSync, mkdirSync, statSync }
 
 import { isGatewayConfigured, resolveClawbooDir, loadSettings } from '@clawboo/config'
 import {
-  integrityCheck,
   listTableNames,
   missingSchemaColumns,
   SchemaUpgradeError,
@@ -28,6 +27,7 @@ import { getProxyDeviceIdentityPath } from '@clawboo/gateway-proxy'
 import { MCP_SERVER_NAMES } from '@clawboo/mcp'
 
 import { getRegistry } from './agentSource'
+import { checkDatabase } from './dbCheck'
 import { getDb, getDbPath } from './db'
 import { DEFAULTS } from './defaults'
 import { probeMcpServer } from './mcpSupervisor'
@@ -113,13 +113,34 @@ export function getLastBootReport(): BootReport | null {
   return lastReport
 }
 
-/** Run the boot probe, de-duping concurrent calls — if a probe is already running
+export interface BootProbeInput {
+  /** The actual listening port, for the api-port file check; omit to skip it. */
+  port?: number
+  /**
+   * Run SQLite's full `integrity_check` (every page and every index) instead of
+   * `quick_check`. The boot probe uses the quick one; a person re-running the probe
+   * asks for the full one. Both run off the main thread (see dbCheck).
+   */
+  fullDatabaseCheck?: boolean
+}
+
+/** Whether the probe in flight runs the full database check. */
+let inFlightFull = false
+
+/** Run the boot probe, de-duping concurrent calls: if a probe is already running
  *  (e.g. two `/api/health` requests race before the first completes), share the one
- *  promise so the (potentially slow) integrity check / probes run at most once. */
-export function runBootProbe(input: { port?: number } = {}): Promise<BootReport> {
-  if (inFlight) return inFlight
+ *  promise so the (potentially slow) integrity check / probes run at most once. A
+ *  call that asks for the full database check while a quick one runs waits for it,
+ *  then runs its own, so a person's Re-run probe always gets the full check. */
+export function runBootProbe(input: BootProbeInput = {}): Promise<BootReport> {
+  if (inFlight) {
+    if (!input.fullDatabaseCheck || inFlightFull) return inFlight
+    return inFlight.catch(() => undefined).then(() => runBootProbe(input))
+  }
+  inFlightFull = input.fullDatabaseCheck === true
   inFlight = runBootProbeInner(input).finally(() => {
     inFlight = null
+    inFlightFull = false
   })
   return inFlight
 }
@@ -325,7 +346,7 @@ async function probeOtel(): Promise<CheckOutcome> {
 
 /** Run the full boot probe. `port` is the actual listening port (for the api-port
  *  file match check); omit it to skip that check (e.g. when probing pre-listen). */
-async function runBootProbeInner(input: { port?: number } = {}): Promise<BootReport> {
+async function runBootProbeInner(input: BootProbeInput = {}): Promise<BootReport> {
   const startedAt = new Date()
   const clawbooHome = resolveClawbooDir(process.env)
   const dbPath = getDbPath()
@@ -361,7 +382,7 @@ async function runBootProbeInner(input: { port?: number } = {}): Promise<BootRep
     schemaCannotUpgrade = err instanceof SchemaUpgradeError
   }
   checks.push(
-    await runCheck('databaseIntegrity', () => {
+    await runCheck('databaseIntegrity', async () => {
       if (!db)
         return {
           ok: false,
@@ -372,13 +393,15 @@ async function runBootProbeInner(input: { port?: number } = {}): Promise<BootRep
             : 'SQLite database could not be opened',
           detail: dbOpenError ?? '',
         }
-      const verdict = integrityCheck(db)
+      const kind = input.fullDatabaseCheck ? 'integrity_check' : 'quick_check'
+      const { verdict } = await checkDatabase(db, dbPath, kind)
+      const which = input.fullDatabaseCheck ? 'integrity check' : 'quick integrity check'
       return verdict === 'ok'
-        ? { ok: true, message: 'SQLite integrity check passed', detail: dbPath }
+        ? { ok: true, message: `SQLite ${which} passed`, detail: dbPath }
         : {
             ok: false,
-            message: 'SQLite integrity check FAILED',
-            detail: `PRAGMA integrity_check: ${verdict}`,
+            message: `SQLite ${which} FAILED`,
+            detail: `PRAGMA ${kind}: ${verdict}`,
           }
     }),
   )

@@ -1203,7 +1203,7 @@ Several processes can open the file at once, for example the server and a stdio 
 - The dashboard server uses `clawboo.db` in its data folder: `~/.clawboo/clawboo.db`, or the folder `CLAWBOO_HOME` names.
 - The stdio MCP bins use `CLAWBOO_DB_PATH`, or `~/.openclaw/clawboo/clawboo.db` when it is unset; `CLAWBOO_DB_PATH` affects only the bins. To make a bin share the dashboard's database, set `CLAWBOO_DB_PATH` to the dashboard's file. The stdio snippets from `GET /api/mcp/config` do this.
 - On open, Clawboo sets the folder to `0700` and the database and its `-wal` and `-shm` files to `0600`, because the file holds the secret that signs MCP attach URLs. Where that fails (for example on Windows, or for a file another user owns), Clawboo logs a warning and opens the file anyway.
-- At start, **System Health** runs `PRAGMA integrity_check` (`databaseIntegrity`) and the schema check above (`databaseSchema`).
+- At start, **System Health** runs `PRAGMA quick_check` (`databaseIntegrity`) and the schema check above (`databaseSchema`). **Re-run probe** (`POST /api/health/recheck`) runs the full `PRAGMA integrity_check`, which also checks every index. Both run in a worker thread on a read-only connection of their own, so the server keeps answering while they read the file.
 
 ## Related
 

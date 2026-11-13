@@ -40,7 +40,7 @@ The composite id is the routing key. `parseCapabilityId` and `parseScheduleId` f
 
 ## `read()` never rejects
 
-A source's `read()` returns degradation as a value. Each returns `{ records, status }`, where `status` is `{ sourceId, ok, degraded, reason?, at }`; a disconnected Gateway returns no records and `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` (the Gateway-cron source serves its last list instead, with reason `stale_cache`, when it has one). The multiplexer also wraps every `read()` in its own `try/catch`, so even a source that breaks the contract becomes a degraded status entry rather than failing the merge:
+A source's `read()` returns degradation as a value. Each returns `{ records, status }`, where `status` is `{ sourceId, ok, degraded, reason?, at }`; a disconnected Gateway returns no records and `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` (the Gateway-cron source serves its last list instead, with reason `stale_cache`, when it has one). A source whose system is not set up at all says so with reason `not_configured` (`SCHEDULE_SOURCE_NOT_CONFIGURED`), so a reader can tell "not in use" from "unreachable". The multiplexer also wraps every `read()` in its own `try/catch`, so even a source that breaks the contract becomes a degraded status entry rather than failing the merge:
 
 ```ts
 // CapabilityMultiplexer.read(): defensive on both ends

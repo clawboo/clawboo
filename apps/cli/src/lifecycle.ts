@@ -648,6 +648,24 @@ export function launchDirEnv(): NodeJS.ProcessEnv {
   }
 }
 
+/**
+ * Where Node keeps the server's compiled code between starts (`NODE_COMPILE_CACHE`),
+ * so a start after the first skips compiling the whole bundle again. That matters
+ * most on a host that stops the server when idle and starts it on demand. In the
+ * data folder rather than the system's temporary folder, which a restart of the
+ * computer may empty. A cache already named in the environment is kept; Node
+ * checks each entry against the file and its own version, so a stale one is
+ * simply rebuilt. Empty when the data folder cannot be resolved.
+ */
+export function compileCacheEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (env['NODE_COMPILE_CACHE']) return {}
+  try {
+    return { NODE_COMPILE_CACHE: path.join(resolveClawbooDir(env), 'cache', 'compile') }
+  } catch {
+    return {}
+  }
+}
+
 export type LaunchMode = 'bundled' | 'dev'
 
 export interface StartOptions {
@@ -722,6 +740,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
       env: {
         ...process.env,
         ...launchDirEnv(),
+        ...compileCacheEnv(),
         NODE_ENV: 'production',
         // The running clawboo version, so the server's self-version check
         // ("update available" chip, and this CLI's own discovery check on the
