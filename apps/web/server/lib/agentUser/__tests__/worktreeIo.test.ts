@@ -164,6 +164,26 @@ describe.runIf(posix)('the agent worktree io with isolation on', { timeout: 120_
     expect(local).toHaveBeenCalledTimes(1)
   })
 
+  it('runs git through the host on the repository at its folder, whatever GIT_DIR the server has', async () => {
+    const repo = path.join(work, 'repo')
+    fs.mkdirSync(repo)
+    git(repo, 'init', '-q', '-b', 'main')
+    const elsewhere = path.join(outside, 'elsewhere')
+    fs.mkdirSync(elsewhere)
+    git(elsewhere, 'init', '-q', '-b', 'main')
+    // A server started from a git hook inherits these.
+    vi.stubEnv('GIT_DIR', path.join(elsewhere, '.git'))
+    vi.stubEnv('GIT_WORK_TREE', elsewhere)
+    vi.stubEnv('GIT_INDEX_FILE', path.join(elsewhere, '.git', 'index'))
+
+    const gitDir = (await execGit(repo, ['rev-parse', '--absolute-git-dir'])).trim()
+    expect(fs.realpathSync(gitDir)).toBe(fs.realpathSync(path.join(repo, '.git')))
+    for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) {
+      expect(spawned.at(-1)!.env[name]).toBeUndefined()
+    }
+    expect(spawned.at(-1)!.env['GIT_TERMINAL_PROMPT']).toBe('0')
+  })
+
   it('a failed git through the host is a GitError carrying git stderr', async () => {
     const notRepo = path.join(work, 'plain')
     fs.mkdirSync(notRepo)

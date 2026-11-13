@@ -105,6 +105,24 @@ describe.runIf(posix)('agent host protocol', () => {
     expect(childEnvFor({ HOME: '/elsewhere' })['HOME']).toBe('/elsewhere')
   })
 
+  it('holds no stream of a process once it has closed', async () => {
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: ['-c', 'sleep 0.3'],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group: true,
+    })
+    await new Promise<void>((resolve) => p.once('spawn', () => resolve()))
+    // The server's buffers for it are full: the host holds both streams.
+    h.client.sendRaw({ t: 'pause', proc: p.id })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(h.host.heldStreams()).toBe(2)
+    await closed(p)
+    // No resume can find a closed process: nothing is kept for it.
+    expect(h.host.heldStreams()).toBe(0)
+  })
+
   it('stops a whole process group on killTree', async () => {
     const pidFile = path.join(dir, 'grandchild.pid')
     const p = h.client.spawn({
@@ -398,6 +416,34 @@ describe.runIf(posix)('agent host protocol', () => {
     }
   })
 
+  it('marks a sudo that no_new_privs stops from running as telling nothing', async () => {
+    const bin = path.join(dir, 'bin')
+    fs.mkdirSync(bin)
+    fs.writeFileSync(
+      path.join(bin, 'sudo'),
+      [
+        '#!/bin/sh',
+        'echo \'sudo: The "no new privileges" flag is set, which prevents sudo from running as root.\' >&2',
+        'exit 1',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`)
+    try {
+      const res = await h.client.request(
+        { op: 'privCheck', serverUser: 'alice' },
+        { timeoutMs: 60_000 },
+      )
+      const sudo = res.attempts.filter((a) => a.what.startsWith('sudo'))
+      expect(sudo.map((a) => a.what)).toEqual(['sudo', 'sudo -u alice', 'sudo -l'])
+      expect(sudo.every((a) => !a.succeeded && a.unchecked === true)).toBe(true)
+      expect(typeof res.noNewPrivs).toBe('boolean')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('counts a setgid file for a group the agent user is not in, whoever owns it', async () => {
     const tree = path.join(dir, 'tree')
     fs.mkdirSync(tree)
@@ -423,6 +469,41 @@ describe.runIf(posix)('agent host protocol', () => {
       })
       expect(res.privileged).toEqual([file])
     } finally {
+      gid.mockRestore()
+      groups.mockRestore()
+    }
+  })
+
+  it('searches a folder on another filesystem mounted in the tree', async () => {
+    const tree = path.join(dir, 'tree')
+    const mounted = path.join(tree, 'mounted')
+    fs.mkdirSync(mounted, { recursive: true })
+    const file = path.join(mounted, 'tool')
+    fs.writeFileSync(file, '#!/bin/sh\n')
+    fs.chownSync(file, process.getuid?.() ?? 0, process.getgid?.() ?? 0)
+    fs.chmodSync(file, 0o2755)
+    // `mounted` is another filesystem, as a mount point reads.
+    const lstat = fs.promises.lstat.bind(fs.promises)
+    const spy = vi.spyOn(fs.promises, 'lstat').mockImplementation((async (
+      p: fs.PathLike,
+      o?: fs.StatOptions,
+    ) => {
+      const st = await lstat(p, o as never)
+      if (String(p) !== mounted) return st
+      const other = Object.create(Object.getPrototypeOf(st)) as typeof st
+      return Object.assign(other, st, {
+        dev: typeof st.dev === 'bigint' ? st.dev + 1n : st.dev + 1,
+      })
+    }) as never)
+    // A host whose user is not in the file's group.
+    const ids = process as { getgid: () => number; getgroups: () => number[] }
+    const gid = vi.spyOn(ids, 'getgid').mockReturnValue(2_000_000_000)
+    const groups = vi.spyOn(ids, 'getgroups').mockReturnValue([])
+    try {
+      const res = await h.client.request({ op: 'inodes', root: tree, targets: [], maxEntries: 100 })
+      expect(res.privileged).toEqual([file])
+    } finally {
+      spy.mockRestore()
       gid.mockRestore()
       groups.mockRestore()
     }
