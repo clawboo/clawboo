@@ -31,7 +31,7 @@ import { createCodexAppServerDriver } from '../codexAppServerDriver'
 import { prepareCodexHome } from '../codexDriver'
 import { probeCodexAppServer } from '../codexModels'
 import { HermesGatewaySupervisor } from '../hermes/gateway'
-import { provisionProfile } from '../hermes/profiles'
+import { listClawbooProfiles, provisionProfile } from '../hermes/profiles'
 import { resolveHermesRunSettings } from '../hermes/runSettings'
 import { detectProvider, provisionHermesHome } from '../hermesHome'
 import { listNativeSkills } from '../hermesSkills'
@@ -408,6 +408,35 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
     expect(fs.readFileSync(path.join(pickedProfile.dir, 'auth.json'), 'utf8')).toBe(agentsAuth)
     const keyProfile = await profile('cb-on-key', null)
     expect(fs.existsSync(path.join(keyProfile.dir, 'auth.json'))).toBe(false)
+  })
+
+  it("lists the gateway's profiles, and an agent's old home, through the host", async () => {
+    const { ops } = await agentModeOn()
+    const gatewayHome = path.join(agentHome, 'runtimes', 'hermes', 'gateway')
+    const legacy = path.join(agentHome, 'runtimes', 'hermes', 'agent-1')
+    fs.mkdirSync(path.join(legacy, 'memories'), { recursive: true })
+    fs.writeFileSync(path.join(legacy, 'memories', 'MEMORY.md'), 'remember me')
+    const provision = (name: string, legacyHome: string | null) =>
+      provisionProfile({
+        gatewayHome,
+        profile: name,
+        legacyHome,
+        key: 'p'.repeat(64),
+        cwd: null,
+        providerEnv: {},
+        mcpServers: null,
+      })
+
+    ops.length = 0
+    const moved = await provision('cb-agent-1', legacy)
+    // The old home is the agent's: the server cannot read it, the host can.
+    expect(ops).toContain('fs.list')
+    expect(moved.migrated).toBe(true)
+    await provision('cb-agent-2', null)
+
+    ops.length = 0
+    expect(await listClawbooProfiles(gatewayHome)).toEqual(['cb-agent-1', 'cb-agent-2'])
+    expect(ops).toContain('fs.list')
   })
 
   it("reads the managed home's subscription login through the host", async () => {
