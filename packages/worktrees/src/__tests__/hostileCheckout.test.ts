@@ -221,6 +221,9 @@ describe('a fresh provision that keeps the branch commits', () => {
 describe('leaving the repository registrations alone', () => {
   /** Another checkout of the repository, whose folder is gone for now: a
    *  prune would drop its registration. */
+  /** A path as `git worktree list` prints it: forward slashes, even on Windows. */
+  const asGit = (p: string): string => p.split(path.sep).join('/')
+
   async function elsewhere(name: string): Promise<string> {
     const other = path.join(root, name)
     await git(repo, ['worktree', 'add', '-q', '-b', name, other])
@@ -240,7 +243,7 @@ describe('leaving the repository registrations alone', () => {
     const r = await gcWorktrees({ repoPath: repo, rootDir: wts, maxCount: 0, prune: false })
     expect(r.reaped).toEqual(['g1'])
     expect(existsSync(a.worktreePath)).toBe(false)
-    expect(await git(repo, ['worktree', 'list', '--porcelain'])).toContain(other)
+    expect(await git(repo, ['worktree', 'list', '--porcelain'])).toContain(asGit(other))
 
     const b = await provisionWorktree({
       repoPath: repo,
@@ -251,7 +254,7 @@ describe('leaving the repository registrations alone', () => {
     const another = await elsewhere('other-2')
     await pauseWorktree(repo, b, wts, { prune: false })
     const listed = await git(repo, ['worktree', 'list', '--porcelain'])
-    expect(listed).toContain(another)
-    expect(listed).not.toContain(b.worktreePath)
+    expect(listed).toContain(asGit(another))
+    expect(listed).not.toContain(asGit(b.worktreePath))
   })
 })
