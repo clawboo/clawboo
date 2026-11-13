@@ -79,8 +79,9 @@ export class RemoteAgentProcess extends EventEmitter {
   readonly stderr: PassThrough | null
   /** Set by the client when the process is done, so late frames are dropped. */
   closed = false
-  /** @internal The host was asked to hold this process's output. */
-  held = false
+  /** @internal Which of this process's streams are full. The host holds all
+   *  of its output while any one is, and is let go once every one has drained. */
+  readonly held = new Set<'out' | 'err'>()
   private readonly client: AgentHostClient
   private readonly group: boolean
 
@@ -491,16 +492,19 @@ export class AgentHostClient {
         switch (f['ev']) {
           case 'out':
           case 'err': {
-            const stream = f['ev'] === 'out' ? proc.stdout : proc.stderr
+            const which = f['ev']
+            const stream = which === 'out' ? proc.stdout : proc.stderr
             if (!stream || typeof f['data'] !== 'string') return
             // A full buffer here holds the child on the host, as a full pipe
-            // would: nothing is buffered without limit on either side.
-            if (!stream.write(Buffer.from(f['data'], 'base64')) && !proc.held) {
-              proc.held = true
-              this.sendRaw({ t: 'pause', proc: proc.id })
+            // would: nothing is buffered without limit on either side. The
+            // host holds both streams at once, so it is let go only when every
+            // stream that filled has drained.
+            if (!stream.write(Buffer.from(f['data'], 'base64')) && !proc.held.has(which)) {
+              if (proc.held.size === 0) this.sendRaw({ t: 'pause', proc: proc.id })
+              proc.held.add(which)
               stream.once('drain', () => {
-                proc.held = false
-                this.sendRaw({ t: 'resume', proc: proc.id })
+                proc.held.delete(which)
+                if (proc.held.size === 0) this.sendRaw({ t: 'resume', proc: proc.id })
               })
             }
             return
