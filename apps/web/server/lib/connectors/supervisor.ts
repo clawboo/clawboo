@@ -6,6 +6,8 @@
 // without an accompanying connectorId would run ungoverned, so the two travel
 // together or not at all.
 
+import type { ChildProcess } from 'node:child_process'
+
 import {
   connectHttpConnector,
   connectorChildEnv,
@@ -33,13 +35,14 @@ import {
 import { connectorInstanceIdForSlug } from '../capabilitySource/connectorIdentity'
 import {
   agentBrowserSession,
+  agentUserConnectorStart,
   closeAllAgentBrowsers,
   closeAllForConnector,
   noteCallEnd,
   noteCallStart,
   type AgentBrowserSpawn,
 } from './agentBrowsers'
-import { killProcessTreeByPid } from '../runtimes/killTree'
+import { killProcessTree, killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
@@ -115,6 +118,13 @@ export interface LiveConnector {
   toolsHash: string
   /** The resolved command this connector was started with, for the operator record. */
   display: string
+  /**
+   * The agent user's process, when the agent host started this connector (see
+   * `agentUserConnectorStart`). Stopped by this handle, because the server
+   * cannot signal another user's process by pid. Absent when the server started
+   * it, which is then tracked and stopped by pid.
+   */
+  agentProcess?: ChildProcess
 }
 
 /**
@@ -289,6 +299,15 @@ async function performConnect(
     throw new Error(`cannot find ${plan.command} on PATH. Is Node installed?`)
   }
 
+  // Resolved once, because it decides two things: what the child's environment
+  // carries, and (with agent isolation on) which user starts it. A connector
+  // holding a credential stays with the server; see `agentUserConnectorStart`.
+  const declared =
+    launch.transport === 'stdio'
+      ? resolveConnectorCredentials(def.slug, def.authInputs ?? [])
+      : null
+  const asAgent = declared ? agentUserConnectorStart('connector', declared) : null
+
   let session: ConnectorSession
   try {
     session =
@@ -304,26 +323,30 @@ async function performConnect(
             // and a port change must not read as the operator's spec having
             // drifted.
             args: [...plan.args, ...browserGuardArgs(def.slug, launch)],
-            // Recorded the moment the child exists, not once the handshake
-            // succeeds. A cold `npx` install can hold the handshake open for
-            // the better part of a minute, and a hard stop inside that window
-            // used to leave an orphan the boot reap could not see.
-            onSpawn: (spawned) => {
-              recordConnectorPid({
-                pid: spawned,
-                slug: def.slug,
-                startedAt: Date.now(),
-                command: plan.command,
-              })
-            },
+            ...(asAgent
+              ? // The agent host starts it, as the agent user, and the handle it
+                // returns is how it is tracked and stopped.
+                { spawn: asAgent.spawn }
+              : {
+                  // Recorded the moment the child exists, not once the handshake
+                  // succeeds. A cold `npx` install can hold the handshake open for
+                  // the better part of a minute, and a hard stop inside that window
+                  // used to leave an orphan the boot reap could not see.
+                  onSpawn: (spawned: number) => {
+                    recordConnectorPid({
+                      pid: spawned,
+                      slug: def.slug,
+                      startedAt: Date.now(),
+                      command: plan.command,
+                    })
+                  },
+                }),
             // The allowlist, never process.env. `declared` is the ONLY way a
             // credential reaches the child, and it comes from the vault rather
             // than the ambient environment. The plan adds only a known server's
             // usage-statistics and update-check opt-outs.
             env: {
-              ...connectorChildEnv({
-                declared: resolveConnectorCredentials(def.slug, def.authInputs ?? []),
-              }),
+              ...connectorChildEnv({ declared: declared ?? {} }),
               ...plan.env,
             },
           })
@@ -331,7 +354,10 @@ async function performConnect(
     // A handshake failure still SPAWNED something, for stdio. The transport's
     // own close reaps only the direct child, so without this the real server
     // survives a connect that reported failure.
-    if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
+    const started = asAgent?.process()
+    if (started) {
+      killProcessTree(started)
+    } else if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
       killProcessTreeByPid(err.pid)
       // The durable record was written as soon as the child spawned, so it has
       // to be dropped here or the boot reap would chase a pid this connect
@@ -343,20 +369,25 @@ async function performConnect(
   // Register BEFORE anything can fail: from here on, a throw must not leak a
   // process, and the transport's own close() reaps only the direct child.
   const pid = session.pid
-  registerConnectorPid(pid)
-  // The durable record is already written by `onSpawn` above, which fires
-  // before the handshake rather than after it. Re-recorded here only for a
-  // transport that never called it, so the record cannot depend on the poll
-  // having caught a very short-lived spawn.
-  if (typeof pid === 'number') {
-    recordConnectorPid({
-      pid,
-      slug: def.slug,
-      startedAt: Date.now(),
-      // The resolved binary, for the log. Identity is decided by boot and start
-      // time rather than by this.
-      command: plan.command,
-    })
+  // The agent user's process is already tracked, by handle, from the moment
+  // the hook started it; its pid means nothing to this server's own signals.
+  const agentProcess = asAgent?.process() ?? null
+  if (!asAgent) {
+    registerConnectorPid(pid)
+    // The durable record is already written by `onSpawn` above, which fires
+    // before the handshake rather than after it. Re-recorded here only for a
+    // transport that never called it, so the record cannot depend on the poll
+    // having caught a very short-lived spawn.
+    if (typeof pid === 'number') {
+      recordConnectorPid({
+        pid,
+        slug: def.slug,
+        startedAt: Date.now(),
+        // The resolved binary, for the log. Identity is decided by boot and start
+        // time rather than by this.
+        command: plan.command,
+      })
+    }
   }
 
   // EVERY EXIT PATH FROM HERE TO `live.set` HAS TO TEAR THE CHILD DOWN. In that
@@ -366,6 +397,10 @@ async function performConnect(
   // database writes that follow were not, and any of them can throw.
   const abandon = async (): Promise<void> => {
     await session.close().catch(() => {})
+    if (agentProcess) {
+      killProcessTree(agentProcess)
+      return
+    }
     if (typeof pid === 'number') {
       killProcessTreeByPid(pid)
       forgetConnectorPid(pid)
@@ -470,6 +505,7 @@ async function performConnect(
       specHash,
       toolsHash,
       display: plan.display,
+      ...(agentProcess ? { agentProcess } : {}),
     }
     // Persist a registry row per tool, attributed to its connector. Without one
     // `setToolEnabled` updates zero rows and `isToolEnabled` falls back to
@@ -539,8 +575,10 @@ async function performConnect(
     session.onClose(() => {
       if (live.get(connectorId) !== connector) return
       live.delete(connectorId)
-      unregisterConnectorPid(pid)
-      if (typeof pid === 'number') forgetConnectorPid(pid)
+      if (!agentProcess) {
+        unregisterConnectorPid(pid)
+        if (typeof pid === 'number') forgetConnectorPid(pid)
+      }
       markConnectorDown(db, connectorId, 'the connector process exited')
       announceChange()
     })
@@ -626,11 +664,16 @@ export async function disconnectConnector(connectorId: string, db?: ClawbooDb): 
   // close() signals only the DIRECT child, which for an `npx -y <pkg>` launch is
   // the wrapper. Without this the real server keeps running, and unregistering
   // the pid below would remove the last thing that could ever reap it.
-  if (typeof pid === 'number') {
-    killProcessTreeByPid(pid)
-    forgetConnectorPid(pid)
+  if (connector.agentProcess) {
+    // The agent user's process: the host stops its tree.
+    killProcessTree(connector.agentProcess)
+  } else {
+    if (typeof pid === 'number') {
+      killProcessTreeByPid(pid)
+      forgetConnectorPid(pid)
+    }
+    unregisterConnectorPid(pid)
   }
-  unregisterConnectorPid(pid)
   announceChange()
   return true
 }

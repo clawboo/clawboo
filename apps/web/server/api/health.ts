@@ -7,6 +7,7 @@
 
 import type { Request, Response } from 'express'
 
+import { agentIsolationStatus } from '../lib/agentUser/boot'
 import { getLastBootReport, runBootProbe, type BootReport } from '../lib/bootProbe'
 import { readApiPortFile } from '../lib/portUtils'
 import { redactObject } from '../lib/redact'
@@ -16,7 +17,12 @@ function serialize(report: BootReport): Record<string, unknown> {
   // Redact-on-display (consistent with obs/audit/tools): the boot-report check
   // details derive from err.message + resolved paths — a credential-shaped
   // substring that lands in one is masked, while the readable paths/config stay.
-  return redactObject({ ok: report.fatal.length === 0, ...report }) as Record<string, unknown>
+  // `agentIsolation`: null unless agents run as their own OS user.
+  return redactObject({
+    ok: report.fatal.length === 0,
+    ...report,
+    agentIsolation: agentIsolationStatus(),
+  }) as Record<string, unknown>
 }
 
 /** The actual listening port to match the api-port file against. The boot-time

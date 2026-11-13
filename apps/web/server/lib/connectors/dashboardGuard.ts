@@ -40,9 +40,12 @@
 // the server's origin guard refuses API calls under a Host it does not know.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
+
+import { isAgentUserMode } from '../agentUser/config'
 
 let dashboardPort: number | null = null
 let dashboardBindHost: string | null = null
@@ -157,7 +160,7 @@ function writeIfChanged(file: string, body: string): void {
   }
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, body)
+  fs.writeFileSync(tmp, body, { mode: 0o644 })
   fs.renameSync(tmp, file)
 }
 
@@ -183,9 +186,33 @@ function networkRuleArgs(
   if (spec.style === 'joined') return [`${spec.flag}=${chromeSwitch}`]
   // Outside the browser's working and output folders, so nothing the agent
   // saves through the browser can land on it, and rewritten when it differs.
-  const file = path.join(resolveClawbooDir(), 'browser-profiles', slug, 'guard.json')
+  const file = guardFileFor(slug)
   writeIfChanged(file, JSON.stringify({ browser: { launchOptions: { args: [chromeSwitch] } } }))
   return [spec.flag, file]
+}
+
+let agentReadableGuardDir: string | null = null
+
+/**
+ * Where a browser's guard file goes. In the data folder normally. With agents
+ * running as their own OS user the browser runs as that user, who cannot read
+ * the data folder and must not be able to change the file (it is what keeps the
+ * browser off the dashboard): so a folder of this server's own, made fresh with
+ * a random name under the shared temporary folder, that every user can read and
+ * only this server can write.
+ */
+function guardFileFor(slug: string): string {
+  if (!isAgentUserMode()) {
+    return path.join(resolveClawbooDir(), 'browser-profiles', slug, 'guard.json')
+  }
+  if (agentReadableGuardDir === null) {
+    const dir = fs.mkdtempSync(
+      path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'clawboo-guard-'),
+    )
+    fs.chmodSync(dir, 0o755)
+    agentReadableGuardDir = dir
+  }
+  return path.join(agentReadableGuardDir, `${slug.replace(/[^A-Za-z0-9_-]/g, '_')}.json`)
 }
 
 /** Every launch argument that keeps this browser off the dashboard and off

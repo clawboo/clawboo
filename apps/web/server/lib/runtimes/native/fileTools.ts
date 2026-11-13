@@ -8,6 +8,15 @@
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import {
+  agentList,
+  agentMkdir,
+  agentReadFile,
+  agentStat,
+  agentWriteFile,
+} from '../../agentUser/agentFs'
+import { isAgentUserMode } from '../../agentUser/config'
+
 export interface NativeToolOutcome {
   output: string
   isError: boolean
@@ -89,6 +98,91 @@ export async function resolveJailedOnDisk(cwd: string, rel: string): Promise<str
 
 const err = (message: string): NativeToolOutcome => ({ output: message, isError: true })
 
+const OUTSIDE = 'path must be a relative path inside the workspace'
+
+const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+// WITH AGENTS ON THEIR OWN OS USER (CLAWBOO_AGENT_USER) the run folder belongs to
+// that user, and the server never reads, writes or lists in it as itself: the
+// tools below ask the agent host, which runs as the agent user. The model loop
+// stays here; only the file access moves.
+//
+// The jail is the same lexical one (`resolveJailed`: relative, no way out of
+// the run folder by name). The on-disk half is not repeated: a link inside the
+// folder can only take the host where the agent user could go anyway, and the
+// server could not resolve real paths in a folder it cannot enter. The last
+// component is still never followed: a link there is refused, as it is locally.
+
+async function readInAgentSpace(cwd: string, rel: string): Promise<NativeToolOutcome> {
+  const target = resolveJailed(cwd, rel)
+  if (!target) return err(OUTSIDE)
+  try {
+    const info = await agentStat(target)
+    if (!info) return err(`ENOENT: no such file or directory, stat '${target}'`)
+    if (info.type === 'link') return err(OUTSIDE)
+    if (info.type !== 'file') return err('not a file')
+    // Enough bytes for READ_CAP_BYTES characters of any UTF-8 text (at most four
+    // bytes each), then cut by characters below as the local read is.
+    const buf = await agentReadFile(target, { maxBytes: READ_CAP_BYTES * 4 })
+    if (!buf) return err(`ENOENT: no such file or directory, open '${target}'`)
+    const body = buf.toString('utf8')
+    return body.length > READ_CAP_BYTES || buf.length < info.size
+      ? {
+          output: `${body.slice(0, READ_CAP_BYTES)}\n…[truncated at ${READ_CAP_BYTES} bytes]`,
+          isError: false,
+        }
+      : { output: body, isError: false }
+  } catch (e) {
+    return err(errorText(e))
+  }
+}
+
+async function writeInAgentSpace(
+  cwd: string,
+  rel: string,
+  content: string,
+): Promise<NativeToolOutcome> {
+  const target = resolveJailed(cwd, rel)
+  if (!target) return err(OUTSIDE)
+  try {
+    const existing = await agentStat(target)
+    if (existing?.type === 'link') return err(OUTSIDE)
+    if (existing && existing.type !== 'file') {
+      return err(`EISDIR: illegal operation on a directory, open '${target}'`)
+    }
+    // Only a missing folder is made: making one that exists would also reset
+    // its mode.
+    const dir = path.dirname(target)
+    if (!existing && !(await agentStat(dir))) await agentMkdir(dir)
+    // The write replaces the file with a new one, so carry the old one's mode
+    // over (an executable script stays executable).
+    await agentWriteFile(target, content, existing ? { mode: existing.mode & 0o777 } : {})
+    return { output: `wrote ${path.relative(cwd, target)}`, isError: false }
+  } catch (e) {
+    return err(errorText(e))
+  }
+}
+
+async function listInAgentSpace(cwd: string, rel: string): Promise<NativeToolOutcome> {
+  const target = resolveJailed(cwd, rel)
+  if (!target) return err(OUTSIDE)
+  try {
+    const info = await agentStat(target)
+    if (!info) return err(`ENOENT: no such file or directory, scandir '${target}'`)
+    if (info.type === 'link') return err(OUTSIDE)
+    if (info.type !== 'dir') return err(`ENOTDIR: not a directory, scandir '${target}'`)
+    const { entries, truncated } = await agentList(target)
+    const lines = entries
+      .map((e) => `${e.type === 'dir' ? 'dir ' : 'file'} ${e.name}`)
+      .sort()
+      .join('\n')
+    const more = truncated ? `\n…[only the first ${entries.length} entries]` : ''
+    return { output: (lines || '(empty)') + more, isError: false }
+  } catch (e) {
+    return err(errorText(e))
+  }
+}
+
 export function buildFileTools(cwd: string | null): NativeLocalTool[] {
   if (!cwd) return []
 
@@ -103,6 +197,7 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
         required: ['path'],
       },
       async run(args) {
+        if (isAgentUserMode()) return readInAgentSpace(cwd, String(args['path'] ?? ''))
         const target = await resolveJailedOnDisk(cwd, String(args['path'] ?? ''))
         if (!target) return err('path must be a relative path inside the workspace')
         try {
@@ -133,6 +228,9 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
         required: ['path', 'content'],
       },
       async run(args) {
+        if (isAgentUserMode()) {
+          return writeInAgentSpace(cwd, String(args['path'] ?? ''), String(args['content'] ?? ''))
+        }
         const target = await resolveJailedOnDisk(cwd, String(args['path'] ?? ''))
         if (!target) return err('path must be a relative path inside the workspace')
         try {
@@ -157,6 +255,7 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
       async run(args) {
         const rel =
           typeof args['path'] === 'string' && args['path'] ? (args['path'] as string) : '.'
+        if (isAgentUserMode()) return listInAgentSpace(cwd, rel)
         const target = await resolveJailedOnDisk(cwd, rel)
         if (!target) return err('path must be a relative path inside the workspace')
         try {

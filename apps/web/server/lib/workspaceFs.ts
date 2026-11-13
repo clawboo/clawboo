@@ -19,6 +19,19 @@
 //      is what stops it. Because the agent can change the tree between that
 //      check and the open, every file is opened through `openConfinedFile`,
 //      which re-checks the open from the handle's side.
+//
+// With agents on their own OS user (CLAWBOO_AGENT_USER), the checkout and the
+// team folder are that user's. The server cannot see into them, and must not
+// open a file there as itself anyway: a link the agent planted would choose
+// what the server reads. So every stat, listing and read goes to the agent
+// host, and git runs there as the agent user. The rules above still hold,
+// computed here from the path's text, since the server cannot resolve links in
+// folders it cannot see: the path is confined to the stored root lexically,
+// and the host is asked about the root and each component below it, so a link
+// anywhere on the way is refused as it is with the setting off. The host is on
+// the agent's side, so its replies are data: bounded in size, and an error
+// when they have the wrong shape. The boundary itself is the agent user's
+// permissions: whatever the host reads, it reads as that user.
 
 import { constants as fsConstants, existsSync } from 'node:fs'
 import { lstat, open, readdir, readlink, realpath, type FileHandle } from 'node:fs/promises'
@@ -26,9 +39,14 @@ import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
 import { agents, getWorkspaceForTask, type DbWorkspace } from '@clawboo/db'
-import { execGit, GitError, loadWorktree } from '@clawboo/worktrees'
+import { branchNameForTask, execGit, GitError, loadWorktree } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { agentList, agentReadFile, agentStat } from './agentUser/agentFs'
+import { AgentHostError } from './agentUser/client'
+import { isAgentUserMode } from './agentUser/config'
+import { AGENT_GIT_OUTPUT_CHARS, MirrorError, runAgentGit } from './agentUser/mirror'
+import { MAX_READ_BYTES, type FsEntry, type FsStat } from './agentUser/protocol'
 import { getDb } from './db'
 import { taskRunWorkdirFor } from './runtimes/teamWorkdir'
 
@@ -109,6 +127,7 @@ export async function resolveWorkspaceRelPath(
       "A path may not contain '..'. Only files inside the workspace are reachable.",
     )
   }
+  if (isAgentUserMode()) return resolveInAgentSpace(root, wanted, mustExist)
 
   // The root must exist and resolve; a reaped worktree surfaces here.
   const realRoot = await realpath(root)
@@ -142,6 +161,261 @@ export async function resolveWorkspaceRelPath(
   return { abs: real, realRoot }
 }
 
+// ─── Agent space: the same rules, through the agent host ─────────────────────
+
+const STAT_TYPES: ReadonlySet<unknown> = new Set<FsStat['type']>(['file', 'dir', 'link', 'other'])
+
+function isCount(n: unknown): n is number {
+  return typeof n === 'number' && Number.isSafeInteger(n) && n >= 0
+}
+
+function isFsStat(v: unknown): v is FsStat {
+  if (typeof v !== 'object' || v === null) return false
+  const s = v as Record<string, unknown>
+  return STAT_TYPES.has(s['type']) && isCount(s['size']) && isCount(s['nlink'])
+}
+
+function isListEntry(v: unknown): v is FsEntry {
+  if (typeof v !== 'object' || v === null) return false
+  const e = v as Record<string, unknown>
+  const name = e['name']
+  return (
+    typeof name === 'string' &&
+    name.length > 0 &&
+    name.length <= MAX_REL_PATH &&
+    name !== '.' &&
+    name !== '..' &&
+    !name.includes('/') &&
+    !name.includes('\0') &&
+    STAT_TYPES.has(e['type']) &&
+    isCount(e['size'])
+  )
+}
+
+/**
+ * What is at `p` in agent space, asked of the host without following a link
+ * there. Null when nothing is, or when something on the way is not a folder.
+ * A reply of the wrong shape is an error, never a guess.
+ */
+export async function statInAgentSpace(p: string): Promise<FsStat | null> {
+  let st: unknown
+  try {
+    st = await agentStat(p)
+  } catch (err) {
+    if (err instanceof AgentHostError && err.code === 'ENOTDIR') return null
+    throw err
+  }
+  if (st === null) return null
+  if (!isFsStat(st)) throw new AgentHostError('the agent host sent a malformed stat')
+  return st
+}
+
+/**
+ * Whether a checkout or team folder is on disk. With agent isolation on it is
+ * the agent user's, which the server cannot see into (`existsSync` answers
+ * false for every one), so the host is asked. A link where the folder should
+ * be does not count.
+ */
+export async function folderOnDiskInAgentSpace(dir: string): Promise<boolean> {
+  return (await statInAgentSpace(dir))?.type === 'dir'
+}
+
+/** A missing root fails the way `realpath` fails on one with the setting off. */
+function missingError(p: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`ENOENT: no such file or directory, '${p}'`), { code: 'ENOENT' })
+}
+
+/**
+ * `resolveWorkspaceRelPath` with agent isolation on, for a `wanted` that has
+ * passed the lexical checks. Containment is by the path's text, against the
+ * root as stored. The host is then asked about the root and each component
+ * below it, in order, which is how a link anywhere on the way is refused here:
+ * `realpath`, which refuses one with the setting off, would run as the server.
+ */
+async function resolveInAgentSpace(
+  root: string,
+  wanted: string,
+  mustExist: boolean,
+): Promise<ResolvedWorkspacePath> {
+  const lexRoot = path.resolve(root)
+  const abs = path.resolve(lexRoot, wanted)
+  const rootPrefix = rootPrefixOf(lexRoot)
+  if (abs !== lexRoot) {
+    if (!abs.startsWith(rootPrefix)) {
+      throw new WorkspacePathError('The path escapes the workspace.')
+    }
+  }
+  // The host makes these folders as real folders. A link at the root is the
+  // agent's doing, and following it would serve some other folder as this one.
+  const rootStat = await statInAgentSpace(lexRoot)
+  if (rootStat === null) throw missingError(lexRoot)
+  if (rootStat.type === 'link') throw new WorkspacePathError('Symbolic links are not served.')
+  if (rootStat.type !== 'dir') throw new WorkspacePathError('Not a directory.')
+
+  let at = lexRoot
+  const segments = abs === lexRoot ? [] : abs.slice(rootPrefix.length).split(path.sep)
+  for (const segment of segments) {
+    at = path.join(at, segment)
+    const st = await statInAgentSpace(at)
+    if (st === null) {
+      if (mustExist) throw new WorkspacePathError('No such file in the workspace.')
+      return { abs, realRoot: lexRoot }
+    }
+    if (st.type === 'link') throw new WorkspacePathError('Symbolic links are not served.')
+  }
+  return { abs, realRoot: lexRoot }
+}
+
+/** What `readConfinedInAgentSpace` read. */
+export interface AgentSpaceRead {
+  data: Buffer
+  /** The file held more than was asked for. */
+  more: boolean
+  /** The file's size, as the host reported it just before the read. */
+  size: number
+}
+
+/** A host refusal, in the words the server uses for the same refusal. */
+function refusalOf(err: unknown): unknown {
+  if (!(err instanceof AgentHostError)) return err
+  // ELOOP on Linux and macOS, EMLINK on FreeBSD: the host's O_NOFOLLOW open
+  // met a link as the last component.
+  if (err.code === 'ELOOP' || err.code === 'EMLINK') {
+    return new WorkspacePathError('Symbolic links are not served.')
+  }
+  if (err.code === 'ENOTFILE' || err.code === 'EISDIR') return new WorkspacePathError('Not a file.')
+  return err
+}
+
+/**
+ * Read a file that `resolveWorkspaceRelPath` confined, at most `maxBytes` (and
+ * never more than one host read carries), with agent isolation on. The
+ * counterpart of `openConfinedFile`, which opens as the server: here the host
+ * opens the file as the agent user with O_NOFOLLOW, so a link swapped in after
+ * the checks is refused there, and could only ever reach what the agent can
+ * read already. Throws `WorkspacePathError` for a link, anything but a regular
+ * file, or a hard-linked file, and an error with code ENOENT for a file that
+ * went away, as an open by the server would.
+ */
+export async function readConfinedInAgentSpace(
+  realRoot: string,
+  abs: string,
+  maxBytes: number,
+): Promise<AgentSpaceRead> {
+  const sinkPrefix = rootPrefixOf(realRoot)
+  if (!abs.startsWith(sinkPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  const st = await statInAgentSpace(abs)
+  if (st === null) throw missingError(abs)
+  if (st.type === 'link') throw new WorkspacePathError('Symbolic links are not served.')
+  if (st.type !== 'file') throw new WorkspacePathError('Not a file.')
+  // As with the setting off: a checkout never makes a hard link, and one would
+  // name a file from elsewhere under a path inside the tree.
+  if (st.nlink > 1) throw new WorkspacePathError('Hard-linked files are not served.')
+
+  const cap = Math.max(0, Math.min(maxBytes, MAX_READ_BYTES))
+  try {
+    // One byte past the cap says whether more was there, where a read can carry it.
+    const first = await agentReadFile(abs, { maxBytes: cap + 1 })
+    if (first === null) throw missingError(abs)
+    if (first.length > cap) return { data: first.subarray(0, cap), more: true, size: st.size }
+    if (first.length < cap || cap + 1 <= MAX_READ_BYTES) {
+      return { data: first, more: false, size: st.size }
+    }
+    // The cap is all one read carries: ask for the byte after it on its own.
+    const next = await agentReadFile(abs, { maxBytes: 1, offset: cap })
+    return { data: first, more: next !== null && next.length > 0, size: st.size }
+  } catch (err) {
+    throw refusalOf(err)
+  }
+}
+
+/**
+ * The most names one listing asks the host for. With the setting off every
+ * name is read; through the host a listing is one bounded reply, so past this
+ * many names the page is drawn from the first ones by name and says it is cut.
+ */
+const AGENT_LIST_MAX = 10_000
+
+const byEntryName = (a: WorkspaceDirEntry, b: WorkspaceDirEntry): number =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+
+/** `listDirAt` past the resolve, with agent isolation on. */
+async function listInAgentSpace(
+  abs: string,
+  relDir: string,
+  maxEntries: number,
+): Promise<WorkspaceDirListing> {
+  const st = await statInAgentSpace(abs)
+  if (st === null) throw missingError(abs)
+  if (st.type !== 'dir') throw new WorkspacePathError('Not a directory.')
+
+  const listed = await agentList(abs, { max: AGENT_LIST_MAX })
+  const dirs: WorkspaceDirEntry[] = []
+  const files: WorkspaceDirEntry[] = []
+  for (const entry of listed.entries as unknown[]) {
+    if (!isListEntry(entry)) throw new AgentHostError('the agent host sent a malformed listing')
+    if (entry.name === '.git') continue
+    // The host lists without following links, so a link is typed `link` and,
+    // like sockets and FIFOs, is not listed.
+    if (entry.type === 'dir') dirs.push({ name: entry.name, kind: 'dir' })
+    else if (entry.type === 'file') files.push({ name: entry.name, kind: 'file', size: entry.size })
+  }
+  dirs.sort(byEntryName)
+  files.sort(byEntryName)
+  const all = [...dirs, ...files]
+  return {
+    dir: relDir,
+    entries: all.slice(0, maxEntries),
+    truncated: listed.truncated || all.length > maxEntries,
+  }
+}
+
+/** `execGit`'s own limit, kept for git run as the agent user. */
+const AGENT_GIT_TIMEOUT_MS = 60_000
+
+const SHA_RE = /^[0-9a-f]{40}([0-9a-f]{24})?$/
+
+/**
+ * git in a task checkout. With agent isolation on the checkout is the agent
+ * user's, and git there (its hooks, its config) runs as that user, through the
+ * host. Rejects with `GitError` or `MirrorError`.
+ */
+function gitInCheckout(root: string, args: string[]): Promise<string> {
+  if (!isAgentUserMode()) return execGit(root, args)
+  return runAgentGit(args, { cwd: root, timeoutMs: AGENT_GIT_TIMEOUT_MS })
+}
+
+/**
+ * The task's scaffold commit, with agent isolation on: the question
+ * `loadWorktree` asks the user's repository, asked of the checkout as the agent
+ * user instead, because the task branch lives in the agent's own copy of the
+ * repository until it is brought out. Null when git cannot answer.
+ */
+async function scaffoldCommitInAgentSpace(root: string, taskId: string): Promise<string | null> {
+  let out: string
+  try {
+    out = await runAgentGit(
+      [
+        'log',
+        '--format=%H',
+        '--grep',
+        `clawboo: scaffold task ${taskId}`,
+        '-n',
+        '1',
+        branchNameForTask(taskId),
+      ],
+      { cwd: root, timeoutMs: AGENT_GIT_TIMEOUT_MS },
+    )
+  } catch (err) {
+    if (err instanceof MirrorError) return null
+    throw err
+  }
+  const sha = out.trim().split('\n')[0] ?? ''
+  return SHA_RE.test(sha) ? sha : null
+}
+
 /** An open, confined regular file. The caller owns `handle` and closes it. */
 export interface ConfinedFile {
   handle: FileHandle
@@ -173,6 +447,14 @@ export interface ConfinedFile {
  *      can still race it.
  */
 export async function openConfinedFile(realRoot: string, abs: string): Promise<ConfinedFile> {
+  // This opens as the server. With agent isolation on, a caller reads through
+  // `readConfinedInAgentSpace`; one that forgets fails here instead of quietly
+  // opening a file in the agent user's folders as the server.
+  if (isAgentUserMode()) {
+    throw new Error(
+      'openConfinedFile opens files as the server; with agent isolation on, use readConfinedInAgentSpace',
+    )
+  }
   const sinkPrefix = rootPrefixOf(realRoot)
   if (!abs.startsWith(sinkPrefix)) {
     throw new WorkspacePathError('The path escapes the workspace.')
@@ -262,6 +544,7 @@ export async function listDirAt(
       throw new WorkspacePathError('The path escapes the workspace.')
     }
   }
+  if (isAgentUserMode()) return listInAgentSpace(abs, relDir, maxEntries)
   const st = await lstat(abs)
   if (!st.isDirectory()) throw new WorkspacePathError('Not a directory.')
 
@@ -275,10 +558,8 @@ export async function listDirAt(
     else if (d.isFile()) files.push({ name: d.name, kind: 'file' })
     // Sockets, FIFOs and the like are not listed.
   }
-  const byName = (a: WorkspaceDirEntry, b: WorkspaceDirEntry) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-  dirs.sort(byName)
-  files.sort(byName)
+  dirs.sort(byEntryName)
+  files.sort(byEntryName)
   const all = [...dirs, ...files]
   const page = all.slice(0, maxEntries)
   // Size the SURVIVORS only, concurrently. Statting every entry first meant a
@@ -319,6 +600,24 @@ export async function readFileAt(
   if (abs !== realRoot) {
     if (!abs.startsWith(sinkPrefix)) {
       throw new WorkspacePathError('The path escapes the workspace.')
+    }
+  }
+  if (isAgentUserMode()) {
+    // Enough for the binary sniff and for what is shown; `more` says whether
+    // the file went on past it.
+    const read = await readConfinedInAgentSpace(
+      realRoot,
+      abs,
+      Math.max(maxBytes, BINARY_SNIFF_BYTES),
+    )
+    if (read.data.subarray(0, BINARY_SNIFF_BYTES).includes(0)) {
+      return { binary: true, size: read.size }
+    }
+    return {
+      binary: false,
+      size: read.size,
+      content: decodeUtf8(read.data.subarray(0, maxBytes)),
+      truncated: read.more || read.data.length > maxBytes,
     }
   }
   const st = await lstat(abs)
@@ -426,6 +725,10 @@ export type WorkspaceRootResult =
 export async function resolveWorkspaceRoot(taskId: string): Promise<WorkspaceRootResult> {
   const ws = getWorkspaceForTask(getDb(), taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
+  if (isAgentUserMode()) {
+    if (!(await folderOnDiskInAgentSpace(ws.worktreePath))) return { ok: false, reason: 'gone' }
+    return { ok: true, root: ws.worktreePath, workspace: ws }
+  }
   try {
     await realpath(ws.worktreePath)
   } catch {
@@ -466,13 +769,28 @@ export async function workspaceGitStatus(
   // list would paint a dirty worktree as clean.
   let raw: string
   try {
-    raw = await execGit(rootRes.root, ['status', '--porcelain', '-z', '--untracked-files=all'])
+    raw = await gitInCheckout(rootRes.root, [
+      'status',
+      '--porcelain',
+      '-z',
+      '--untracked-files=all',
+    ])
   } catch (err) {
-    if (err instanceof GitError) return { ok: false, reason: 'unreadable' }
+    if (err instanceof GitError || err instanceof MirrorError) {
+      return { ok: false, reason: 'unreadable' }
+    }
     throw err
   }
-  const status = parsePorcelainStatus(raw)
-  return { ok: true, branch: rootRes.workspace.branch ?? null, ...status }
+  // `runAgentGit` may have cut its output mid-record: keep whole records only,
+  // and say the list is cut.
+  const cut = isAgentUserMode() && raw.length >= AGENT_GIT_OUTPUT_CHARS
+  const status = parsePorcelainStatus(cut ? raw.slice(0, raw.lastIndexOf('\0') + 1) : raw)
+  return {
+    ok: true,
+    branch: rootRes.workspace.branch ?? null,
+    ...status,
+    truncated: status.truncated || cut,
+  }
 }
 
 export async function workspaceFileDiff(
@@ -499,34 +817,50 @@ export async function workspaceFileDiff(
   // file, under a response that echoes the requested path. The sibling readers
   // (listDirAt / readFileAt) both assert their target type; this one must too.
   try {
-    if ((await lstat(abs)).isDirectory()) {
+    const isDir = isAgentUserMode()
+      ? (await statInAgentSpace(abs))?.type === 'dir'
+      : (await lstat(abs)).isDirectory()
+    if (isDir) {
       throw new WorkspacePathError('Not a file.')
     }
   } catch (err) {
     // A missing path is the legitimate deleted-file case; anything else rethrows.
     if (err instanceof WorkspacePathError) throw err
   }
-  // Only the baseline commit is taken from loadWorktree; reads use the stored
-  // worktree path. findScaffoldCommit does not depend on the worktree root.
-  const wt = await loadWorktree({
-    repoPath: rootRes.workspace.repoPath,
-    taskId,
-  })
+  let baseCommit: string
+  if (isAgentUserMode()) {
+    const found = await scaffoldCommitInAgentSpace(rootRes.root, taskId)
+    if (found === null) return { ok: false, reason: 'unreadable' }
+    baseCommit = found
+  } else {
+    // Only the baseline commit is taken from loadWorktree; reads use the stored
+    // worktree path. findScaffoldCommit does not depend on the worktree root.
+    const wt = await loadWorktree({
+      repoPath: rootRes.workspace.repoPath,
+      taskId,
+    })
+    baseCommit = wt.baseCommit
+  }
   // :(literal) keeps a filename carrying glob characters from acting as a
   // pathspec pattern. The TRIMMED path is what was validated, so it is what git
   // gets.
   let diff: string
   try {
-    diff = await execGit(rootRes.root, ['diff', wt.baseCommit, '--', `:(literal)${wanted}`])
+    diff = await gitInCheckout(rootRes.root, ['diff', baseCommit, '--', `:(literal)${wanted}`])
   } catch (err) {
-    if (err instanceof GitError) return { ok: false, reason: 'unreadable' }
+    if (err instanceof GitError || err instanceof MirrorError) {
+      return { ok: false, reason: 'unreadable' }
+    }
     throw err
   }
   // Cap on BYTES, cut on a codepoint boundary: slicing the string by
   // MAX_DIFF_BYTES cuts UTF-16 code units, which overshoots the byte budget on
-  // non-ASCII diffs and can split a surrogate pair.
+  // non-ASCII diffs and can split a surrogate pair. Through the host the diff
+  // may also have been cut by `runAgentGit` itself.
   const bytes = Buffer.from(diff, 'utf8')
-  const truncated = bytes.byteLength > MAX_DIFF_BYTES
+  const truncated =
+    bytes.byteLength > MAX_DIFF_BYTES ||
+    (isAgentUserMode() && diff.length >= AGENT_GIT_OUTPUT_CHARS)
   return {
     ok: true,
     path: wanted,
@@ -565,6 +899,10 @@ async function resolveTeamFolderRoot(
 ): Promise<{ ok: true; root: string } | { ok: false; reason: WorkspaceMissReason }> {
   const folder = agentTeamFolder(agentId)
   if (!folder) return { ok: false, reason: 'not_found' }
+  if (isAgentUserMode()) {
+    if (!(await folderOnDiskInAgentSpace(folder.path))) return { ok: false, reason: 'gone' }
+    return { ok: true, root: folder.path }
+  }
   try {
     await realpath(folder.path)
   } catch {

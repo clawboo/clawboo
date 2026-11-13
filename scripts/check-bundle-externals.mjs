@@ -38,14 +38,15 @@ const REPO_ROOT = path.resolve(__dirname, '..')
  * and never `require` anything).
  *
  * Derived from the manifest's own `bin` map plus `dist/server.js` (forked by the
- * launcher, so not a bin), unioned with anything else under `dist/bin/`. Reading
+ * launcher, so not a bin) and `dist/agent-host.js` (started by the server as
+ * the agent user, so it must need nothing beyond Node), unioned with anything else under `dist/bin/`. Reading
  * `bin` means a newly published entry point is covered the day it is added, and
  * a `bin` target the tarball forgot shows up here as a missing file.
  */
 async function bundleEntryPoints(packageDir, pkg) {
   const bin = pkg.bin ?? {}
   const declared = typeof bin === 'string' ? [bin] : Object.values(bin)
-  const rels = new Set([...declared, 'dist/server.js'])
+  const rels = new Set([...declared, 'dist/server.js', 'dist/agent-host.js'])
   try {
     for (const file of await fs.readdir(path.join(packageDir, 'dist', 'bin'))) {
       if (file.endsWith('.js')) rels.add(`dist/bin/${file}`)

@@ -284,6 +284,28 @@ function markLentValuesStale(): void {
 
 registerKnownSecretSource(savedSecretValues)
 
+/**
+ * Every value that must never be visible to another OS user: each saved key,
+ * and the vault's master key (from the environment or its file). For the agent
+ * isolation startup check, which looks for these in what the agent user can see
+ * of this process. Never creates a master key.
+ */
+export function secretValuesForExposureCheck(): string[] {
+  const out = new Set<string>(savedSecretValues())
+  const fromEnv = process.env['CLAWBOO_SECRETS_MASTER_KEY']?.trim()
+  if (fromEnv) out.add(fromEnv)
+  try {
+    const keyPath = masterKeyPath()
+    if (existsSync(keyPath)) {
+      const fromFile = readFileSync(keyPath, 'utf8').trim()
+      if (fromFile) out.add(fromFile)
+    }
+  } catch {
+    /* unreadable: nothing to look for */
+  }
+  return [...out]
+}
+
 /** Encrypt + persist a runtime secret keyed by its env-var name. */
 export function setRuntimeSecret(name: string, value: string): void {
   const masterKey = loadOrCreateMasterKey()

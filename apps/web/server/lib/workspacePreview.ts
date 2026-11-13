@@ -17,16 +17,25 @@
 // a 256 KB ceiling and a binary sniff that refuses anything with a NUL in its
 // first 8 KB — and a preview is mostly images, fonts and bundles. So this reads
 // raw bytes under its own, larger ceiling.
+//
+// With agents on their own OS user (CLAWBOO_AGENT_USER) the server never opens
+// the file: the agent host reads it as the agent user, never through a link at
+// its end, and the server sends the bytes it got. Opened by the server, a link
+// the agent planted would have the server read the vault key for it and serve
+// it into the dashboard.
 
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 
+import { isAgentUserMode } from './agentUser/config'
 import {
   openConfinedFile,
   type ConfinedFile,
+  readConfinedInAgentSpace,
   resolveWorkspaceRelPath,
   resolveWorkspaceRoot,
+  statInAgentSpace,
   WorkspacePathError,
 } from './workspaceFs'
 
@@ -92,6 +101,24 @@ export function previewContentType(relPath: string): string {
   return CONTENT_TYPES[path.extname(relPath).toLowerCase()] ?? 'application/octet-stream'
 }
 
+/** What `resolvePreviewFile` needs to know about a confined path. */
+interface PreviewStat {
+  isDirectory: boolean
+  isFile: boolean
+  size: number
+}
+
+async function previewStat(abs: string): Promise<PreviewStat> {
+  if (isAgentUserMode()) {
+    // The checkout is the agent user's: the host looks, without following a
+    // link. Nothing there (it went away since the resolve) is "not a file".
+    const st = await statInAgentSpace(abs)
+    return { isDirectory: st?.type === 'dir', isFile: st?.type === 'file', size: st?.size ?? 0 }
+  }
+  const st = await stat(abs)
+  return { isDirectory: st.isDirectory(), isFile: st.isFile(), size: st.size }
+}
+
 export type PreviewResolution =
   | {
       ok: true
@@ -137,10 +164,10 @@ export async function resolvePreviewFile(
     throw err
   }
 
-  let st = await stat(abs)
+  let st = await previewStat(abs)
   let served = wanted
   let isIndex = false
-  if (st.isDirectory()) {
+  if (st.isDirectory) {
     isIndex = true
     // Re-resolve through the same guard rather than joining, so the index is
     // confined on exactly the terms every other path is.
@@ -150,10 +177,10 @@ export async function resolvePreviewFile(
     } catch {
       return { ok: false, status: 404, error: 'No index.html in that directory.' }
     }
-    st = await stat(abs)
+    st = await previewStat(abs)
     served = indexRel
   }
-  if (!st.isFile()) return { ok: false, status: 404, error: 'Not a file.' }
+  if (!st.isFile) return { ok: false, status: 404, error: 'Not a file.' }
   if (st.size > MAX_PREVIEW_BYTES) {
     return { ok: false, status: 413, error: 'That file is too large to preview.' }
   }
@@ -177,6 +204,16 @@ export type PreviewStream =
     }
   | { ok: false; status: 400 | 404 | 413; error: string }
 
+/** The answer for a preview file that could not be opened, or null to rethrow. */
+function openRefusal(err: unknown): Extract<PreviewStream, { ok: false }> | null {
+  if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
+  const code = (err as NodeJS.ErrnoException).code
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    return { ok: false, status: 404, error: 'No such file in the workspace.' }
+  }
+  return null
+}
+
 /**
  * Open a resolved preview file and stream it, or say what to answer instead.
  * Streamed rather than buffered so a large asset never sits in this process's
@@ -192,19 +229,20 @@ export type PreviewStream =
  * A file that went away answers 404. Any other failure to open it (no
  * permission, no file descriptors left) is thrown, for the route to answer
  * 500 with the error rather than call an existing file missing.
+ *
+ * With agent isolation on, the host reads the file instead (see the header),
+ * and the stream yields the bytes it read.
  */
 export async function openPreviewStream(
   file: Pick<Extract<PreviewResolution, { ok: true }>, 'absPath' | 'realRoot'>,
 ): Promise<PreviewStream> {
+  if (isAgentUserMode()) return readPreviewInAgentSpace(file)
   let opened: ConfinedFile
   try {
     opened = await openConfinedFile(file.realRoot, file.absPath)
   } catch (err) {
-    if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT' || code === 'ENOTDIR') {
-      return { ok: false, status: 404, error: 'No such file in the workspace.' }
-    }
+    const refused = openRefusal(err)
+    if (refused) return refused
     throw err
   }
   const { handle, size } = opened
@@ -218,4 +256,27 @@ export async function openPreviewStream(
   }
   // autoClose (the default) closes the handle when the stream ends or fails.
   return { ok: true, stream: handle.createReadStream({ start: 0, end: size - 1 }), size }
+}
+
+/**
+ * `openPreviewStream` with agent isolation on. One host read carries the whole
+ * file, held in memory rather than streamed from a handle: the server has no
+ * handle on the agent user's files. The ceiling keeps it to 8 MB, and a file
+ * that grew past it since the resolve answers 413 like one that was already
+ * past it.
+ */
+async function readPreviewInAgentSpace(
+  file: Pick<Extract<PreviewResolution, { ok: true }>, 'absPath' | 'realRoot'>,
+): Promise<PreviewStream> {
+  let data: Buffer
+  try {
+    const read = await readConfinedInAgentSpace(file.realRoot, file.absPath, MAX_PREVIEW_BYTES)
+    if (read.more) return { ok: false, status: 413, error: 'That file is too large to preview.' }
+    data = read.data
+  } catch (err) {
+    const refused = openRefusal(err)
+    if (refused) return refused
+    throw err
+  }
+  return { ok: true, stream: Readable.from(data.length > 0 ? [data] : []), size: data.length }
 }
