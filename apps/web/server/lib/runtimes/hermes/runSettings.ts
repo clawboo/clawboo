@@ -100,9 +100,11 @@ export async function resolveHermesRunSettings(
   // neither the agents' own sign-in nor a provider key fails here, saying why,
   // rather than on Hermes's own missing-credential error.
   if (agentMode && !(await codexUsable())) {
+    // Hermes reads a Gemini key from the environment too, and `auto` picks it.
     const anyKey =
       Object.keys(ctx.apiKeyEnv ?? {}).length > 0 ||
-      Object.values(PICK_PROVIDER_ENV).some((name) => Boolean(process.env[name]))
+      Object.values(PICK_PROVIDER_ENV).some((name) => Boolean(process.env[name])) ||
+      Boolean(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'])
     const wantsSubscription =
       requested === 'openai-codex' || configured === 'openai-codex' || (!provider && !configured)
     if (!anyKey && wantsSubscription) throw new Error(HERMES_AGENT_SIGN_IN_MESSAGE)
