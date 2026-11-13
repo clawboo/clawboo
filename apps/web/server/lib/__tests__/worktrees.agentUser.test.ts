@@ -745,6 +745,30 @@ describe.runIf(posix)('task checkouts under agent isolation', { timeout: 120_000
     expect(git(repo, 'rev-parse', branch)).toBe(later)
   })
 
+  it("an empty completion keeps a user commit that the agent's checkout reverted", async () => {
+    const taskId = newTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(prov.reason)
+    const { branch } = prov.worktree
+    await actOnTaskWorkspace(taskId, 'pause')
+    // The user commits on top of the exported branch, and resume carries it in.
+    git(repo, 'checkout', '-q', branch)
+    fs.writeFileSync(path.join(repo, 'theirs.txt'), 'theirs\n')
+    git(repo, 'add', '.')
+    git(repo, 'commit', '-q', '-m', 'theirs')
+    git(repo, 'checkout', '-q', 'main')
+    const theirs = git(repo, 'rev-parse', branch)
+    const resumed = await resumeTaskWorkspace(taskId, { repoPath: repo })
+    if (!resumed.ok) throw new Error('resume failed')
+    expect(git(mirrorPathFor(repo), 'rev-parse', branch)).toBe(theirs)
+    // The agent's checkout drops the file, so the task has nothing to land.
+    fs.rmSync(path.join(resumed.worktree.worktreePath, 'theirs.txt'))
+
+    const done = await actOnTaskWorkspace(taskId, 'complete')
+    expect(done.ok && done.action === 'complete' && done.complete.cleaned).toBe(true)
+    expect(git(repo, 'rev-parse', branch)).toBe(theirs)
+  })
+
   it('resume never runs git as the server in a checkout the mirror names outside the work folder', async () => {
     const taskId = newTask()
     const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
