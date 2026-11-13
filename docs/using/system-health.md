@@ -37,17 +37,17 @@ A failed check never stops Clawboo. The server keeps running, so you can read th
 
 The checks run in this order. Three of them are fatal when they fail, because nothing works without them; the rest are degraded.
 
-| Check                         | What it checks                                                                                                                                                | When it fails |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| **Clawboo home writable**     | Clawboo can create and write its folder, `~/.clawboo` (or the folder `CLAWBOO_HOME` names)                                                                    | Fatal         |
-| **Secrets vault permissions** | Only your user account can read the key vault's folder, its master key, and the key Clawboo uses to identify itself to the OpenClaw Gateway (macOS and Linux) | Degraded      |
-| **Master key**                | The vault's master key can still decrypt what it encrypted                                                                                                    | Degraded      |
-| **Database integrity**        | The database opens and passes SQLite's integrity check: the quick check at start, the full check on **Re-run probe**                                          | Fatal         |
-| **Database schema**           | Every table and column Clawboo needs is in the database                                                                                                       | Fatal         |
-| **API port file**             | The port file names the port this server listens on                                                                                                           | Degraded      |
-| **MCP servers**               | Clawboo's four tool servers start and answer: tasks (the board), memory, tools (connected apps) and teamchat (messages between agents)                        | Degraded      |
-| **OpenClaw Gateway**          | Clawboo's server is connected to the OpenClaw Gateway. Passes as skipped when OpenClaw was never set up on this computer                                      | Degraded      |
-| **OTel exporter**             | The OpenTelemetry exporter started. Passes as disabled when no endpoint is set                                                                                | Degraded      |
+| Check                         | What it checks                                                                                                                                                                                 | When it fails |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| **Clawboo home writable**     | Clawboo can create and write its folder, `~/.clawboo` (or the folder `CLAWBOO_HOME` names)                                                                                                     | Fatal         |
+| **Secrets vault permissions** | Only your user account can read the key vault's folder, its master key, and the key Clawboo uses to identify itself to the OpenClaw Gateway (macOS and Linux)                                  | Degraded      |
+| **Master key**                | The vault's master key can still decrypt what it encrypted                                                                                                                                     | Degraded      |
+| **Database integrity**        | The database opens and passes SQLite's integrity check: the quick check at start, the full check daily in the background and on **Re-run probe**. A check that could not run reads as Degraded | Fatal         |
+| **Database schema**           | Every table and column Clawboo needs is in the database                                                                                                                                        | Fatal         |
+| **API port file**             | The port file names the port this server listens on                                                                                                                                            | Degraded      |
+| **MCP servers**               | Clawboo's four tool servers start and answer: tasks (the board), memory, tools (connected apps) and teamchat (messages between agents)                                                         | Degraded      |
+| **OpenClaw Gateway**          | Clawboo's server is connected to the OpenClaw Gateway. Passes as skipped when OpenClaw was never set up on this computer                                                                       | Degraded      |
+| **OTel exporter**             | The OpenTelemetry exporter started. Passes as disabled when no endpoint is set                                                                                                                 | Degraded      |
 
 ## Fix a failing check
 
