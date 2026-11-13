@@ -436,7 +436,18 @@ export async function runAgentUserCheck(
       `${config.user} may schedule its own jobs with crontab, which would run after Clawboo stops its agents. Add ${config.user} to /etc/cron.deny and /etc/at.deny.`,
     )
   }
-  pass(8, 'agent privileges', 'none')
+  // Under no_new_privs sudo and doas refuse to run before they read a rule, so
+  // a failed try proves nothing. Agents inherit the flag and cannot use a rule
+  // either, but a job scheduled with cron or at runs without it.
+  if (priv.noNewPrivs === true || attempts.some((a) => a && a.unchecked === true)) {
+    warn(
+      8,
+      'agent privileges',
+      `not checked: the agent host runs with no_new_privs, under which sudo will not run, so ${config.user}'s sudo and doas rules could not be tried. Agents cannot use them either, but a job scheduled with cron or at could. As an administrator, make sure \`sudo -l -U ${config.user}\` lists nothing.`,
+    )
+  } else {
+    pass(8, 'agent privileges', 'none')
+  }
 
   // 9. Runtime binaries: shown, not refused.
   if (deps.runtimeBinaries.length > 0) {

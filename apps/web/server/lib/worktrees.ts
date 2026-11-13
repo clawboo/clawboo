@@ -288,15 +288,22 @@ async function bringBranchIntoMirror(
         why: `${branch} in ${repoPath} and in the agent's copy each have commits the other does not, so the task cannot go on from either until a person merges them`,
       }
     }
-    // A checkout on the branch moves with it, or git refuses; else (none, or a
+    // A checkout on the branch moves with it, or git refuses; with none (or a
     // registration whose folder is gone, which the rebuild clears) the branch
     // moves only from the commit read above. Where the checkout is comes from
     // the mirror, which the agent can write: only a folder in agent space is
-    // taken, so the merge runs through the agent host as the agent user, never
-    // as the server in a folder the agent named.
+    // merged in, through the agent host as the agent user, never as the server
+    // in a folder the agent named. A live checkout anywhere else is refused,
+    // with the branch left where it is.
     const at = await checkedOutAt(mirror, `refs/heads/${branch}`)
-    if (at !== null && isInAgentSpace(at) && (await agentStat(at)) !== null) {
+    const live = at !== null && (await agentStat(at)) !== null
+    if (live && isInAgentSpace(at)) {
       await execGit(at, ['merge', '--ff-only', '--quiet', inUser])
+    } else if (live) {
+      return {
+        ok: false,
+        why: `${branch} is checked out at ${at}, outside the work folder, so the task cannot go on until that checkout is removed`,
+      }
     } else {
       await execGit(mirror, ['update-ref', `refs/heads/${branch}`, inUser, inMirror])
     }
@@ -372,7 +379,13 @@ async function lastExported(repoPath: string, branch: string): Promise<string | 
 async function exportFromMirror(repoPath: string, worktree: Worktree): Promise<void> {
   const mirror = mirrorPathFor(repoPath)
   const tip = await branchTip(mirror, worktree.branch)
-  if (tip === null) return
+  // Every caller exports a branch the task has: one that is gone took the
+  // work with it, and is never read as nothing to bring over.
+  if (tip === null) {
+    throw new Error(
+      `the task's branch ${worktree.branch} is gone from the agent's copy of ${repoPath}, so its work could not be brought over`,
+    )
+  }
   const theirs = await branchTip(repoPath, worktree.branch)
   if (theirs === tip) return
   // Not where the last export put it: the task's work must contain it. Asked
