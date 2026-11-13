@@ -10,6 +10,8 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { MAX_READ_BYTES } from '../../../agentUser/protocol'
+
 import {
   derivedHermesKey,
   envLine,
@@ -336,6 +338,15 @@ describe('provisionProfile', () => {
     providerEnv: { OPENROUTER_API_KEY: 'sk-or' },
     mcpServers: { 'clawboo-tasks': { url: 'http://127.0.0.1:1/api/mcp/tasks?live=1' } },
     ...over,
+  })
+
+  it('refuses a profile config.yaml too large to read whole, and leaves it as it is', async () => {
+    const dir = path.join(root, 'gw', 'profiles', 'cb-agent-1')
+    await mkdir(dir, { recursive: true })
+    const big = `model:\n  provider: openrouter\n# ${'x'.repeat(MAX_READ_BYTES)}\n`
+    await writeFile(path.join(dir, 'config.yaml'), big)
+    await expect(provisionProfile(base({ legacyHome: null }))).rejects.toThrow(/larger than/)
+    expect(await readFile(path.join(dir, 'config.yaml'), 'utf8')).toBe(big)
   })
 
   it("moves the agent's old Hermes home in once, so its memory and skills carry over", async () => {
