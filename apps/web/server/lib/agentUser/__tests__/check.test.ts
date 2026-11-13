@@ -355,6 +355,20 @@ describe.runIf(posix && me.uid !== 0)('agent isolation startup check', () => {
     expect(r.steps.find((s) => s.name === 'hard links')?.level).toBe('warn')
   })
 
+  it('refuses a work folder with a folder the search could not enter, no_new_privs or not', async () => {
+    override('inodes', {
+      matches: [],
+      privileged: [],
+      truncated: false,
+      noNewPrivs: true,
+      unreadable: ['/work/teams/t/private'],
+    })
+    const r = await runAgentUserCheck(config, deps)
+    expect(failed(r)).toMatchObject({ step: 7, name: 'hard links' })
+    expect(failed(r)?.message).toContain('/work/teams/t/private')
+    expect(failed(r)?.message).toMatch(/chmod u\+rx/)
+  })
+
   it('refuses an agent user with a sudo rule it can use', async () => {
     override('privCheck', {
       attempts: [

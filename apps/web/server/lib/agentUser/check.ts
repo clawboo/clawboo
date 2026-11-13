@@ -371,6 +371,16 @@ export async function runAgentUserCheck(
         `${privileged[0]} is a setuid or setgid file that would give an agent another user's or group's rights. Remove it, or run \`chmod ug-s\` on it as an administrator, and start Clawboo again.`,
       )
     }
+    // A folder the search could not enter may hold either kind, and
+    // no_new_privs does nothing for a hard link: refused whatever the host says.
+    const unreadable = strings(found.unreadable)
+    if (unreadable.length > 0) {
+      return fail(
+        7,
+        'hard links',
+        `${config.user} cannot search ${unreadable[0]} in the work folder, so it could not be checked for hard links to Clawboo's private files or setuid files. Let ${config.user} read and enter it (\`chmod u+rx\` as its owner), or move it out of the work folder, and start Clawboo again.`,
+      )
+    }
     if (found.truncated) {
       // A setuid file past the end of the search would still work for an
       // agent, unless the host runs with no_new_privs.

@@ -29,7 +29,11 @@ import {
   agentWriteFile,
 } from '../agentUser/agentFs'
 import { isAgentUserMode } from '../agentUser/config'
+import { MAX_READ_BYTES } from '../agentUser/protocol'
 import { agentHermesHome, hasUsableHermesCodexAuthIn, userHermesAuthPath } from './hermesAuth'
+
+/** The largest config.yaml provisioning reads whole (one byte under a read). */
+const HERMES_CONFIG_MAX_BYTES = MAX_READ_BYTES - 1
 
 export function userHermesConfigPath(): string {
   return path.join(os.homedir(), '.hermes', 'config.yaml')
@@ -273,9 +277,16 @@ export async function provisionHermesHome(
   // custom provider's `api_key`, which any agent could read in agent space.
   const agentMode = isAgentUserMode()
   const configPath = path.join(home, 'config.yaml')
-  const onDisk = await agentReadFile(configPath)
-    .then((buf) => (buf === null ? null : buf.toString('utf8')))
-    .catch(() => null)
+  // Missing reads as null; any other failure stops here, before the write
+  // below could replace the file. One byte past the cap says the file is
+  // larger than a read can hold: it is refused, never rewritten from a prefix.
+  const read = await agentReadFile(configPath, { maxBytes: HERMES_CONFIG_MAX_BYTES + 1 })
+  if (read !== null && read.length > HERMES_CONFIG_MAX_BYTES) {
+    throw new Error(
+      `${configPath} is larger than ${HERMES_CONFIG_MAX_BYTES} bytes, so Clawboo leaves it as it is and cannot add its tools to it`,
+    )
+  }
+  const onDisk = read === null ? null : read.toString('utf8')
   let base = onDisk ?? ''
   let seededConfig = false
   if (
