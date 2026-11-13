@@ -18,7 +18,13 @@ import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree, killProcessTreeByPid } from './killTree'
 import { recordRuntimePid } from './runtimePidFile'
-import { isHostedAgentProcess, spawnAgentProcess, type AgentProcess } from './spawner'
+import {
+  agentBinaryProblem,
+  isAgentUserMode,
+  isHostedAgentProcess,
+  spawnAgentProcess,
+  type AgentProcess,
+} from './spawner'
 import { resolveWindowsSpawn, type WinSpawnPlan } from './winSpawn'
 
 /**
@@ -400,6 +406,13 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
     cwd = resolved.cwd ?? null
     stdoutAll = ''
     stderrAll = ''
+    // A binary the startup check found the agent user cannot run starts no
+    // process: the run ends here, as a refused start does, and says so.
+    const unavailable = isAgentUserMode() ? agentBinaryProblem(plan.command) : null
+    if (unavailable) {
+      endWith(null, null, `not available to the agent user: ${unavailable}`)
+      return false
+    }
     let spawned: ChildProcess
     try {
       // NEVER a shell (the seam has none): an untrusted prompt is passed as argv.

@@ -13,7 +13,28 @@ import { exportTaskBranch, mirrorPathFor, runAgentGit, syncMirror } from '../mir
 import { setActiveAgentHost } from '../state'
 import { startInProcessHost, type InProcessHost } from './inProcessHost'
 
+// The git the server runs in the user's repository, recorded on its way through.
+const serverGit = vi.hoisted(() => ({ calls: [] as string[][] }))
+
+vi.mock('@clawboo/worktrees', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@clawboo/worktrees')>()
+  return {
+    ...real,
+    execGit: (cwd: string, args: string[]) => {
+      serverGit.calls.push(args)
+      return real.execGit(cwd, args)
+    },
+  }
+})
+
 const posix = process.platform !== 'win32'
+
+/** Where the subcommand sits, past any `-C <dir>` and `-c <setting>` pairs. */
+function subcommandAt(args: string[]): number {
+  let i = 0
+  while (args[i] === '-C' || args[i] === '-c') i += 2
+  return i
+}
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, {
@@ -58,6 +79,7 @@ describe.runIf(posix)('agent-owned mirror', { timeout: 120_000 }, () => {
       config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
     })
     spawned = []
+    serverGit.calls = []
     const orig = h.client.spawn.bind(h.client)
     vi.spyOn(h.client, 'spawn').mockImplementation((o) => {
       spawned.push([o.command, ...o.args])
@@ -126,6 +148,46 @@ describe.runIf(posix)('agent-owned mirror', { timeout: 120_000 }, () => {
     const mirror = await syncMirror(repo, base)
     await runAgentGit(['-C', mirror, 'branch', 'clawboo/task-2', base])
     expect(await exportTaskBranch(repo, 'clawboo/task-2', base)).toBeNull()
+  })
+
+  it('names every path after --, and lets a fetch read nothing but a bundle file', async () => {
+    // A path in front of `--` could be read as an option, and `--upload-pack=`
+    // names a program for git to run. A fetch that only means to read a bundle
+    // has every other transport turned off, so a name that read as a URL
+    // (`ext::` runs a command) would be refused by git itself.
+    const base = git(repo, 'rev-parse', 'HEAD')
+    const mirror = await syncMirror(repo, base)
+    await runAgentGit(['-C', mirror, 'branch', 'clawboo/task-4', base])
+    const wt = path.join(dir, 'work', 'worktrees', 'x', 'task-4')
+    await runAgentGit(['-C', mirror, 'worktree', 'add', '--quiet', wt, 'clawboo/task-4'])
+    fs.writeFileSync(path.join(wt, 'd.txt'), 'd\n')
+    git(wt, 'add', '.')
+    git(wt, 'commit', '-q', '-m', 'd')
+    const tip = git(wt, 'rev-parse', 'HEAD')
+    expect(await exportTaskBranch(repo, 'clawboo/task-4', base)).toBe(tip)
+
+    const calls = [...serverGit.calls, ...spawned.map((a) => a.slice(1))]
+    const checked = new Map<string, number>()
+    for (const args of calls) {
+      const at = subcommandAt(args)
+      const sub = args[at]!
+      if (!['init', 'bundle', 'fetch'].includes(sub)) continue
+      checked.set(sub, (checked.get(sub) ?? 0) + 1)
+      const dashes = args.indexOf('--', at)
+      const paths = args.slice(at + 1).filter((a) => path.isAbsolute(a))
+      expect(paths.length, args.join(' ')).toBeGreaterThan(0)
+      expect(dashes, args.join(' ')).toBeGreaterThan(at)
+      for (const p of paths) expect(args.indexOf(p, at), args.join(' ')).toBeGreaterThan(dashes)
+      if (sub === 'fetch') {
+        expect(args.slice(0, at), args.join(' ')).toEqual(
+          expect.arrayContaining(['protocol.allow=never', 'protocol.file.allow=always']),
+        )
+      }
+    }
+    // One fetch into the mirror and one out of it, each with its bundle checks.
+    expect(checked.get('fetch')).toBe(2)
+    expect(checked.get('bundle')).toBe(5)
+    expect(checked.get('init')).toBe(1)
   })
 
   it('refuses unsafe branch names and commit ids', async () => {

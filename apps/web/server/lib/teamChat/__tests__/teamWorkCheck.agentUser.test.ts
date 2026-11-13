@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setActiveAgentHost } from '../../agentUser/state'
 import { installAgentWorktreeIo } from '../../agentUser/worktreeIo'
 import { startInProcessHost, type InProcessHost } from '../../agentUser/__tests__/inProcessHost'
-import { dropTeamFolderBase, teamFolderHistoryDir } from '../teamWorkCheck'
+import { dropTeamFolderBase, historyExists, taskBase, teamFolderHistoryDir } from '../teamWorkCheck'
 
 const posix = process.platform !== 'win32'
 
@@ -95,5 +95,42 @@ describe.runIf(posix)('team work check history under agent isolation', { timeout
       spawned.some((a) => a[0] === 'git' && a.includes('update-ref') && a.includes(gitDir)),
     ).toBe(true)
     expect(g('for-each-ref', 'refs/clawboo/base/')).toBe('')
+  })
+
+  it('a host that does not answer is not read as a history that is not there', async () => {
+    vi.stubEnv('CLAWBOO_AGENT_USER', 'clawboo-agent')
+    h = startInProcessHost()
+    const hello = await h.client.waitForHello()
+    setActiveAgentHost({
+      client: h.client,
+      hello,
+      config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
+    })
+    vi.spyOn(h.client, 'request').mockRejectedValue(new Error('the agent host did not answer'))
+    // That would make the check measure nothing and skip the team's check.
+    await expect(historyExists(teamFolderHistoryDir('T'))).rejects.toThrow(/did not answer/)
+  })
+
+  it("reads only a missing ref as a task with no starting point, not git's failure", async () => {
+    vi.stubEnv('CLAWBOO_AGENT_USER', 'clawboo-agent')
+    h = startInProcessHost()
+    const hello = await h.client.waitForHello()
+    setActiveAgentHost({
+      client: h.client,
+      hello,
+      config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
+    })
+    installAgentWorktreeIo()
+    const gitDir = teamFolderHistoryDir('T')
+    fs.mkdirSync(gitDir, { recursive: true })
+    execFileSync('git', ['init', '--bare', '-q', gitDir])
+    const folder = path.join(dir, 'work', 'teams', 'T')
+    const taskId = '22222222-2222-4222-8222-222222222222'
+    expect(await taskBase(gitDir, folder, taskId)).toBe('')
+    // Git cannot be started for the lookup.
+    vi.spyOn(h.client, 'spawn').mockImplementation(() => {
+      throw new Error('the agent host did not answer')
+    })
+    await expect(taskBase(gitDir, folder, taskId)).rejects.toThrow(/did not answer/)
   })
 })

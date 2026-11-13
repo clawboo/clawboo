@@ -27,7 +27,12 @@ vi.mock('node:child_process', async (orig) => {
 })
 
 import { commitRuntimeInstall, newInstallFolder } from '../runtimeFolder'
-import { detectOpenClaw, findOpenClawPath, invalidateOpenClawCache } from '../openclawDetect'
+import {
+  detectOpenClaw,
+  findOpenClawPath,
+  invalidateOpenClawCache,
+  openclawInvocation,
+} from '../openclawDetect'
 
 describe('detectOpenClaw', () => {
   const KEYS = ['CLAWBOO_HOME', 'CLAWBOO_RUNTIMES_DIR', 'CLAWBOO_WORK_DIR'] as const
@@ -80,6 +85,19 @@ describe('detectOpenClaw', () => {
       node: { path: process.execPath, version: 'v24.22.1' },
     })
     expect(execState.calls).toEqual([])
+  })
+
+  it('runs its own copy with no shell, naming the install folder to mark a Gateway with', () => {
+    pathState.openclaw = '/usr/local/bin/openclaw'
+    installOwn()
+    expect(openclawInvocation()).toEqual({
+      command: process.execPath,
+      args: [
+        path.join(base, 'runtimes', 'openclaw', 'v1', 'node_modules', 'openclaw', 'openclaw.mjs'),
+      ],
+      shell: false,
+      installFolder: 'v1',
+    })
   })
 
   it('falls back to a global install on PATH', async () => {

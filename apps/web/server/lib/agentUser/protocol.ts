@@ -156,10 +156,13 @@ export interface HostReplies {
   }
   inodes: {
     matches: string[]
-    /** setuid or setgid files the agent user does not own: each would run as
-     *  someone else for an agent. */
+    /** setuid files another user owns, and setgid files for a group the agent
+     *  user is not in: each would give an agent someone else's rights. */
     privileged: string[]
     truncated: boolean
+    /** The host runs with no_new_privs (Linux), so such files give nothing.
+     *  Absent from an older host. */
+    noNewPrivs?: boolean
   }
   privCheck: {
     /** Each attempt and whether it SUCCEEDED (exit 0). */

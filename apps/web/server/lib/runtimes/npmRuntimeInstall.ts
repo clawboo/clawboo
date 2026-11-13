@@ -17,7 +17,6 @@ import path from 'node:path'
 
 import { summarizeNpmFailure } from '../npmFailure'
 import { findExecutable } from '../platform'
-import { resolveWindowsSpawn } from './winSpawn'
 import {
   commitRuntimeInstall,
   discardInstallFolder,
@@ -44,13 +43,12 @@ export function npmPackageName(spec: string): string {
   return at === -1 ? spec : spec.slice(0, at)
 }
 
+/** How npm is started: always as a program with its arguments, never through a
+ *  shell. */
 export interface NpmInvocation {
   command: string
   /** Arguments before npm's own (npm's CLI script, when run through Node). */
   prefixArgs: string[]
-  /** A Windows `npm.cmd` to start through cmd.exe with every argument quoted
-   *  (`resolveWindowsSpawn`), since Node will not start a .cmd directly. */
-  cmdShim: boolean
 }
 
 /** Injectable file-system lookups for {@link npmInvocation}. */
@@ -79,9 +77,12 @@ const HOMEBREW_KEG_NODE = /^(.*)[/\\]Cellar[/\\]([^/\\]+)[/\\][^/\\]+[/\\]bin[/\
  *   `bin/`, or `node_modules\npm` beside `node.exe`), or Homebrew's, which sits
  *   under the Homebrew prefix rather than the Node's own folder;
  * - the npm on PATH, run by this Node from its own `npm-cli.js`;
- * - failing that, the npm on PATH as it is (on Windows its `npm.cmd`), with this
- *   Node's folder first on PATH (`npmChildEnv`).
- * Null when there is no npm at all.
+ * - failing that, the npm on PATH as it is, with this Node's folder first on
+ *   PATH (`npmChildEnv`), unless it is a Windows `npm.cmd`: Node starts a .cmd
+ *   only through cmd.exe, and the install's folder and spec are never handed to
+ *   a shell. Node.js for Windows ships `npm-cli.js` beside `node.exe`, so only
+ *   an npm moved away from its Node gets here.
+ * Null when there is no npm that can be started that way.
  */
 export function npmInvocation(
   execPath: string = process.execPath,
@@ -96,11 +97,7 @@ export function npmInvocation(
     platform === 'win32'
       ? p.join(binDir, 'node_modules', 'npm', 'bin', 'npm-cli.js')
       : p.join(binDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
-  const viaNode = (cli: string): NpmInvocation => ({
-    command: execPath,
-    prefixArgs: [cli],
-    cmdShim: false,
-  })
+  const viaNode = (cli: string): NpmInvocation => ({ command: execPath, prefixArgs: [cli] })
 
   const candidates = [besideBin(p.dirname(execPath))]
   const keg = HOMEBREW_KEG_NODE.exec(execPath)
@@ -114,7 +111,8 @@ export function npmInvocation(
   if (real && /npm-cli\.js$/.test(real)) return viaNode(real)
   const near = besideBin(p.dirname(onPath))
   if (exists(near)) return viaNode(near)
-  return { command: onPath, prefixArgs: [], cmdShim: platform === 'win32' }
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(onPath)) return null
+  return { command: onPath, prefixArgs: [] }
 }
 
 /**
@@ -219,6 +217,13 @@ export interface NpmInstallOptions {
   /** Each line npm prints. */
   onLine?: (line: string) => void
   env?: NodeJS.ProcessEnv
+  /**
+   * Run once npm is done, before the install is made current: why the new
+   * install cannot be used (such as the Agent SDK without its own binary), or
+   * null. A reason ends the install with `UNUSABLE` and leaves the current one
+   * as it was.
+   */
+  check?: (folder: string) => string | null
   /** Injectable for tests. */
   spawnFn?: typeof spawn
   invocation?: NpmInvocation | null
@@ -244,7 +249,10 @@ export function runNpmRuntimeInstall(rt: NpmRuntime, opts: NpmInstallOptions = {
   if (refusal) return fail('RUNTIMES_DIR_REFUSED', refusal)
   const npm = opts.invocation !== undefined ? opts.invocation : npmInvocation(execPath)
   if (!npm) {
-    return fail('NPM_MISSING', 'npm not found. Install Node.js (which bundles npm) and retry.')
+    return fail(
+      'NPM_MISSING',
+      `npm not found beside Node.js ${execPath}, and no npm on PATH that Clawboo can start. Install Node.js (which bundles npm) and retry.`,
+    )
   }
 
   let folder: string
@@ -257,17 +265,15 @@ export function runNpmRuntimeInstall(rt: NpmRuntime, opts: NpmInstallOptions = {
   let child: ChildProcess
   try {
     // Under the install umask, so nothing npm writes is ever writable by others.
+    // No shell: the folder and spec reach npm as arguments, never as a command line.
     const args = [...npm.prefixArgs, ...npmInstallArgs(folder, rt.spec)]
-    const plan = npm.cmdShim
-      ? resolveWindowsSpawn({ command: npm.command, args })
-      : { command: npm.command, args }
     child = withInstallUmask(() =>
-      (opts.spawnFn ?? spawn)(plan.command, plan.args, {
+      (opts.spawnFn ?? spawn)(npm.command, args, {
         cwd: folder,
         env: npmChildEnv(env, execPath),
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
         windowsHide: true,
-        ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       }),
     )
   } catch (err) {
@@ -336,6 +342,17 @@ export function runNpmRuntimeInstall(rt: NpmRuntime, opts: NpmInstallOptions = {
           return
         }
         launchers[bin] = { command: nodePath, args: [script] }
+      }
+      let unusable: string | null
+      try {
+        unusable = opts.check ? opts.check(folder) : null
+      } catch (err) {
+        unusable = err instanceof Error ? err.message : String(err)
+      }
+      if (unusable) {
+        void discardInstallFolder(folder)
+        finish({ ok: false, code: 'UNUSABLE', message: unusable })
+        return
       }
       try {
         const { record } = commitRuntimeInstall(

@@ -195,6 +195,34 @@ export function resolveAgentSdkBinary(opts: ResolveAgentSdkBinaryOptions = {}): 
     sdkDir = opts.fromDir ? findAgentSdkDir(opts.fromDir) : null
   }
   if (!sdkDir) return null
+  return binaryOf(sdkDir, within, opts)
+}
+
+/**
+ * The binary a run would start from the SDK in an install folder of Claude Code
+ * (one `newInstallFolder` made), looked for inside that folder only, or null.
+ * For checking an install before it is made current.
+ */
+export function agentSdkBinaryInInstall(
+  folder: string,
+  opts: Omit<ResolveAgentSdkBinaryOptions, 'fromDir'> = {},
+): string | null {
+  const dir = path.join(folder, 'node_modules', ...AGENT_SDK_PACKAGE.split('/'))
+  if (!existsSync(path.join(dir, 'package.json'))) return null
+  try {
+    return binaryOf(realpathSync(dir), folder, opts)
+  } catch {
+    return null
+  }
+}
+
+/** The first of the SDK's candidates for this platform that is there and can be
+ *  started, inside `within` when it is set. */
+function binaryOf(
+  sdkDir: string,
+  within: string | null,
+  opts: Omit<ResolveAgentSdkBinaryOptions, 'fromDir'>,
+): string | null {
   const resolve = createRequire(path.join(sdkDir, 'package.json')).resolve
   const candidates = agentSdkBinaryCandidates({
     platform: opts.platform ?? process.platform,
