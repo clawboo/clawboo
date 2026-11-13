@@ -279,6 +279,7 @@ describe('the setup plan', () => {
     expect(text).toContain('-UID 499 -GID 499 -roleAccount')
     expect(text).toContain('/private/etc/sudoers.d/clawboo')
     expect(text).toContain('chmod 750 /Users/alice')
+    expect(text).toContain('/var/clawboo-agent/work')
     // Node under the operator's home cannot run as the agent user.
     expect(text).toContain('inside your home')
   })
