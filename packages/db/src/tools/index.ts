@@ -64,6 +64,7 @@ export {
 export {
   MIN_KNOWN_SECRET_LENGTH,
   registerKnownSecretSource,
+  SAFE_COUNT_KEYS as SCRUB_SAFE_KEYS,
   scrubArgsSummary,
   scrubResultSummary,
   scrubSecrets,

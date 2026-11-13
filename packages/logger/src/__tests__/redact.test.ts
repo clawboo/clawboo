@@ -149,6 +149,44 @@ describe('redactObject', () => {
     expect(redactObject({ authToken: 'abc' })).toEqual({ authToken: '••••' })
   })
 
+  it('keeps the board\'s author fields, which also only match on "auth"', () => {
+    // `comment_added` events carry `authorType`, `team_chat_post` events carry
+    // `authorAgentId`; both used to come back from the event API as the mask.
+    // A system comment has no author agent, so a null must stay null too.
+    expect(redactObject({ authorType: 'user', authorAgentId: 'agent-1' })).toEqual({
+      authorType: 'user',
+      authorAgentId: 'agent-1',
+    })
+    expect(redactObject({ authorType: 'system', authorAgentId: null })).toEqual({
+      authorType: 'system',
+      authorAgentId: null,
+    })
+    expect(redactJsonString('{"authorType":"agent","body":"done"}')).toBe(
+      '{"authorType":"agent","body":"done"}',
+    )
+  })
+
+  it('still masks a credential under any other auth-shaped key', () => {
+    expect(
+      redactObject({
+        auth: 'abc',
+        Authorization: 'Basic abc',
+        authorization: 'Basic abc',
+        authToken: 'abc',
+        // Author-shaped, but not one of the listed fields: still a credential.
+        authorToken: 'abc',
+        authorAgentIdSecret: 'abc',
+      }),
+    ).toEqual({
+      auth: '••••',
+      Authorization: '••••',
+      authorization: '••••',
+      authToken: '••••',
+      authorToken: '••••',
+      authorAgentIdSecret: '••••',
+    })
+  })
+
   it('renders a SHARED (non-circular) sub-object twice, not as [Circular]', () => {
     // The cycle guard tracks the current recursion PATH, not every object ever
     // visited — so a DAG renders in full. A visited-ever set would replace the

@@ -36,4 +36,10 @@ export const createLogger = (module: string) => logger.child({ module })
 
 export type Logger = ReturnType<typeof logger.child>
 
-export { redactObject, redactValue, redactJsonString, REDACTION_MASK } from './redact'
+export {
+  redactObject,
+  redactValue,
+  redactJsonString,
+  REDACTION_MASK,
+  SAFE_COUNT_KEYS as REDACTION_SAFE_KEYS,
+} from './redact'
