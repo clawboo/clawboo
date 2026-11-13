@@ -34,6 +34,7 @@ import {
   peekCodexModels,
 } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import { agentSdkBinaryInInstall } from '../lib/runtimes/agentSdkBinary'
 import { resolveRuntimeInstall, resolveSdkBinary } from '../lib/runtimes/installProbe'
 import { runNpmRuntimeInstall } from '../lib/runtimes/npmRuntimeInstall'
 import {
@@ -376,7 +377,20 @@ function installViaNpm(
   ctl.pending = true
   const run = runNpmRuntimeInstall(
     { id: d.id, spec: d.pkg ?? '', bins: d.npmBins ?? [] },
-    { onLine: (line) => sendEvent(res, { type: 'output', line }) },
+    {
+      onLine: (line) => sendEvent(res, { type: 'output', line }),
+      // The Agent SDK's own binary is an optional dependency npm may leave out.
+      // Without it Claude Code cannot run, so such an install is not made
+      // current: whatever ran Claude Code before keeps doing so.
+      ...(d.sdkBinary
+        ? {
+            check: (folder: string) =>
+              agentSdkBinaryInInstall(folder)
+                ? null
+                : `The Agent SDK installed without its own ${process.platform}-${process.arch} binary, so Claude Code could not run on it and nothing was changed. Check that npm may install optional dependencies, then install again.`,
+          }
+        : {}),
+    },
   )
   ctl.child = run.child
   void run.result.then((result) => {
