@@ -2524,6 +2524,60 @@ function requesterOf(tx: BoardTx, task: DbTask): PersonRecord {
   return { ...LOCAL_PERSON }
 }
 
+/**
+ * Who asked for a task: the person recorded on it, else on its nearest ancestor that
+ * records one, with the id of the task that named them. Null when no task in the chain
+ * names anyone. Unlike `requesterOf`, never the built-in local person as a fallback: a
+ * run's person decides whose credentials and logins it may use, and a fallback here
+ * would hand them to a routine's child tasks.
+ */
+export function requesterOfTask(
+  db: ClawbooDb,
+  taskId: string,
+): { person: PersonRecord; taskId: string } | null {
+  const seen = new Set<string>()
+  let id: string | null = taskId
+  while (id && !seen.has(id)) {
+    seen.add(id)
+    const row = db
+      .select({
+        id: tasks.id,
+        requestedBy: tasks.requestedBy,
+        parentTaskId: tasks.parentTaskId,
+      })
+      .from(tasks)
+      .where(eq(tasks.id, id))
+      .get()
+    if (!row) return null
+    const asked = parsePersonJson(row.requestedBy)
+    if (asked) return { person: asked, taskId: row.id }
+    id = row.parentTaskId
+  }
+  return null
+}
+
+/**
+ * Whether a routine fired this task or any task above it. A routine's run, and the
+ * runs of the work it hands out, belong to no person until the routine records who
+ * made it.
+ */
+export function taskTreeFiredByRoutine(db: ClawbooDb, taskId: string): boolean {
+  const seen = new Set<string>()
+  let id: string | null = taskId
+  while (id && !seen.has(id)) {
+    seen.add(id)
+    const row = db
+      .select({ scheduledBy: tasks.scheduledBy, parentTaskId: tasks.parentTaskId })
+      .from(tasks)
+      .where(eq(tasks.id, id))
+      .get()
+    if (!row) return false
+    if (firedByRoutine(row)) return true
+    id = row.parentTaskId
+  }
+  return false
+}
+
 export type HandBackResult =
   | { ok: true; task: DbTask; from: TaskStatus; person: PersonRecord }
   | {

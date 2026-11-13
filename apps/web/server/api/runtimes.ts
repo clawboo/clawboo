@@ -13,7 +13,7 @@ import { autoFireRefusal } from '@clawboo/board-core'
 import { getTask, jobRunRefused, listExecutions, personMovedSinceLastRun } from '@clawboo/db'
 import { breakerConfigSchema } from '@clawboo/governance'
 
-import { actsAsPerson } from '../lib/auth'
+import { actingPerson, actsAsPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -822,6 +822,8 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
       disableMemoryAutoInject: body['disableMemoryAutoInject'] === true,
       // Only a person's start is free of the job's limit.
       automaticStart: !actsAsPerson(req),
+      // A person started it (vouched for, or the dashboard's own), so the run is theirs.
+      startedBy: actsAsPerson(req) ? actingPerson(req) : null,
       ...(typeof body['maxRotations'] === 'number' ? { maxRotations: body['maxRotations'] } : {}),
       ...(breaker?.success ? { breakerConfig: breaker.data } : {}),
       parentTraceparent:

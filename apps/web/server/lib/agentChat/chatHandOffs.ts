@@ -984,6 +984,7 @@ export async function runChatTurn(
       agentId,
       message,
       mcpBaseUrl,
+      startedBy: params.requestedBy ?? null,
       ...seam,
       ...(carrying
         ? {
@@ -1007,6 +1008,7 @@ export async function runChatTurn(
     agentId,
     message,
     mcpBaseUrl,
+    startedBy: params.requestedBy ?? null,
     ...seam,
     ...(carrying?.quietWhileBudgetHeld ? { quietWhileBudgetHeld: true } : {}),
     ...(carrying ? { retriesWhileBudgetHeld: true } : {}),

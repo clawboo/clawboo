@@ -84,6 +84,7 @@ import { onPauseLifted } from './lib/pauseBus'
 import { isRunnerRerunWaiting, pumpRunnerReruns } from './lib/runnerRerun'
 import { runnerTargetOf } from './lib/runnerRoute'
 import { startTask } from './lib/startBoardTask'
+import { jsonBodyErrors } from './lib/jsonBodyErrors'
 import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
@@ -515,6 +516,8 @@ async function main() {
 
   // JSON body parser — must be before API routes
   app.use(express.json({ limit: '2mb' }))
+  // A body that is not JSON gets a plain 400 that never quotes it (see jsonBodyErrors).
+  app.use(jsonBodyErrors)
 
   // Access gate middleware
   app.use((req, res, next) => {

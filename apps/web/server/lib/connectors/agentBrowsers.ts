@@ -574,20 +574,22 @@ export function noteCallEnd(connectorId: string, agentId: string): void {
 /**
  * Call a tool on an agent's browser ONLY if it already has one.
  *
- * The panel's capture path. It never creates, because a panel opening must not
- * be what puts a headed Chrome on someone's desktop, and it does not go through
- * the broker's executor precisely because that one does create.
+ * The panel's capture path, and the login fill's. It never creates, because a
+ * panel opening must not be what puts a headed Chrome on someone's desktop, and
+ * it does not go through the broker's executor precisely because that one does
+ * create, and audits the arguments (a fill's carry the login).
  */
 export async function callIfRunning(
   connectorId: string,
   agentId: string,
   rawToolName: string,
+  args: Record<string, unknown> = {},
 ): Promise<{ text: string; images?: { data: string; mimeType: string }[] } | null> {
   const browser = browsers.get(connectorId)?.get(agentId)
   if (!browser) return null
   noteCallStart(connectorId, agentId)
   try {
-    return await browser.session.callTool(rawToolName, {})
+    return await browser.session.callTool(rawToolName, args)
   } finally {
     noteCallEnd(connectorId, agentId)
   }

@@ -101,6 +101,13 @@ export interface AttachScope {
    * tools make. It changes from run to run, so it stays off the other URLs.
    */
   boundExecutionId?: string | null
+  /**
+   * The run's reference (see `runPerson.ts` in the server). Rides the Tools URL
+   * only, as `scopeRunRef` inside its `scopeSig`: a tool that acts for the run's
+   * person (the login fill) looks the run up by it. Random per run, so it stays
+   * off the other URLs.
+   */
+  boundRunRef?: string | null
 }
 
 export interface AttachConfigInput {
@@ -254,6 +261,9 @@ export function mcpHttpUrl(
     // The run's own task, so an approval a connector call opens names it. Inside
     // the signature for the same reason as on the Tasks URL.
     if (scope.boundTaskId) p.set('scopeTaskId', scope.boundTaskId)
+    // The run's reference, so a tool acting for the run's person finds the run.
+    // Inside the signature: moving it would claim another run's person.
+    if (scope.boundRunRef) p.set('scopeRunRef', scope.boundRunRef)
     if (scope.attachSecret && claimsScope)
       p.set(
         'scopeSig',
@@ -262,6 +272,7 @@ export function mcpHttpUrl(
           teamRun,
           ...chatClaim,
           ...(scope.boundTaskId ? { boundTaskId: scope.boundTaskId } : {}),
+          ...(scope.boundRunRef ? { boundRunRef: scope.boundRunRef } : {}),
         }),
       )
   }

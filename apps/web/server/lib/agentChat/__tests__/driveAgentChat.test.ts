@@ -42,6 +42,7 @@ import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlo
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../../runtimes/types'
+import { runPersonForRef } from '../../runPerson'
 import { subscribeAgentStatus } from '../../teamChat/agentStatusBus'
 import { subscribeChatDelta } from '../../teamChat/chatDeltaBus'
 import { chatHistoryDELETE, chatHistoryRESETCONTEXT } from '../../../api/chatHistory'
@@ -1260,5 +1261,34 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
       expect(adapter.startCalls).toBe(0)
       expect(rowsFor(directChatSessionKey('codex-q', 'codex'))).toEqual([])
     })
+  })
+
+  // Whose run a chat turn is, for the tools that act for that person (the login fill):
+  // registered when the turn starts, signed onto its Tools URL, forgotten when it ends.
+  it('a turn is the run of the person who sent the message, until it ends', async () => {
+    seedAgent('codex-p', 'codex')
+    const ada = { id: 'user-ada', name: 'Ada', role: 'member' }
+    let ref: string | null = null
+    let during: unknown = null
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        during = runPersonForRef(ref, 'codex-p')
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'codex-p',
+      message: 'sign in please',
+      mcpBaseUrl: null,
+      startedBy: ada,
+      makeAdapter: (_agentId: string, ctx: RuntimeRunContext) => {
+        ref = ctx.memoryScope?.boundRunRef ?? null
+        return adapter
+      },
+    })
+    expect(ref).toBeTruthy()
+    expect(during).toEqual({ person: ada, basis: 'started' })
+    expect(runPersonForRef(ref, 'codex-p')).toBeNull()
   })
 })

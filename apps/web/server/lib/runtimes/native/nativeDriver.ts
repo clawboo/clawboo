@@ -146,6 +146,7 @@ export function createNativeDriver(
               ...(ctx.memoryScope?.boundExecutionId
                 ? { boundExecutionId: ctx.memoryScope.boundExecutionId }
                 : {}),
+              ...(ctx.memoryScope?.boundRunRef ? { boundRunRef: ctx.memoryScope.boundRunRef } : {}),
               ...(ctx.memoryScope
                 ? {
                     memoryScope: ctx.memoryScope,

@@ -90,6 +90,7 @@ import {
   teamOverflowText,
 } from '../runFailureText'
 import { PausedDeliveryError, pauseRefusalText, pauseStopNote } from '../pauseBus'
+import { openRunRef, runPersonOf, type RunRef } from '../runPerson'
 import { runSlots, PERSON_TURN, type RunSlot, type RunRank } from '../runSlots'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
@@ -1179,6 +1180,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                   : null
 
           let adapter: RuntimeAdapter
+          // Whose run this is, for the tools that act for that person (the login
+          // fill). Opened with the run's context, released when its job ends.
+          let runRefHandle: RunRef | null = null
           let homeKind = 'ephemeral'
           let homeDir: string | null = null
           // Where the run starts: its task's folder, or the team's shared folder
@@ -1313,6 +1317,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // state dir). For Native the folder is also what turns on its file
               // tools, confined to it.
               workdir = taskFolder?.dir ?? teamWorkdirFor(runtime, teamId)
+              runRefHandle = openRunRef(
+                targetAgentId,
+                runPersonOf({
+                  db,
+                  startedBy: origin.kind === 'human' ? (origin.request?.requestedBy ?? null) : null,
+                  taskId: queueTaskId,
+                  routine:
+                    origin.kind === 'schedule' ? { createdBy: null, runAsCreator: false } : null,
+                }),
+              )
               const ctx: RuntimeRunContext = {
                 ...(workdir ? { cwd: workdir } : {}),
                 // A run in its task's folder may still read the team folder holding it.
@@ -1341,6 +1355,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                   attachSecret: getMcpAttachSecret(db),
                   ...(runTaskId !== null ? { boundTaskId: runTaskId } : {}),
                   ...(runExecId !== null ? { boundExecutionId: runExecId } : {}),
+                  boundRunRef: runRefHandle.ref,
                 },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
@@ -1869,6 +1884,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             if (paused) {
               const text = pauseRefusalText(paused)
               if (chatVisible) deps.persistMeta?.(targetSessionKey, text)
+              runRefHandle?.release()
               failStart(new PausedDeliveryError(text))
               return
             }
@@ -1905,6 +1921,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 // agent's lock goes; this covers a throw that skipped them.
                 runHold?.release()
                 folderRun?.release()
+                runRefHandle?.release()
                 slot.release()
                 leaveQueue()
                 stopBeat()
@@ -1947,6 +1964,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               () => {
                 // Taken out of the queue by a Stop, a teardown or the engine letting
                 // go of the task: it never starts.
+                runRefHandle?.release()
                 leaveQueue()
                 stopBeat()
                 settleRefused(refusal() ?? 'released')

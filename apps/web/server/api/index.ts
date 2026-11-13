@@ -165,6 +165,15 @@ import {
   connectorsDisconnectPOST,
   connectorsListGET,
 } from './connectors'
+import {
+  onePasswordDELETE,
+  onePasswordInstallPOST,
+  onePasswordPUT,
+  websiteLoginsDELETE,
+  websiteLoginsGET,
+  websiteLoginsPATCH,
+  websiteLoginsPOST,
+} from './websiteLogins'
 import { grantsCreatePOST, grantsListGET, grantsResumePOST, grantsRevokePOST } from './grants'
 import { toolsListGET, toolsApprovalsGET, toolsApprovalResolvePOST, toolsAuditGET } from './tools'
 import {
@@ -531,6 +540,19 @@ router.get('/api/tools/audit', toolsAuditGET)
 // spawn a child process, bind a socket and make outbound requests, or delete
 // stored credentials, and the general ceiling is high enough to allow thousands
 // of them. Reads stay on the general tier: the panel polls them.
+// Website logins an agent's browser can be filled with, and their 1Password source.
+// Writes take the sensitive limiter: each one decrypts and rewrites the vault.
+router.get('/api/website-logins', websiteLoginsGET)
+router.post('/api/website-logins', sensitiveLimiter, websiteLoginsPOST)
+router.patch('/api/website-logins/:id', sensitiveLimiter, websiteLoginsPATCH)
+router.delete('/api/website-logins/:id', sensitiveLimiter, websiteLoginsDELETE)
+router.post(
+  '/api/website-logins/sources/1password/install',
+  sensitiveLimiter,
+  onePasswordInstallPOST,
+)
+router.put('/api/website-logins/sources/1password', sensitiveLimiter, onePasswordPUT)
+router.delete('/api/website-logins/sources/1password', sensitiveLimiter, onePasswordDELETE)
 router.get('/api/connectors', connectorsListGET)
 router.post('/api/connectors/connect', sensitiveLimiter, connectorsConnectPOST)
 // Which connectors already have what they asked for. ONE request for the whole

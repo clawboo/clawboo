@@ -73,6 +73,10 @@ export interface RuntimeRunContext {
     /** The run's execution row: recorded with each write its Tasks tools make
      *  (signed onto the Tasks URL; in-process for Native). */
     boundExecutionId?: string | null
+    /** The run's reference (`openRunRef` in lib/runPerson.ts): signed onto the
+     *  Tools URL, so a tool acting for the run's person can find the run.
+     *  In-process for Native. */
+    boundRunRef?: string | null
   } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>

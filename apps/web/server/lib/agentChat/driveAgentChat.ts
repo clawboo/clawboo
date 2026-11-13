@@ -35,6 +35,7 @@ import {
 } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { createLogger } from '@clawboo/logger'
+import type { PersonRef } from '@clawboo/protocol'
 import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
@@ -57,6 +58,7 @@ import {
   TURN_TOO_LARGE_TEXT,
 } from '../runFailureText'
 import { pauseRefusalText, pauseStopNote } from '../pauseBus'
+import { openRunRef, runPersonOf } from '../runPerson'
 import { RunQueueAbortedError, withRunSlot, PERSON_TURN } from '../runSlots'
 import { adapterFactoryFor, type RuntimeAdapterFactory } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
@@ -229,6 +231,8 @@ export async function stopAgentChat(agentId: string): Promise<void> {
 export interface DriveAgentChatParams {
   db: ClawbooDb
   agentId: string
+  /** The person whose message started this turn, when one did (see runPerson.ts). */
+  startedBy?: PersonRef | null
   /** The context-injected message delivered to the model (rules block + any @team
    *  brief/history are prepended client-side, exactly as the Gateway path did). */
   message: string
@@ -288,9 +292,15 @@ export interface ChatTurnEnding {
 export async function driveAgentChat(params: DriveAgentChatParams): Promise<void> {
   const ending: ChatTurnEnding = { how: 'failed', reply: '' }
   turnsUnderWay.set(params.agentId, (turnsUnderWay.get(params.agentId) ?? 0) + 1)
+  // Whose run this is, for the tools that act for that person (the login fill).
+  const runRef = openRunRef(
+    params.agentId,
+    runPersonOf({ db: params.db, startedBy: params.startedBy ?? null }),
+  )
   try {
-    await driveTurn(params, ending)
+    await driveTurn(params, ending, runRef.ref)
   } finally {
+    runRef.release()
     const left = (turnsUnderWay.get(params.agentId) ?? 1) - 1
     if (left > 0) turnsUnderWay.set(params.agentId, left)
     else turnsUnderWay.delete(params.agentId)
@@ -314,7 +324,11 @@ function pausedNow(db: ClawbooDb, agentId: string): boolean {
   return pauseFor(db, { agentId, teamId: row?.teamId ?? null }) !== null
 }
 
-async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): Promise<void> {
+async function driveTurn(
+  params: DriveAgentChatParams,
+  ending: ChatTurnEnding,
+  runRef: string,
+): Promise<void> {
   const { db, agentId, message, mcpBaseUrl } = params
 
   const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
@@ -458,6 +472,7 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
         chatRun: true,
         chatRunTeamId: row?.teamId ?? null,
         attachSecret: getMcpAttachSecret(db),
+        boundRunRef: runRef,
       },
       ...(homeDir ? { homeDir } : {}),
       ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),

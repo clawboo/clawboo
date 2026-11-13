@@ -40,6 +40,7 @@ import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { connectorToolsForServer, onConnectorsChanged } from '../lib/connectors/supervisor'
+import { loginFillTools } from '../lib/logins/tool'
 import { getDb, getDbPath } from '../lib/db'
 import { isLeadOfTeam } from '../lib/teamChat/booZero'
 import {
@@ -197,12 +198,13 @@ export function parseTasksBinding(req?: IncomingMessage):
  *  unit testing. */
 export function parseToolsBinding(
   req?: IncomingMessage,
-): { scope: MemoryScope; taskId?: string } | undefined {
+): { scope: MemoryScope; taskId?: string; runRef?: string } | undefined {
   const params = attachParams(req)
   if (!params) return undefined
   const taskId = params.get('scopeTaskId')
-  const scope = signedScope('tools', params, params.get('teamRun') === '1', taskId)
-  return scope ? { scope, ...(taskId ? { taskId } : {}) } : undefined
+  const runRef = params.get('scopeRunRef')
+  const scope = signedScope('tools', params, params.get('teamRun') === '1', taskId, null, runRef)
+  return scope ? { scope, ...(taskId ? { taskId } : {}), ...(runRef ? { runRef } : {}) } : undefined
 }
 
 function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
@@ -216,13 +218,15 @@ function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
 
 /** The scope the params claim, when their signature covers exactly that claim.
  *  `boundTaskId` is the run's task, on the Tasks and Tools URLs; `boundExecutionId`
- *  is the run's id, on the Tasks URL. No other URL carries either. */
+ *  is the run's id, on the Tasks URL; `boundRunRef` is the run's reference, on the
+ *  Tools URL. No other URL carries any of them. */
 function signedScope(
   server: McpServerName,
   params: URLSearchParams,
   teamRun: boolean,
   boundTaskId: string | null = null,
   boundExecutionId: string | null = null,
+  boundRunRef: string | null = null,
 ): MemoryScope | undefined {
   const teamId = params.get('scopeTeamId')
   const agentId = params.get('scopeAgentId')
@@ -239,6 +243,7 @@ function signedScope(
       chatRun: params.get('chatRun') === '1',
       boundTaskId,
       boundExecutionId,
+      boundRunRef,
     })
   )
     return undefined
@@ -517,6 +522,14 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         // the array would have frozen the list at initialize.
         connectorTools: connectorToolsForServer,
         onConnectorsChanged,
+        // The login fill, for a session that names its agent and its run. It acts
+        // for the run's person, looked up by the signed run reference.
+        hostTools: () =>
+          loginFillTools({
+            agentId: scope?.agentId ?? null,
+            taskId: binding?.taskId ?? null,
+            runRef: binding?.runRef ?? null,
+          }),
         // Keep the newest frame so the agent's Browser panel can show a human
         // what it just looked at. Ephemeral and per-agent; never the event log.
         onToolImages: ({ agentId, toolName, images }) => {

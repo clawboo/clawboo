@@ -42,6 +42,7 @@ import {
   noteCallStart,
   type AgentBrowserSpawn,
 } from './agentBrowsers'
+import { maskFilledValues } from '../logins/filledValues'
 import { killProcessTree, killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
@@ -175,7 +176,23 @@ function toDescriptor(
       if (!session) return `connector ${def.slug} is not connected`
       if (routedAgentId) noteCallStart(connectorId, routedAgentId)
       try {
-        return await callThrough(session, tool.name, args)
+        let result: Awaited<ReturnType<typeof callThrough>>
+        try {
+          result = await callThrough(session, tool.name, args)
+        } catch (err) {
+          // A failed call's message can quote the page too, and it reaches the
+          // model and the audit row the same way.
+          if (!routedAgentId || !(err instanceof Error)) throw err
+          const masked = maskFilledValues(routedAgentId, err.message)
+          if (masked === err.message) throw err
+          throw new Error(masked)
+        }
+        // A password the login fill put into this agent's page never comes back
+        // out through its own browser tools spelled as it was filled.
+        if (!routedAgentId) return result
+        return typeof result === 'string'
+          ? maskFilledValues(routedAgentId, result)
+          : { ...result, text: maskFilledValues(routedAgentId, result.text) }
       } finally {
         // In a `finally` so a throw still releases the browser for eviction.
         // Without it one failed navigation would pin a slot until the process

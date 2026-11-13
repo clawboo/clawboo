@@ -218,7 +218,8 @@ The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK, Codex 
 │   ├── 20261111-083000/        the current install
 │   └── 20261020-141500/        the install before it
 ├── claude-code/                the Agent SDK, which offers no command
-└── codex/
+├── codex/
+└── 1password-sdk/              1Password's SDK, installed the first time someone connects 1Password
 ```
 
 | Path                             | What it holds                                                                                                                                                                                                                           |

@@ -29,6 +29,7 @@ import {
 
 import { isLeadOfTeam } from '../../teamChat/booZero'
 import { connectorToolsForServer, onConnectorsChanged } from '../../connectors/supervisor'
+import { loginFillTools } from '../../logins/tool'
 import { getEmbedProvider } from '../../memoryEmbedding'
 import type { NativeToolOutcome } from './fileTools'
 import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
@@ -60,6 +61,9 @@ export interface McpBridgeOptions {
   /** The run's execution row: recorded with each write its Tasks tools make, as
    *  the HTTP runtimes' signed Tasks URLs say. */
   boundExecutionId?: string | null
+  /** The run's reference (`openRunRef`): what the login fill looks the run's
+   *  person up by, as the HTTP runtimes' signed Tools URLs say. */
+  boundRunRef?: string | null
   /**
    * The run's authoritative memory scope — bound onto the in-process Memory
    * server so native saves are team-shared + reads team-limited, matching the
@@ -172,6 +176,13 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
           // rest of it.
           connectorTools: connectorToolsForServer,
           onConnectorsChanged,
+          // The login fill, as the HTTP mount serves it.
+          hostTools: () =>
+            loginFillTools({
+              agentId: opts.agentId ?? null,
+              taskId: opts.boundTaskId ?? null,
+              runRef: opts.boundRunRef ?? null,
+            }),
           // Same frame capture as the HTTP mount: a native run's screenshots
           // reach the Browser panel even though its model may not see them.
           onToolImages: ({ agentId, toolName, images }) => {

@@ -27,6 +27,7 @@ export const NAV_VIEWS = [
   'inbox',
   'runtimes',
   'providers',
+  'websiteLogins',
   'memory',
   'governance',
   'capabilities',

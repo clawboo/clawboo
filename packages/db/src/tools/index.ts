@@ -86,6 +86,7 @@ export {
 } from './namespace'
 export { ToolRegistry, createBuiltinRegistry, type VisibleTool } from './registry'
 export { BUILTIN_TOOLS, echoTool, memoryNoteTool } from './builtins'
+export { createFillLoginTool, FILL_LOGIN_TOOL_NAME } from './fillLogin'
 
 export {
   createApproval,

@@ -25,7 +25,7 @@ It is off unless you set it. An install without the setting runs exactly as befo
 
 With the setting on, a prompt-injected agent can no longer:
 
-- read the vault's key and the vault, and with them every saved provider key;
+- read the vault's key and the vault, and with them every saved provider key, website login and 1Password token;
 - read or change Clawboo's database: the board, approvals, budgets, routines and connector grants;
 - read the secret behind its MCP attach links, and so sign itself as another agent;
 - read the access token and answer its own approval card through the API;
@@ -39,7 +39,7 @@ Clawboo checks the first and the last of these from inside the agent user's acco
 It does **not**:
 
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
-- protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins;
+- protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins, and a [website login](/using/website-logins) Clawboo filled into its page;
 - keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder;
 - change what Clawboo's tools allow. Agents still reach the board, memory and team chat through Clawboo's MCP servers, and approvals, grants and budgets still apply;
 - cover OpenClaw agents. They run inside the OpenClaw Gateway, as whoever started it. Use OpenClaw's own sandbox for them;

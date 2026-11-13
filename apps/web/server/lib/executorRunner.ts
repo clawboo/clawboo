@@ -63,6 +63,7 @@ import {
   type RuntimeEvent,
 } from '@clawboo/executor'
 import { assembleTiers } from '@clawboo/executor/tiers'
+import type { PersonRef } from '@clawboo/protocol'
 import {
   checkCostCap,
   createBreakerState,
@@ -121,6 +122,7 @@ import { loadAgentConfig } from './runtimes/native/agentConfigStore'
 import { startFolderRun, type FolderRun } from './runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, taskRunFolderFor, TASK_FOLDER_NOTE } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
+import { openRunRef, runPersonOf } from './runPerson'
 import { notifyBlockedByAgent } from './teamChat/inboxNotices'
 import {
   actOnTaskWorkspace,
@@ -194,6 +196,12 @@ export interface RunTaskInput {
   makeAdapter: (ctx: RuntimeRunContext) => RuntimeAdapter
   taskId: string
   assigneeAgentId: string
+  /** The verified person whose click started this run (a Retry is the retrier's).
+   *  Absent: the run's person is its task's requester (see runPerson.ts). */
+  startedBy?: PersonRef | null
+  /** Set by `runTaskOnRuntime` for the run's life: the run's reference, which its
+   *  Tools URL carries so a tool can act for the run's person. Never a caller's. */
+  runRef?: string
   /** Git repo to branch the worktree from (file-mutating tasks). */
   repoPath?: string | null
   /** Task kind → isolation (research/review = none, code = worktree). */
@@ -512,7 +520,13 @@ export async function runTaskOnRuntime(caller: RunTaskInput): Promise<RunTaskRes
   const forward = (): void => controller.abort()
   if (caller.abortSignal?.aborted) forward()
   else caller.abortSignal?.addEventListener('abort', forward, { once: true })
-  const input: RunTaskInput = { ...caller, abortSignal: controller.signal }
+  // Whose run this is, decided once as it starts, for the tools that act for that
+  // person (the login fill). Released below with the rest of the run.
+  const runRef = openRunRef(
+    caller.assigneeAgentId,
+    runPersonOf({ db: caller.db, startedBy: caller.startedBy ?? null, taskId: caller.taskId }),
+  )
+  const input: RunTaskInput = { ...caller, abortSignal: controller.signal, runRef: runRef.ref }
   const stop = registerRunStop(input.taskId, forward, input.assigneeAgentId, { waiting: true })
   // The live run, once there is one, so a person's comment on the task can steer
   // it (`steerTaskRun`). Re-pointed on every rotation.
@@ -523,6 +537,7 @@ export async function runTaskOnRuntime(caller: RunTaskInput): Promise<RunTaskRes
     caller.abortSignal?.removeEventListener('abort', forward)
     stop.release()
     steerSlot.handle?.release()
+    runRef.release()
   }
 }
 
@@ -1182,6 +1197,8 @@ async function runTaskInner(
       boundTaskId: taskId,
       // The run's ledger row, recorded with each write its Tasks tools make.
       boundExecutionId: exec.id,
+      // The run's reference, so a tool acting for the run's person finds the run.
+      ...(input.runRef ? { boundRunRef: input.runRef } : {}),
     },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),

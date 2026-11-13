@@ -291,6 +291,7 @@ Clawboo encrypts the keys it stores for itself, but some copies are plain text. 
 | What                                                                                      | Where                                                                                         | Encrypted           |
 | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------- |
 | Keys you connect on a **Runtimes** card; connector credentials, sign-ins and Composio key | The vault: `~/.clawboo/secrets/runtime-keys.json`, with its key in `secrets/master.key`       | Yes                 |
+| [Website logins](/using/website-logins) and the 1Password service account token           | The vault                                                                                     | Yes                 |
 | Keys you connect under **Providers**                                                      | The vault, plus OpenClaw's `~/.openclaw/.env` and every OpenClaw agent's `auth-profiles.json` | The vault copy only |
 | The Gateway token and the provider key that OpenClaw setup writes                         | `~/.openclaw/.env`, and the agents' `auth-profiles.json`                                      | No                  |
 | The Gateway address and token Clawboo connects with                                       | `~/.clawboo/settings.json`                                                                    | No                  |
@@ -355,6 +356,10 @@ What this leaves open:
 - Other ports on this computer stay reachable, so a local web server that serves your files, or forwards to Clawboo, is open to agents' browsers.
 - With Admin access, Playwright's `browser_run_code_unsafe` runs code in the Playwright server itself, outside these checks.
 - A browser connector you add yourself gets none of this.
+
+## Website logins
+
+When an agent calls `fill_login`, Clawboo fills a saved login (or one from 1Password) into the agent's own browser, on a page whose live address is exactly the login's. The username, password, one-time code and 1Password token never reach the model, the event log, the tool audit, the server's log or a REST answer, and a run uses only its own person's logins. Once a password is in the page, though, the agent drives that page and can read or send what is in it, so give an agent only logins you would trust it to use. Without [`CLAWBOO_AGENT_USER`](/operating/agent-isolation), agents run as your user and a misbehaving one could read the vault and its key directly; with it, they cannot. See [Let agents sign in to websites](/using/website-logins#what-this-protects-and-what-it-does-not).
 
 ## The OpenClaw Gateway device key
 

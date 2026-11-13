@@ -26,6 +26,7 @@ export const NAV_VIEW_LABELS: Record<NavView, string> = {
   inbox: 'Inbox',
   runtimes: 'Runtimes',
   providers: 'Providers',
+  websiteLogins: 'Website logins',
   memory: 'Memory',
   governance: 'Governance',
   capabilities: 'Capabilities',
