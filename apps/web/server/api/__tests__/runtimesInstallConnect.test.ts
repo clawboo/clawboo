@@ -59,6 +59,7 @@ const sdkState = vi.hoisted(() => ({ binary: null as string | null }))
 vi.mock('../../lib/runtimes/agentSdkBinary', () => ({
   AGENT_SDK_PACKAGE: '@anthropic-ai/claude-agent-sdk',
   resolveAgentSdkBinary: () => sdkState.binary,
+  agentSdkBinaryInInstall: () => sdkState.binary,
   ownAgentSdkDir: () => null,
   agentSdkEntryFile: (dir: string) => dir,
 }))
@@ -206,6 +207,8 @@ import {
   peekHermesAcp,
   resetHermesTransport,
 } from '../../lib/runtimes/hermesTransport'
+import { stableNodePath } from '../../lib/runtimes/npmRuntimeInstall'
+import { INSTALL_RECORD_FILE, launcherFileName } from '../../lib/runtimeFolder'
 
 interface Mock {
   res: Response
@@ -387,9 +390,13 @@ describe('runtimes install/connect REST', () => {
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
-    // Its command, run by the Node that installed it.
-    const launcher = readFileSync(path.join(`${home}-runtimes`, 'bin', 'codex'), 'utf8')
-    expect(launcher).toContain(process.execPath)
+    // Its command (`codex.cmd` on Windows), run by the Node that installed it,
+    // by the path that survives an upgrade (Homebrew's opt link for a keg Node).
+    const launcher = readFileSync(
+      path.join(`${home}-runtimes`, 'bin', launcherFileName('codex')),
+      'utf8',
+    )
+    expect(launcher).toContain(stableNodePath(process.execPath))
     expect(launcher).toContain(
       path.join(prefix!, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
     )
@@ -508,15 +515,21 @@ describe('runtimes install/connect REST', () => {
     expect(done).toEqual({ type: 'complete', success: true })
   })
 
-  it('an SDK install whose platform binary is missing says why', async () => {
+  it('an SDK install without its platform binary is not made current, and says why', async () => {
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    const prefix = prefixOf(spawnState.calls[0])!
     fakeNpmPuts(spawnState.calls[0], '@anthropic-ai/claude-agent-sdk')
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
-    const done = m.events().find((e) => e['type'] === 'complete')
-    expect(done?.['success']).toBe(true)
-    expect(String(done?.['warning'])).toMatch(/binary is missing/)
+    expect(m.events().some((e) => e['type'] === 'complete')).toBe(false)
+    const err = m.events().find((e) => e['type'] === 'error')
+    expect(err?.['code']).toBe('UNUSABLE')
+    expect(String(err?.['message'])).toMatch(/without its own .* binary.*nothing was changed/)
+    // Whatever ran Claude Code before still does: no install of it is on record.
+    const runtimeDir = path.join(realpathSync.native(home) + '-runtimes', 'claude-code')
+    expect(existsSync(path.join(runtimeDir, INSTALL_RECORD_FILE))).toBe(false)
+    await vi.waitFor(() => expect(existsSync(prefix)).toBe(false))
   })
 
   it('installs the SDK from a one-off npx run or a source checkout too', async () => {

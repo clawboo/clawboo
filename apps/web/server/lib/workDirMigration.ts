@@ -286,6 +286,19 @@ async function isLinkBackTo(p: string, target: string): Promise<boolean> {
 
 // ── Planning ────────────────────────────────────────────────────────────────
 
+/** This install's team folder names. A work folder can be shared with another
+ *  install, so only these are taken out of one. */
+export function ownTeamFolderNames(db: ClawbooDb): Set<string> {
+  return new Set([
+    NO_TEAM_SEGMENT,
+    ...db
+      .select({ id: teams.id })
+      .from(teams)
+      .all()
+      .map((t) => sanitizeAgentId(t.id)),
+  ])
+}
+
 /** The work folder the last boot recorded, when it is not this one. */
 function recordedWorkDir(db: ClawbooDb, work: string): string | null {
   const prev = getSetting(db, WORK_DIR_IN_USE_KEY)
@@ -328,14 +341,7 @@ export function planWorkDirMove(
   if (prev) {
     // A previous work folder can be shared with another install: only this
     // install's teams move out of it.
-    const mine = new Set([
-      NO_TEAM_SEGMENT,
-      ...db
-        .select({ id: teams.id })
-        .from(teams)
-        .all()
-        .map((t) => sanitizeAgentId(t.id)),
-    ])
+    const mine = ownTeamFolderNames(db)
     for (const name of realFolderNames(path.join(prev, 'teams'))) {
       if (!mine.has(name)) continue
       items.push({

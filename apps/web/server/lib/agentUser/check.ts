@@ -368,14 +368,23 @@ export async function runAgentUserCheck(
       return fail(
         7,
         'setuid files',
-        `${privileged[0]} is a setuid or setgid file that ${config.user} does not own, so it would run as another user for an agent. Remove it, or run \`chmod ug-s\` on it as an administrator, and start Clawboo again.`,
+        `${privileged[0]} is a setuid or setgid file that would give an agent another user's or group's rights. Remove it, or run \`chmod ug-s\` on it as an administrator, and start Clawboo again.`,
       )
     }
     if (found.truncated) {
+      // A setuid file past the end of the search would still work for an
+      // agent, unless the host runs with no_new_privs.
+      if (found.noNewPrivs !== true) {
+        return fail(
+          7,
+          'setuid files',
+          `The work folder ${work.dir} is too large to search completely for setuid files. Remove task checkouts you no longer need from it${deps.platform === 'linux' ? ', or install setpriv (util-linux) so the agent host runs with no_new_privs,' : ''} and start Clawboo again.`,
+        )
+      }
       warn(
         7,
         'hard links',
-        `The work folder ${work.dir} is too large to search completely for hard links and setuid files.`,
+        `The work folder ${work.dir} is too large to search completely for hard links.`,
       )
     }
   }
@@ -386,8 +395,9 @@ export async function runAgentUserCheck(
   )
 
   // 8. No way for the agent user to become anyone else: actually tried, as the
-  // agent user, rather than read from `sudo -l` (whose listing a sudoers
-  // default can hide while the rules still work).
+  // agent user, and sudo's listing read as well. A sudoers default can hide the
+  // listing while the rules still work, and a rule for one command (a shell as
+  // the server user) shows only in the listing.
   let priv
   try {
     priv = await client.request(
@@ -406,7 +416,7 @@ export async function runAgentUserCheck(
     return fail(
       8,
       'agent privileges',
-      `${config.user} can run \`${String(escalation.what)}\`. The agent user must not be able to become any other user: remove its sudo and doas rules (\`sudo -l -U ${config.user}\` lists sudo's).`,
+      `${escalation.what === 'sudo -l' ? `${config.user} has sudo rules it can use without a password` : `${config.user} can run \`${String(escalation.what)}\``}. The agent user must not be able to become any other user: remove its sudo and doas rules (\`sudo -l -U ${config.user}\` lists sudo's).`,
     )
   }
   if (priv.crontab === 'allowed') {
