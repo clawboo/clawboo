@@ -822,6 +822,8 @@ describe('runtimes install/connect REST', () => {
       mockRes().res,
     )
     expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
+    // A new or replaced key reaches Hermes's profiles at once.
+    expect(hermesState.keySyncs).toBe(1)
     const m = mockRes()
     runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(m.statusCode()).toBe(200)
@@ -833,7 +835,7 @@ describe('runtimes install/connect REST', () => {
       kept: [{ envVar: 'OPENROUTER_API_KEY', sharedWith: ['Clawboo Native'] }],
     })
     // Hermes's profiles keep keys for the jobs it runs on its own: they follow.
-    expect(hermesState.keySyncs).toBe(1)
+    expect(hermesState.keySyncs).toBe(2)
   })
 
   it('disconnect deletes an ALT-slot key no other runtime reads (native connected via Groq)', () => {
@@ -848,10 +850,13 @@ describe('runtimes install/connect REST', () => {
       mockRes().res,
     )
     expect(hasRuntimeSecret('GROQ_API_KEY')).toBe(true)
+    const syncsBefore = hermesState.keySyncs
     const m = mockRes()
     runtimesDisconnectPOST(req({ params: { id: 'clawboo-native' } }), m.res)
     expect(m.statusCode()).toBe(200)
     expect(hasRuntimeSecret('GROQ_API_KEY')).toBe(false)
+    // Another runtime's Disconnect takes the key out of Hermes's profiles too.
+    expect(hermesState.keySyncs).toBe(syncsBefore + 1)
     expect((m.body() as { connectionState: string }).connectionState).toBe('needs-auth')
     expect(m.body()).toMatchObject({ removed: ['GROQ_API_KEY'], kept: [] })
   })

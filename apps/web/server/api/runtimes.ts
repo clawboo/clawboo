@@ -471,6 +471,9 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
   setRuntimeSecret(targetEnvVar, apiKey)
   // A new key may change which provider embeds memory.
   onEmbeddingKeysChanged()
+  // Hermes's profiles keep keys for the jobs it runs on its own: a replaced
+  // key reaches them now, not at their next run.
+  void syncHermesProfileKeys()
   // A reconnect lifts the explicit-disconnect override — ambient key reuse
   // (process env / OpenClaw's .env) applies again for this runtime.
   setRuntimeDisconnected(id, false)
@@ -690,8 +693,9 @@ export function runtimesDisconnectPOST(req: Request, res: Response): void {
   setRuntimeDisconnected(id, true)
   // Stop embedding memory with a key the user just removed.
   onEmbeddingKeysChanged({ removed: deletes })
-  // Hermes's profiles keep keys for the jobs it runs on its own: take them out.
-  if (id === 'hermes') void syncHermesProfileKeys()
+  // Hermes's profiles keep keys for the jobs it runs on its own: take out any
+  // this removed, whichever runtime it was read for.
+  void syncHermesProfileKeys()
   res.json({
     ok: true,
     connectionState: runtimeStatus(id)['connectionState'],
