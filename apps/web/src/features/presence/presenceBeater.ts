@@ -9,11 +9,18 @@
 // moment it stops being so (hidden, focus lost, or the person walked away) it sends
 // one last beat saying so, then nothing until a person is back. A dashboard left
 // focused on an unattended screen therefore stops counting after INPUT_IDLE_MS.
+//
+// Loading the page, or switching to its tab or window, counts too, but only for
+// GLANCE_MS: a person who comes back to read counts before they click, while a
+// window a desktop shell restores at login, or one left focused when the screen
+// was locked, stops counting soon after unless someone touches it.
 
 /** How often a tab with a person at it beats. The engine's presence window is three of these. */
 export const PRESENCE_BEAT_MS = 20_000
 /** No input for this long, and a focused tab stops counting as a person. */
 export const INPUT_IDLE_MS = 15 * 60_000
+/** How long a page load, or a switch to the tab or window, counts without input. */
+export const GLANCE_MS = 2 * 60_000
 
 export interface PresenceBeatBody {
   tabId: string
@@ -44,7 +51,10 @@ export interface PresenceBeater {
 export function createPresenceBeater(deps: PresenceBeatDeps): PresenceBeater {
   const now = deps.now ?? ((): number => Date.now())
   // The page was just opened or reloaded by someone.
-  let lastInputAt = now()
+  // When the person last touched the page. A load or a switch to the page counts
+  // as a touch GLANCE_MS before the idle limit runs out, so only a short while.
+  const glance = (): number => now() - INPUT_IDLE_MS + GLANCE_MS
+  let lastInputAt = glance()
   let actedSinceBeat = false
   // What the last beat said, so a change is sent once and silence costs nothing.
   let lastSaidHere: boolean | null = null
@@ -73,9 +83,11 @@ export function createPresenceBeater(deps: PresenceBeatDeps): PresenceBeater {
       if (isHere || lastSaidHere === true) send(isHere)
     },
     changed() {
-      // Switching to this tab or window is something a person does, so it counts as
-      // input: someone who comes back after a break is here before they click.
-      if (lastSaidHere !== true && deps.isVisible() && deps.hasFocus()) lastInputAt = now()
+      // Switching to this tab or window counts as a glance (see GLANCE_MS): someone
+      // who comes back after a break is here before they click, for a while.
+      if (lastSaidHere !== true && deps.isVisible() && deps.hasFocus()) {
+        lastInputAt = Math.max(lastInputAt, glance())
+      }
       const isHere = here()
       // Nothing said yet reads as not here: a tab that was never here stays silent.
       if (isHere !== (lastSaidHere ?? false)) send(isHere)

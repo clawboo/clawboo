@@ -19,7 +19,7 @@ const SECRET_KEY_RE =
 // under e.g. `accessToken` or `authorization` still redacts, and an author-shaped
 // key not listed here is still masked. Must hold exactly what the display-layer
 // masker in @clawboo/logger holds; a server test compares the two.
-export const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
+const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
   'tokens',
   'inputtokens',
   'outputtokens',
@@ -34,6 +34,13 @@ export const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
   'authortype',
   'authoragentid',
 ])
+
+/** The keys the storage scrub lets through although they contain a secret-looking
+ *  word, as a sorted copy: the set itself stays private, so no caller can widen
+ *  what is stored readable for the rest of the process. */
+export function scrubSafeKeys(): string[] {
+  return [...SAFE_COUNT_KEYS].sort()
+}
 
 // A PEM private key block is masked by its own scan (below) rather than by a
 // pattern in the list, so the multi-line block still wins before any of the

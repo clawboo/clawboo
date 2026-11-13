@@ -1453,6 +1453,23 @@ export async function boardWorkspaceFileGET(req: Request, res: Response): Promis
   }
 }
 
+/** A task folder route's failure. A folder removed while it was read (the boot
+ *  cleanup, or a team delete) is not found, as on the preview route; anything
+ *  else is logged and answered without the server's paths. */
+function sendTaskFolderError(res: Response, err: unknown): void {
+  if (err instanceof WorkspacePathError) {
+    res.status(400).json({ ok: false, error: err.message })
+    return
+  }
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    sendWorkspaceMiss(res, 'gone')
+    return
+  }
+  log.error({ err }, 'task folder read failed')
+  res.status(500).json({ ok: false, error: 'task folder could not be read' })
+}
+
 // ─── GET /api/board/:taskId/folder/tree?dir=<rel> ────────────────────────────
 // One directory level of the task's own folder (a task with no worktree). Read-
 // only; the folder comes from the task's row, never the request. It is not a
@@ -1467,11 +1484,7 @@ export async function boardTaskFolderTreeGET(req: Request, res: Response): Promi
     }
     res.json(result)
   } catch (err) {
-    if (err instanceof WorkspacePathError) {
-      res.status(400).json({ ok: false, error: err.message })
-      return
-    }
-    res.status(500).json({ error: String(err) })
+    sendTaskFolderError(res, err)
   }
 }
 
@@ -1488,11 +1501,7 @@ export async function boardTaskFolderFileGET(req: Request, res: Response): Promi
     }
     res.json(result)
   } catch (err) {
-    if (err instanceof WorkspacePathError) {
-      res.status(400).json({ ok: false, error: err.message })
-      return
-    }
-    res.status(500).json({ error: String(err) })
+    sendTaskFolderError(res, err)
   }
 }
 
