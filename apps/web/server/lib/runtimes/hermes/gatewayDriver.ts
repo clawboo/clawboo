@@ -571,6 +571,7 @@ export function createHermesGatewayDriver(
           cwd: ctx.cwd ?? null,
           providerEnv: ctx.apiKeyEnv ?? {},
           mcpServers,
+          providerHint: ctx.providerHint ?? null,
         })
         if (prov.migrated) log.info({ profile }, 'moved the agent’s Hermes home into its profile')
         if (ctx.mcpBaseUrl && !prov.mcpAttached) {

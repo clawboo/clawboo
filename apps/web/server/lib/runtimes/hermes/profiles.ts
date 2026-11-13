@@ -489,6 +489,8 @@ export async function provisionProfile(opts: {
   cwd: string | null
   providerEnv: Record<string, string>
   mcpServers: HermesMcpServers | null
+  /** The provider the run picked, if any. */
+  providerHint?: string | null
 }): Promise<ProvisionedProfile> {
   const profilesDir = path.join(opts.gatewayHome, 'profiles')
   const dir = hermesProfileDir(opts.gatewayHome, opts.profile)
@@ -592,9 +594,11 @@ export async function provisionProfile(opts: {
   }
   // The ChatGPT sign-in (seedHermesAuth copies only the agent user's own with
   // agents on their own OS user, never the person's). A run with a provider key
-  // gets none copied in then.
-  const hasApiKey = Object.values(opts.providerEnv).some(Boolean)
-  if (!(agentMode && hasApiKey)) await seedHermesAuth(dir)
+  // gets none copied in then, unless it picked the subscription: then the key
+  // is not what it runs on.
+  const keyRun =
+    Object.values(opts.providerEnv).some(Boolean) && opts.providerHint !== 'openai-codex'
+  if (!(agentMode && keyRun)) await seedHermesAuth(dir)
   return { profile: opts.profile, dir, created, migrated, mcpAttached: merged.attached }
 }
 
