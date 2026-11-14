@@ -65,7 +65,7 @@ describe('installHermesRelease', () => {
 
   beforeEach(() => {
     // Resolved, as the install records it (macOS's temp folder is a link).
-    root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'clawboo-hermes-install-')))
+    root = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'clawboo-hermes-install-')))
     env = {
       ...process.env,
       HOME: path.join(root, 'home'),
