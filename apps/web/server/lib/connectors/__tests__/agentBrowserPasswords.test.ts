@@ -29,7 +29,10 @@ describe('keepPasswordsOutOfProfile', () => {
       credentials_enable_service: false,
       profile: { password_manager_enabled: false },
     })
-    expect(fs.statSync(path.join(dir, 'Default', 'Preferences')).mode & 0o777).toBe(0o600)
+    // Windows keeps no POSIX mode bits, so the file mode is checked elsewhere.
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(dir, 'Default', 'Preferences')).mode & 0o777).toBe(0o600)
+    }
   })
 
   it('keeps everything else a profile has set', async () => {

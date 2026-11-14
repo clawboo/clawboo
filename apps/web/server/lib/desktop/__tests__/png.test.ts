@@ -2,7 +2,7 @@ import zlib from 'node:zlib'
 
 import { describe, expect, it } from 'vitest'
 
-import { encodeRegionPng } from '../png'
+import { encodeRegionPng, encodeRegionPngAsync } from '../png'
 
 /** Read a PNG back: its size and its RGB pixels, checking every CRC. */
 function decode(png: Buffer): { w: number; h: number; rgb: Buffer } {
@@ -59,5 +59,24 @@ describe('encodeRegionPng', () => {
 
   it('refuses an empty region', () => {
     expect(() => encodeRegionPng(Buffer.alloc(16), 2, 0, 0, 0, 1)).toThrow(RangeError)
+  })
+})
+
+describe('encodeRegionPngAsync', () => {
+  it('makes the same picture as the encoder on this thread', async () => {
+    const fbWidth = 5
+    const fb = Buffer.alloc(fbWidth * 4 * 4)
+    for (let i = 0; i < fb.length; i++) fb[i] = (i * 37) & 0xff
+    const png = await encodeRegionPngAsync(fb, fbWidth, 1, 0, 3, 4)
+    expect(png).toEqual(encodeRegionPng(fb, fbWidth, 1, 0, 3, 4))
+  })
+
+  it('copies the region before it returns, so later drawing does not reach it', async () => {
+    const fbWidth = 2
+    const fb = Buffer.alloc(fbWidth * 2 * 4, 0x10)
+    const before = encodeRegionPng(fb, fbWidth, 0, 0, 2, 2)
+    const pending = encodeRegionPngAsync(fb, fbWidth, 0, 0, 2, 2)
+    fb.fill(0xee)
+    expect(await pending).toEqual(before)
   })
 })

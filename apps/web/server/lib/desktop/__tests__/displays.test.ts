@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import net from 'node:net'
+import os from 'node:os'
+import path from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -98,14 +100,18 @@ vi.mock('../../agentUser/state', () => ({ agentHomeDir: () => '/var/lib/clawboo-
 
 const displays = await import('../displays')
 
+// The display manager runs on Linux only, over Unix sockets and POSIX paths,
+// so these run where those exist and are skipped on Windows.
+const onWindows = process.platform === 'win32'
+
 let home: string
 const realPlatform = process.platform
 const savedHome = process.env['CLAWBOO_HOME']
 
 beforeAll(() => {
   // Short, because a Unix socket path has a length limit and macOS's temp
-  // folder is long.
-  home = fs.mkdtempSync('/tmp/cbd-')
+  // folder is long. Windows has no /tmp, and skips these tests anyway.
+  home = fs.mkdtempSync(onWindows ? path.join(os.tmpdir(), 'cbd-') : '/tmp/cbd-')
   process.env['CLAWBOO_HOME'] = home
 })
 afterAll(() => {
@@ -133,7 +139,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('displaySupport', () => {
+describe.skipIf(onWindows)('displaySupport', () => {
   it('is Linux only, needs Xvnc, and can be turned off', () => {
     expect(displays.displaySupport('darwin', {})).toMatchObject({ ok: false })
     expect(displays.displaySupport('win32', {})).toMatchObject({ ok: false })
@@ -205,7 +211,7 @@ describe('displaySupport', () => {
   })
 })
 
-describe('acquireDisplay', () => {
+describe.skipIf(onWindows)('acquireDisplay', () => {
   it('starts Xvnc reachable only through its own folder, with a cookie, and a window manager on it', async () => {
     const d = await displays.acquireDisplay('agent-1', 'browser:x')
     expect(d).not.toBeNull()

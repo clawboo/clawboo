@@ -16,6 +16,18 @@ vi.mock('../displays', () => ({
   },
 }))
 vi.mock('../browserFrames', () => ({ captureAgentBrowserFrame: async () => null }))
+// The live view compresses on libuv's thread pool, which a loaded runner can
+// keep busy past any fixed number of event-loop turns. Here the same encoder
+// runs on this thread, so a picture is ready within one promise turn. The
+// thread-pool encoder itself is checked in png.test.ts.
+vi.mock('../png', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../png')>()
+  return {
+    ...real,
+    encodeRegionPngAsync: async (...args: Parameters<typeof real.encodeRegionPng>) =>
+      real.encodeRegionPng(...args),
+  }
+})
 
 const { resetControlForTests, isPersonInControl } = await import('../control')
 const { mintLink, resetLinksForTests, revokeLink } = await import('../links')
@@ -95,7 +107,7 @@ function sink(opts: { full?: boolean } = {}) {
   }
 }
 
-/** Let compression on the thread pool finish: setImmediate is not faked. */
+/** Let the encoded pictures go out: setImmediate is not faked. */
 const settle = async () => {
   for (let i = 0; i < 30; i++) await new Promise((r) => setImmediate(r))
 }
