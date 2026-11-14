@@ -29,11 +29,24 @@ export function createSseReader(
 ): SseReader {
   const max = opts.maxEventChars ?? MAX_SSE_EVENT_CHARS
   let buf = ''
+  /** Where the search for the next line break resumes in `buf`: the part
+   *  before it is one unfinished line already looked at. */
+  let scanFrom = 0
   let event = ''
   let data: string[] = []
   let dataChars = 0
   let lastId: string | null = null
   let broken = false
+
+  /** The stream is treated as broken from here on; nothing more is delivered. */
+  const overflow = (): void => {
+    broken = true
+    buf = ''
+    scanFrom = 0
+    data = []
+    dataChars = 0
+    opts.onOverflow?.()
+  }
 
   const dispatch = (): void => {
     if (data.length > 0) {
@@ -56,8 +69,10 @@ export function createSseReader(
     if (value.startsWith(' ')) value = value.slice(1)
     if (field === 'event') event = value
     else if (field === 'data') {
-      data.push(value)
+      // Counted before the event can be dispatched, so an oversized one never is.
       dataChars += value.length + 1
+      if (dataChars > max) return overflow()
+      data.push(value)
     } else if (field === 'id') {
       if (!value.includes('\0')) lastId = value
     }
@@ -67,37 +82,35 @@ export function createSseReader(
     push(chunk: string): void {
       if (broken) return
       buf += chunk
-      for (;;) {
-        // A lone CR at the very end may be the first half of a CRLF.
-        let i = -1
-        let len = 1
-        for (let j = 0; j < buf.length; j++) {
-          const c = buf.charCodeAt(j)
-          if (c === 10) {
-            i = j
-            break
-          }
-          if (c === 13) {
-            if (j === buf.length - 1) break
-            i = j
-            len = buf.charCodeAt(j + 1) === 10 ? 2 : 1
-            break
-          }
+      // Each character is looked at once: the search resumes where the last
+      // chunk left it, and lines are cut from `start` without copying the rest.
+      let start = 0
+      let j = scanFrom
+      while (j < buf.length) {
+        const c = buf.charCodeAt(j)
+        if (c !== 10 && c !== 13) {
+          j++
+          continue
         }
-        if (i === -1) break
-        line(buf.slice(0, i))
-        buf = buf.slice(i + len)
+        // A lone CR at the very end may be the first half of a CRLF: look at it
+        // again with the next chunk.
+        if (c === 13 && j === buf.length - 1) break
+        const end = j
+        j += c === 13 && buf.charCodeAt(j + 1) === 10 ? 2 : 1
+        if (end - start > max) return overflow()
+        line(buf.slice(start, end))
+        if (broken) return
+        start = j
       }
-      if (buf.length + dataChars > max) {
-        broken = true
-        buf = ''
-        data = []
-        opts.onOverflow?.()
-      }
+      buf = buf.slice(start)
+      scanFrom = j - start
+      if (buf.length + dataChars > max) overflow()
     },
     end(): void {
       buf = ''
+      scanFrom = 0
       data = []
+      dataChars = 0
     },
   }
 }

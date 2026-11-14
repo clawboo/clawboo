@@ -77,9 +77,10 @@ All five real adapters declare `toolApproval: true`, which describes the runtime
 - Claude Code runs with `permissionMode: 'bypassPermissions'`.
 - Codex runs with approval policy `never` and sandbox `danger-full-access`; its `codex exec` fallback passes
   `--dangerously-bypass-approvals-and-sandbox`.
-- Hermes follows its own approval policy (`approvals.mode`, which Clawboo sets before every run to the person's
-  own choice, else `manual`). Each command it flags waits on a Clawboo approval card, and the answer goes back to
-  Hermes as `once` or `deny`.
+- Hermes follows its own approval policy (`approvals.mode` and, for its own jobs, `approvals.cron_mode`, which
+  Clawboo sets before every run to the person's own choice, else `manual` and `deny`; always those with agents as
+  their own user). Each command it flags waits on a Clawboo approval card, and the answer goes back to Hermes as
+  `once` or `deny`. The card is a check, not a lock: the agent can reach its own profile's key and settings.
 - Clawboo Native asks a person before every shell command, and its shell tool is off unless an agent's config
   turns it on.
 - OpenClaw decides which commands ask first through its own exec policy; Clawboo shows those requests and relays
@@ -162,7 +163,9 @@ declares `streaming: true`, `steering: 'live'`, `toolApproval: true`, `nativeCha
   reached at `/p/<profile>/` with its own key, derived from one master key in the vault. Before each run the
   driver writes the profile's `.env` (its key, the provider keys, and the run's folder as `TERMINAL_CWD`) and
   keeps three things in its `config.yaml`: a marked `mcp_servers` block, the pinned `terminal:` keys, and
-  `approvals.mode`, pinned before each run to the person's own choice, else `manual`. An agent's old per-agent home moves into its profile on
+  `approvals.mode` and `approvals.cron_mode`, pinned before each run to the person's own choice, else `manual`
+  and `deny` (always those with agents as their own user). When the run lets go of the profile, `TERMINAL_CWD`
+  points at the agent's jobs folder, `<work folder>/agents/<agent id>/hermes-jobs`. An agent's old per-agent home moves into its profile on
   its first run, with its memory, skills and sessions.
 - **Runs** (`gatewayDriver.ts`, `client.ts`, `sse.ts`, `runSettings.ts`). A run is `POST /p/<profile>/v1/runs`
   with the input (the context block, then the message), a session id, and the provider and model

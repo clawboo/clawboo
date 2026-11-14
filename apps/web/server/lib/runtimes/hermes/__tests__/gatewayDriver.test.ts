@@ -4,7 +4,7 @@
 // with `request_id` and `execution_generation`).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import os from 'node:os'
@@ -12,6 +12,7 @@ import path from 'node:path'
 
 import { createDb, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
 import type { HermesNativeEvent } from '@clawboo/adapter-hermes'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { clearLiveRunBindings, liveRunScope } from '../../../mcpLiveBindings'
@@ -20,7 +21,7 @@ import { clearPendingHermesApprovals, resolveHermesApproval } from '../approvals
 import { createHermesClient } from '../client'
 import type { HermesGatewaySupervisor } from '../gateway'
 import { createHermesGatewayDriver, type HermesGatewayDriverDeps } from '../gatewayDriver'
-import { derivedHermesKey } from '../profiles'
+import { derivedHermesKey, hermesJobsFolder } from '../profiles'
 
 const MASTER = 'm'.repeat(64)
 
@@ -51,6 +52,8 @@ interface FakeGateway {
   loseFirstStart: boolean
   /** Hermes reports the card settled before it replies to the answer. */
   settleBeforeReply: boolean
+  /** Runs after Hermes takes an answer and before it replies. */
+  beforeApprovalReply: (() => void) | null
   /** Starts refused as a profile the gateway does not serve yet. */
   unservedStarts: number
   close: () => Promise<void>
@@ -80,6 +83,7 @@ async function fakeGateway(): Promise<FakeGateway> {
     startKeys: [],
     loseFirstStart: false,
     settleBeforeReply: false,
+    beforeApprovalReply: null,
     unservedStarts: 0,
     emit: (f) => {
       stream?.write(`id: ${seq}\ndata: ${JSON.stringify({ ...f, seq: seq++ })}\n\n`)
@@ -173,6 +177,7 @@ async function fakeGateway(): Promise<FakeGateway> {
           g.emit({ event: 'approval.settled', prompt_id: answer['request_id'] })
           await new Promise((r) => setTimeout(r, 150))
         }
+        g.beforeApprovalReply?.()
         res.end(JSON.stringify({ status: 'resolved' }))
         return
       }
@@ -316,9 +321,10 @@ describe('createHermesGatewayDriver', () => {
     })
     expect(liveRunScope('agent-1')).toBeNull()
 
-    // The working folder rode the profile's .env, as the API has none per run.
+    // The working folder rides the profile's .env, as the API has none per run
+    // (which folder, during a run and after it: the jobs folder tests below).
     const env = await readFile(path.join(root, 'gw', 'profiles', 'cb-agent-1', '.env'), 'utf8')
-    expect(env).toContain(`TERMINAL_CWD="${path.join(root, 'work')}"`)
+    expect(env).toContain('TERMINAL_CWD="')
     const config = await readFile(
       path.join(root, 'gw', 'profiles', 'cb-agent-1', 'config.yaml'),
       'utf8',
@@ -464,6 +470,61 @@ describe('createHermesGatewayDriver', () => {
     await until(() => !existsSync(path.join(root, 'gw', 'profiles', profile)))
   })
 
+  it('keeps a throwaway profile until Hermes says its stopped run ended', async () => {
+    g.stopCancels = false
+    g.script = [{ event: 'message.delta', delta: 'working' }, () => new Promise(() => undefined)]
+    const { driver, events, result } = drive(ctx({ homeDir: null }), 'x', {
+      stopGraceMs: 30,
+      pollMs: 20,
+    })
+    await driver.start()
+    await until(() => events.some((e) => e.type === 'message'))
+    const dir = path.join(root, 'gw', 'profiles', g.runs[0]!.profile)
+    await driver.abort()
+    await until(() => Boolean(result()))
+    // Hermes is still in the run: its profile, and the .env its commands read, stay.
+    await new Promise((r) => setTimeout(r, 150))
+    expect(existsSync(path.join(dir, '.env'))).toBe(true)
+    g.status = { run_id: 'run_1', status: 'cancelled' }
+    await until(() => !existsSync(dir))
+  })
+
+  it("points the agent's profile at its jobs folder once a run lets go of it", async () => {
+    const env = path.join(root, 'gw', 'profiles', 'cb-agent-1', '.env')
+    let during = ''
+    g.script = [
+      async () => {
+        during = await readFile(env, 'utf8')
+      },
+      { event: 'run.completed', output: 'ok' },
+    ]
+    const { driver, result } = drive(ctx())
+    await driver.start()
+    await until(() => Boolean(result()))
+    // The run worked in its own folder...
+    expect(during).toContain(`TERMINAL_CWD="${path.join(root, 'work')}"`)
+    // ...and the jobs Hermes runs on its own until the next run work in the agent's.
+    const jobs = hermesJobsFolder('agent-1')
+    expect(jobs).not.toContain(path.join(root, 'gw'))
+    await until(() => readFileSync(env, 'utf8').includes(`TERMINAL_CWD="${jobs}"`))
+    expect(existsSync(jobs)).toBe(true)
+  })
+
+  it('gives a run with no folder of its own the jobs folder, never the gateway home', async () => {
+    const env = path.join(root, 'gw', 'profiles', 'cb-agent-1', '.env')
+    let during = ''
+    g.script = [
+      async () => {
+        during = await readFile(env, 'utf8')
+      },
+      { event: 'run.completed', output: 'ok' },
+    ]
+    const { driver, result } = drive(ctx({ cwd: null }))
+    await driver.start()
+    await until(() => Boolean(result()))
+    expect(during).toContain(`TERMINAL_CWD="${hermesJobsFolder('agent-1')}"`)
+  })
+
   it("runs one agent's runs one at a time, whoever starts them", async () => {
     let release: () => void = () => undefined
     const hold = new Promise<void>((r) => (release = r))
@@ -571,6 +632,21 @@ describe('createHermesGatewayDriver', () => {
     expect(db.select().from(toolCallApprovals).all()[0]!.status).not.toBe('pending')
   })
 
+  it('settles a run whose stream stays open but goes quiet, by reading it again', async () => {
+    // The stream opens and then sends nothing, not even a keepalive.
+    g.script = [() => new Promise<void>(() => undefined)]
+    g.status = { run_id: 'run_1', status: 'completed', output: 'done while unwatched' }
+    const { driver, result } = drive(ctx(), 'x', { pollMs: 20, streamIdleMs: 80 })
+    await driver.start()
+    try {
+      await until(() => Boolean(result()), 4_000)
+    } finally {
+      // A run that never settles would keep its agent's profile from later tests.
+      if (!result()) await driver.abort()
+    }
+    expect(result()).toMatchObject({ ok: true, summary: 'done while unwatched' })
+  })
+
   it('asks again with the same key when the answer to a start is lost', async () => {
     g.loseFirstStart = true
     g.script = [{ event: 'run.completed', output: 'ok' }]
@@ -599,6 +675,45 @@ describe('createHermesGatewayDriver', () => {
     await again.driver.start()
     await until(() => Boolean(again.result()))
     expect(g.runs[1]!.body['session_id']).not.toBe(session)
+  })
+
+  it('records an answer Hermes took even when its reply comes back after the card deadline', async () => {
+    let answered: () => void = () => undefined
+    const gotAnswer = new Promise<void>((r) => (answered = r))
+    g.script = [
+      {
+        event: 'approval.request',
+        prompt_id: 'p1',
+        execution_generation: 1,
+        command: 'rm -rf build',
+        choices: ['once', 'deny'],
+        timeout_s: 120,
+      },
+      () => gotAnswer,
+      { event: 'run.completed', output: 'ok' },
+    ]
+    const { driver, result } = drive(ctx())
+    await driver.start()
+    await until(() => db.select().from(toolCallApprovals).all().length > 0)
+    const id = db.select().from(toolCallApprovals).all()[0]!.id
+    // Hermes takes the answer in time; its reply arrives once the deadline passed.
+    g.beforeApprovalReply = () => {
+      db.update(toolCallApprovals)
+        .set({ expiresAt: Date.now() - 1 })
+        .where(eq(toolCallApprovals.id, id))
+        .run()
+    }
+    const out = await resolveHermesApproval(db, id, 'allow_once', {
+      resolvedBy: { id: 'person-1', name: 'Pat', role: null },
+    })
+    expect(out.status).toBe(200)
+    expect(g.approvals).toHaveLength(1)
+    const row = db.select().from(toolCallApprovals).all()[0]!
+    expect(row.status).toBe('allow_once')
+    expect(JSON.parse(row.resolvedBy!)).toMatchObject({ id: 'person-1', name: 'Pat' })
+    expect(out.body['approval']).toMatchObject({ status: 'allow_once' })
+    answered()
+    await until(() => Boolean(result()))
   })
 
   it("keeps the person's decision when Hermes reports a card settled before it replies", async () => {

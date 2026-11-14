@@ -23,6 +23,8 @@ const ALLOWED: Record<string, string> = {
   'lib/agentUser/plan.ts': 'reads the used user and group ids (dscl) to print the setup commands',
   'lib/runtimes/killTree.ts': "ps and taskkill for the server's own children",
   'lib/processIdentity.ts': 'ps for process start times (the boot reap of its own children)',
+  'lib/runtimes/hermes/portOwner.ts':
+    "netstat and ps, to see who listens on the Hermes gateway's port before its key is sent",
   'lib/platform.ts': 'which / where lookups to resolve runtime binaries',
   'lib/selfRestart.ts': 'restarts the server itself',
   'api/systemUpdate.ts': 'updates the installed clawboo package (the server, not agent work)',

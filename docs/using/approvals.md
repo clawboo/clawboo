@@ -22,13 +22,13 @@ Some actions wait for a person before they happen. Each one appears as an approv
 
 ## What asks for your approval
 
-| Request                                     | When it asks                                                                                                                                     | How long it waits                                                      |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| A shell command from an OpenClaw agent      | When the agent's **Command Execution** setting says to ask. Agents you create in Clawboo start on **Ask for Unknown**                            | Until the OpenClaw Gateway's deadline, or 30 minutes when it sets none |
-| A shell command from a Clawboo Native agent | Before every command, once you let the agent ask to run commands                                                                                 | 10 minutes                                                             |
-| A command from a Hermes agent               | When Hermes's own policy flags it, such as a recursive delete (`approvals.mode` in your own `~/.hermes/config.yaml`, `manual` when it sets none) | 300 seconds by default (`approvals.timeout`)                           |
-| A connector call                            | When Clawboo rates the call as risky, for example one that changes or deletes something in an app                                                | 5 minutes                                                              |
-| A risky hand-off                            | When a leader in team chat hands off a task whose text contains a risky word                                                                     | 5 minutes                                                              |
+| Request                                     | When it asks                                                                                                                                                                     | How long it waits                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| A shell command from an OpenClaw agent      | When the agent's **Command Execution** setting says to ask. Agents you create in Clawboo start on **Ask for Unknown**                                                            | Until the OpenClaw Gateway's deadline, or 30 minutes when it sets none |
+| A shell command from a Clawboo Native agent | Before every command, once you let the agent ask to run commands                                                                                                                 | 10 minutes                                                             |
+| A command from a Hermes agent               | When Hermes's own policy flags it, such as a recursive delete (`approvals.mode` in your own `~/.hermes/config.yaml`, `manual` when it sets none or agents run as their own user) | 300 seconds by default (`approvals.timeout`)                           |
+| A connector call                            | When Clawboo rates the call as risky, for example one that changes or deletes something in an app                                                                                | 5 minutes                                                              |
+| A risky hand-off                            | When a leader in team chat hands off a task whose text contains a risky word                                                                                                     | 5 minutes                                                              |
 
 Claude Code and Codex never ask before using their own tools, such as their shell and file editing: Clawboo runs them with their own approval prompts turned off. Hermes asks only before the commands its own policy flags; its other tools, file editing included, run without asking. Their connector calls and hand-offs still follow the rules above. See [Hermes](/runtimes/hermes#permissions-and-safety). [What agents can do](/concepts/permissions) explains what they can reach. [Command permissions](/using/command-permissions) sets when the two shell checks ask, and [Connectors](/using/connectors#when-a-connector-call-asks-you-first) lists which connector calls ask.
 
@@ -165,7 +165,7 @@ Your tab has no connection to the OpenClaw Gateway, and Clawboo's server could n
 
 <Accordion title="An agent ran a command without asking me">
 
-Claude Code and Codex never ask before a command, and Hermes asks only before the commands its own policy flags (set `approvals.mode` in your own `~/.hermes/config.yaml` to change which). An OpenClaw agent runs without asking when it is set to **Run Freely**, or when the command is already on its list under **Commands this Boo can run without asking**. A Clawboo Native agent asks before every command.
+Claude Code and Codex never ask before a command, and Hermes asks only before the commands its own policy flags (set `approvals.mode` in your own `~/.hermes/config.yaml` to change which, unless agents run as their own user). An OpenClaw agent runs without asking when it is set to **Run Freely**, or when the command is already on its list under **Commands this Boo can run without asking**. A Clawboo Native agent asks before every command.
 
 </Accordion>
 
