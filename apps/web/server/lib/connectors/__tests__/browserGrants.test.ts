@@ -153,6 +153,31 @@ describe('ensureBrowserGrantsForAllAgents', () => {
 
     expect(ensureBrowserGrantsForAllAgents(getDb(), ['a1', 'a2'])).toBe(0)
   })
+
+  it('reads decisions like the per-agent path: a revoked grant, and one of any kind under that id', () => {
+    ensureBrowserGrantsForAgent(getDb(), 'a1')
+    for (const g of browserGrantsFor('a1')) revokeGrant(getDb(), g.id, 'operator said no')
+    // A grant under the same id for another kind of subject counts as decided too,
+    // exactly as the per-agent lookup (by subject id alone) reads it.
+    const connectorId = browserConnectorIds()[0] as string
+    upsertGrant(getDb(), {
+      subjectKind: 'team',
+      subjectId: 'a2',
+      capabilityKind: 'connector',
+      connectorId,
+      capabilityId: null,
+      mode: 'read',
+      toolAllow: ['*'],
+    })
+
+    const minted = ensureBrowserGrantsForAllAgents(getDb(), ['a1', 'a2'])
+
+    expect(minted).toBe(browserConnectorIds().length - 1)
+    for (const g of browserGrantsFor('a1')) expect(g.state).toBe('revoked')
+    const a2 = browserGrantsFor('a2')
+    expect(a2.filter((g) => g.connectorId === connectorId)).toHaveLength(1)
+    expect(a2.find((g) => g.connectorId === connectorId)?.subjectKind).toBe('team')
+  })
 })
 
 describe('ensureBrowserConnectedAtBoot', () => {

@@ -29,6 +29,11 @@ import {
   engineCapabilitiesSchema,
   engineHoldSchema,
   engineHoldStateSchema,
+  engineIdleStateSchema,
+  idleDueSourceSchema,
+  idleNextDueSchema,
+  idlePeopleSchema,
+  idleWorkSchema,
   supportFloorFor,
   type AgentStatusFrame,
   type BoardChangeFrame,
@@ -114,6 +119,7 @@ const PINNED_FEATURES = [
   'stream.events.resume',
   'system.selfUpdate',
   'system.hold',
+  'system.idle',
   'board.pause',
   'auth.proxyIdentity',
   'auth.appLink',
@@ -123,6 +129,13 @@ const PINNED_FEATURES = [
 const PINNED_HOLD_FIELDS = ['backgroundWork', 'held', 'holds', 'runs']
 const PINNED_HOLD_ENTRY_FIELDS = ['expiresAt', 'expiresInMs', 'heldAt', 'owner', 'reason']
 const PINNED_HOLD_RUNS_FIELDS = ['limit', 'queued', 'running']
+
+/** The sleep-and-wake answer (GET /api/system/idle) and the presence beat's. */
+const PINNED_IDLE_FIELDS = ['at', 'nextDue', 'people', 'work']
+const PINNED_IDLE_PEOPLE_FIELDS = ['focusedTabs', 'lastActedAt', 'lastSeenAt', 'present']
+const PINNED_IDLE_WORK_FIELDS = ['backgroundWork', 'checks', 'held', 'routinesInFlight', 'runs']
+const PINNED_IDLE_NEXT_DUE_FIELDS = ['at', 'complete', 'sources', 'timeZone']
+const PINNED_IDLE_SOURCE_FIELDS = ['at', 'count', 'id', 'reason', 'state', 'timeZone']
 
 /** Every route the API router serves, as `METHOD /path`, in registration order. */
 const PINNED_ROUTES = [
@@ -171,6 +184,8 @@ const PINNED_ROUTES = [
   'GET /api/system/hold',
   'POST /api/system/hold',
   'DELETE /api/system/hold/:owner',
+  'GET /api/system/idle',
+  'POST /api/system/presence',
   'GET /api/pauses',
   'POST /api/pauses',
   'DELETE /api/pauses/:kind/:id',
@@ -221,6 +236,8 @@ const PINNED_ROUTES = [
   'GET /api/agents/:agentId/workspaces',
   'GET /api/agents/:agentId/team-folder/tree',
   'GET /api/agents/:agentId/team-folder/file',
+  'GET /api/board/:taskId/folder/tree',
+  'GET /api/board/:taskId/folder/file',
   'POST /api/agents/:agentId/chat/stop',
   'GET /api/agents/:agentId/chat/stream',
   'POST /api/agents/:agentId/chat',
@@ -712,6 +729,56 @@ describe('drain and hold', () => {
     )
     expect(Object.keys(engineHoldStateSchema.shape.runs.shape).sort(), BUMP).toEqual(
       [...PINNED_HOLD_RUNS_FIELDS].sort(),
+    )
+  })
+})
+
+describe('sleep and wake', () => {
+  it('answers the idle read and the presence beat in the pinned shape', async () => {
+    const beat = await fetch(`${base}/api/system/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tabId: 'contract-client', visible: true, focused: true }),
+    })
+    expect(beat.status).toBe(200)
+    expect(Object.keys((await beat.json()) as object).sort(), BUMP).toEqual(
+      [...PINNED_IDLE_PEOPLE_FIELDS].sort(),
+    )
+
+    const res = await fetch(`${base}/api/system/idle`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    const body = (await res.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort(), BUMP).toEqual([...PINNED_IDLE_FIELDS].sort())
+    const idle = engineIdleStateSchema.parse(body)
+    expect(idle.people.present).toBe(true)
+    expect(Object.keys(idle.people).sort(), BUMP).toEqual([...PINNED_IDLE_PEOPLE_FIELDS].sort())
+    expect(Object.keys(idle.work).sort(), BUMP).toEqual([...PINNED_IDLE_WORK_FIELDS].sort())
+    expect(Object.keys(idle.nextDue).sort(), BUMP).toEqual([...PINNED_IDLE_NEXT_DUE_FIELDS].sort())
+    for (const source of idle.nextDue.sources) {
+      const allowed = new Set(PINNED_IDLE_SOURCE_FIELDS)
+      expect(
+        Object.keys(source).filter((k) => !allowed.has(k)),
+        BUMP,
+      ).toEqual([])
+    }
+  })
+
+  it('declares the pinned fields in the exported schemas', () => {
+    expect(Object.keys(engineIdleStateSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_IDLE_FIELDS].sort(),
+    )
+    expect(Object.keys(idlePeopleSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_IDLE_PEOPLE_FIELDS].sort(),
+    )
+    expect(Object.keys(idleWorkSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_IDLE_WORK_FIELDS].sort(),
+    )
+    expect(Object.keys(idleNextDueSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_IDLE_NEXT_DUE_FIELDS].sort(),
+    )
+    expect(Object.keys(idleDueSourceSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_IDLE_SOURCE_FIELDS].sort(),
     )
   })
 })

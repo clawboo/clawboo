@@ -60,10 +60,18 @@ export interface ScheduleSourceReadStatus {
   sourceId: ScheduleSourceId
   ok: boolean
   degraded: boolean
-  /** e.g. 'gateway_disconnected' | 'stale_cache' */
+  /** e.g. 'gateway_disconnected' | 'stale_cache' | SCHEDULE_SOURCE_NOT_CONFIGURED */
   reason?: string
   at: number
 }
+
+/**
+ * The `reason` a source gives when the system it reads is not set up at all (no
+ * Gateway configured, say), as opposed to set up but unreachable right now. A
+ * reader can then treat the source as not in use: it has no schedules, rather
+ * than schedules it could not read.
+ */
+export const SCHEDULE_SOURCE_NOT_CONFIGURED = 'not_configured'
 
 export interface ScheduleReadResult {
   records: ScheduleRecord[]

@@ -104,6 +104,10 @@ export interface OpenClawAgentSourceDeps {
    *  per call — the registries are module singletons built once per test file). */
   getDb: () => ClawbooDb
   loadSettings: () => { gatewayUrl?: string; gatewayToken?: string }
+  /** Whether this install set up a Gateway at all. `loadSettings` falls back to
+   *  the default local address, so its URL alone cannot say. Absent: a URL in
+   *  settings counts as set up. */
+  isConfigured?: () => boolean
   /** Construct a fresh Gateway client (the registry injects the real one + signer). */
   makeClient: () => OpenClawClientLike
   /** Connect options the registry supplies (token + signConnect). */
@@ -280,6 +284,17 @@ export class OpenClawAgentSource implements AgentSource {
 
   isConnected(): boolean {
     return this.connection === 'connected'
+  }
+
+  /** True when this install set up a Gateway, connected or not. */
+  isConfigured(): boolean {
+    if (this.deps.isConfigured) return this.deps.isConfigured()
+    return Boolean(this.deps.loadSettings().gatewayUrl?.trim())
+  }
+
+  /** The Gateway URL settings name (the default local address when none is set). */
+  gatewayUrl(): string | undefined {
+    return this.deps.loadSettings().gatewayUrl
   }
 
   /** True while the last connect failed for an auth-class reason (bad token /

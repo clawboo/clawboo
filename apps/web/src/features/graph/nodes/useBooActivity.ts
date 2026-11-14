@@ -7,7 +7,7 @@
 // Two sources, because a Boo can be working in two different ways:
 //   • CHAT runs write to the chat store (streaming text, reasoning, tool calls)
 //   • BOARD runs never touch it, so `RunStatusBridge` folds the obs tool_call
-//     tail into `runActivity` — the same line the Workspace tab shows.
+//     tail into `runActivity`, the same line the Computer tab shows.
 //
 // Returns null when the agent has produced nothing yet. That is NOT the same as
 // "not working": a run that has been thinking for ten seconds has no line to

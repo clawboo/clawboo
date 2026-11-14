@@ -289,6 +289,19 @@ describe('OpenClawGatewayCronScheduleSource', () => {
     expect(client.calls).toHaveLength(0)
   })
 
+  it('no Gateway set up: read says not_configured, so a reader can tell it from a dropped connection', async () => {
+    const client = { ...makeFakeClient({ connected: false }), isConfigured: () => false }
+    const source = new OpenClawGatewayCronScheduleSource(client)
+    const { records, status } = await source.read()
+    expect(records).toEqual([])
+    expect(status).toMatchObject({ ok: false, degraded: true, reason: 'not_configured' })
+
+    // Set up but not connected is still the dropped connection.
+    const configured = { ...makeFakeClient({ connected: false }), isConfigured: () => true }
+    const read = await new OpenClawGatewayCronScheduleSource(configured).read()
+    expect(read.status.reason).toBe('gateway_disconnected')
+  })
+
   it('answers an unknown job id as UnknownScheduleError (404), not a raw Gateway error', async () => {
     const client = makeFakeClient()
     // OpenClaw 2026.9's own not-found answer: INVALID_REQUEST with a detail code.

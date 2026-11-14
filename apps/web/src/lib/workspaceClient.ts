@@ -1,5 +1,5 @@
 // Client for the read-only workspace filesystem view (the agent-detail
-// Workspace tab). Same conventions as boardClient: thin fetchers over
+// Computer tab). Same conventions as boardClient: thin fetchers over
 // `apiFetch`, null/[] on failure, no throwing into render paths.
 
 import { apiFetch } from '@clawboo/control-client'
@@ -17,8 +17,18 @@ export interface AgentWorkspace {
   updatedAt: number
 }
 
-/** The folder an agent starts in when it has no worktree (team chat, read-only
- *  tasks). No git, so no change badges. */
+/** A task's own folder: where a run of a task with no worktree starts and its
+ *  files land. No git, so no change badges. */
+export interface AgentTaskFolder {
+  taskId: string
+  title: string
+  taskStatus: string
+  path: string
+  updatedAt: number
+}
+
+/** The folder an agent's other runs start in (team chat, its own chat). No git,
+ *  so no change badges. */
 export interface AgentTeamFolder {
   /** null for an agent with no team (the shared `_no-team` folder). */
   teamId: string | null
@@ -29,6 +39,8 @@ export interface AgentTeamFolder {
 
 export interface AgentWorkspaceList {
   workspaces: AgentWorkspace[]
+  /** Its tasks' own folders, newest first. */
+  taskFolders: AgentTaskFolder[]
   /** null for a runtime that gets no folder (OpenClaw). */
   teamFolder: AgentTeamFolder | null
 }
@@ -42,9 +54,14 @@ export async function getAgentWorkspaces(agentId: string): Promise<AgentWorkspac
     if (!r.ok) return null
     const body = (await r.json()) as {
       workspaces?: AgentWorkspace[]
+      taskFolders?: AgentTaskFolder[]
       teamFolder?: AgentTeamFolder | null
     }
-    return { workspaces: body.workspaces ?? [], teamFolder: body.teamFolder ?? null }
+    return {
+      workspaces: body.workspaces ?? [],
+      taskFolders: body.taskFolders ?? [],
+      teamFolder: body.teamFolder ?? null,
+    }
   } catch {
     return null
   }
@@ -88,6 +105,37 @@ export async function getWorkspaceFile(
   try {
     const r = await apiFetch(
       `/api/board/${encodeURIComponent(taskId)}/workspace/file?path=${encodeURIComponent(path)}`,
+    )
+    if (!r.ok) return null
+    return (await r.json()) as WorkspaceFileContent
+  } catch {
+    return null
+  }
+}
+
+/** One directory level of a task's own folder. */
+export async function getTaskFolderTree(
+  taskId: string,
+  dir: string,
+): Promise<WorkspaceTreeListing | null> {
+  try {
+    const r = await apiFetch(
+      `/api/board/${encodeURIComponent(taskId)}/folder/tree?dir=${encodeURIComponent(dir)}`,
+    )
+    if (!r.ok) return null
+    return (await r.json()) as WorkspaceTreeListing
+  } catch {
+    return null
+  }
+}
+
+export async function getTaskFolderFile(
+  taskId: string,
+  path: string,
+): Promise<WorkspaceFileContent | null> {
+  try {
+    const r = await apiFetch(
+      `/api/board/${encodeURIComponent(taskId)}/folder/file?path=${encodeURIComponent(path)}`,
     )
     if (!r.ok) return null
     return (await r.json()) as WorkspaceFileContent

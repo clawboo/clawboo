@@ -8,7 +8,7 @@
 // The obs log already carries the answer. `deriveNowActivity` turns a tool_call
 // tail into the current file and command, and every obs row is tagged with the
 // agent that produced it — so grouping by `agentId` and reusing that deriver
-// gives the same live line the Workspace tab shows, for every agent at once,
+// gives the same live line the Computer tab shows, for every agent at once,
 // off a stream the app already has open.
 
 import { deriveNowActivity } from '@/features/workspace/deriveNowActivity'

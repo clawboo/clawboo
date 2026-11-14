@@ -49,6 +49,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 ├── frames/                     screenshots from agents' browsers
 ├── runtimes/                   per-agent homes for Codex and Hermes
 ├── catalog/                    a cached copy of the Marketplace catalog
+├── cache/compile/              Node's compiled copy of the server, for faster starts
 └── team-folder-history/        a git history of each team's folder, for checks
 ```
 
@@ -71,11 +72,12 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 | `frames/`                            | Screenshots saved from agents' browsers                                                                                                                                                                                                                                                           | Yes                                         | Those screenshots.                                                                                   |
 | `runtimes/`                          | Per-agent homes for Codex and Hermes agents, including a copy of your Codex sign-in                                                                                                                                                                                                               | Yes, when no run is active                  | Those agents' saved sessions; they start fresh.                                                      |
 | `catalog/`                           | A cached copy of the Marketplace catalog                                                                                                                                                                                                                                                          | Yes                                         | Nothing. Clawboo downloads it again.                                                                 |
+| `cache/compile/`                     | Node's compiled copy of the server, so a start after the first does not compile it again. Only when `clawboo` started the server                                                                                                                                                                  | Yes                                         | Nothing. The next start is a little slower.                                                          |
 | `team-folder-history/`               | A git history of each team's folder (`<team id>.git`), saved as team chat tasks start and end so their work can be checked. Deleting a team deletes it                                                                                                                                            | Yes, when no run or check is active         | Running tasks lose their starting point: unchecked, or Needs you after a failed check.               |
 | `workspaces/`, `worktrees/`          | Left by an older version. After the [move](#move-older-work-into-it), a link at each old path to the team folder or checkout that moved, and any folder the move kept at its old place. New work goes here only when the [work folder cannot be created](#when-the-work-folder-cannot-be-created) | No                                          | A folder kept here is still in use. Without the links, 0.6.x finds no team folders after a rollback. |
 | `reviews/`                           | Review checkouts an older version made. New ones go in the work folder, or here when it cannot be created                                                                                                                                                                                         | Yes, when no check is running               | Nothing.                                                                                             |
 
-On macOS and Linux, Clawboo makes the database, its working files, `settings.json` and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in its team's folder in the work folder instead. It still has your account's full file access; see [What agents can do](/concepts/permissions).
+On macOS and Linux, Clawboo makes the database, its working files, `settings.json` and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in the work folder instead: in the task's own folder on a run that holds a task, else in its team's folder. It still has your account's full file access, unless [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) runs it as its own user; see [What agents can do](/concepts/permissions).
 
 ## The work folder
 
@@ -86,6 +88,7 @@ Your agents' work lives in the work folder, apart from the data folder. It is th
 ├── README.txt                  what this folder is
 ├── teams/                      a folder for each team, where its agents start
 │   ├── <team id>/
+│   │   └── tasks/<task id>/    a folder for each task run with no worktree
 │   └── _no-team/               for tasks and agents with no team
 ├── worktrees/                  git worktrees for board tasks
 │   └── <repo hash>/<task id>/
@@ -95,18 +98,34 @@ Your agents' work lives in the work folder, apart from the data folder. It is th
         └── team-<team id>/
 ```
 
-| Path         | What it holds                                                                                                                                                                     | Safe to delete?                     | What you lose                                                                        |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------ |
-| `teams/`     | One folder per team (`teams/<team id>`), where its agents start when a run has no worktree, plus `_no-team` for tasks and agents with no team. Deleting a team deletes its folder | Yes, when no run is active          | The files agents saved there. Clawboo creates a team's folder again on its next run. |
-| `worktrees/` | Git worktrees for board tasks that run in a repository, each with a `.<task id>.owner` file beside it                                                                             | No: Clawboo removes old ones itself | Uncommitted work in those checkouts.                                                 |
-| `reviews/`   | Read-only checkouts for verifying finished work                                                                                                                                   | Yes, when no check is running       | Nothing.                                                                             |
-| `README.txt` | A note on what the folder holds                                                                                                                                                   | Yes                                 | Nothing. Clawboo writes it again at the next start.                                  |
+| Path         | What it holds                                                                                                                                                                                                                                                                                                                | Safe to delete?                     | What you lose                                                                        |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `teams/`     | One folder per team (`teams/<team id>`), where its agents start when a run holds no task and has no worktree, plus `_no-team` for tasks and agents with no team. Inside it, `tasks/<task id>` is the folder of each task that runs without a worktree; see [Task folders](#task-folders). Deleting a team deletes its folder | Yes, when no run is active          | The files agents saved there. Clawboo creates a team's folder again on its next run. |
+| `worktrees/` | Git worktrees for board tasks that run in a repository, each with a `.<task id>.owner` file beside it                                                                                                                                                                                                                        | No: Clawboo removes old ones itself | Uncommitted work in those checkouts.                                                 |
+| `reviews/`   | Read-only checkouts for verifying finished work                                                                                                                                                                                                                                                                              | Yes, when no check is running       | Nothing.                                                                             |
+| `README.txt` | A note on what the folder holds                                                                                                                                                                                                                                                                                              | Yes                                 | Nothing. Clawboo writes it again at the next start.                                  |
 
-Everything Clawboo creates in the work folder is readable only by your user account (`0700`). The `.<task id>.owner` file beside each checkout holds this install's id. The worktree cleanup in the work folder removes only checkouts this install's board records or that carry its id, so two installs can share one work folder.
+Everything Clawboo creates in the work folder is readable only by your user account (`0700`), or only by the agent user with `CLAWBOO_AGENT_USER` set. The `.<task id>.owner` file beside each checkout holds this install's id. The worktree cleanup in the work folder removes only checkouts this install's board records or that carry its id, so two installs can share one work folder.
 
-The data folder keeps the rest: the database, the key vault, the settings, the runtime homes (`runtimes/`), the browser profiles, connector state, and `team-folder-history/`, the work check's history of each team folder.
+The data folder keeps the rest: the database, the key vault, the settings, the runtime homes (`runtimes/`), the browser profiles, connector state, and `team-folder-history/`, the work check's history of each team folder. With `CLAWBOO_AGENT_USER` set, the work folder, the runtime homes and the browser profiles are in the agent user's home instead; see [With agents as their own user](#with-agents-as-their-own-user).
 
-Keeping the work apart removes the short relative path from an agent's folder to your data: `../..` from a team folder no longer reaches the database, and neither does a tool that walks up parent folders. That holds only for work in the work folder. When the work folder cannot be created and the install keeps the old layout, or the move below keeps a folder at its old place, that folder is still inside the data folder and `../..` from it does reach the data. It is not a boundary either way. Agents still run as your user account and can open `~/.clawboo` by its full path; see [What agents can do](/concepts/permissions).
+Keeping the work apart removes the short relative path from an agent's folder to your data: `../..` from a team folder no longer reaches the database, and neither does a tool that walks up parent folders. That holds only for work in the work folder. When the work folder cannot be created and the install keeps the old layout, or the move below keeps a folder at its old place, that folder is still inside the data folder and `../..` from it does reach the data. It is not a boundary either way. Agents still run as your user account and can open `~/.clawboo` by its full path; see [What agents can do](/concepts/permissions). With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set, agents run as a user that cannot open the database, the vault, its key, settings or the token at all.
+
+### Task folders
+
+A task that a Claude Code, Codex, Hermes or Clawboo Native agent runs without a worktree gets a folder of its own, `teams/<team id>/tasks/<task id>`, or `teams/_no-team/tasks/<task id>` for a task with no team. That covers tasks handed out in team chat, tasks you give from the Board, tasks a routine files, and research and review runs of the task runner. Each run on the task starts there and is told to save the files it makes for the task there, and that the team's shared folder is two levels up (`../..`), where `tasks/` holds the other tasks' folders. Clawboo creates the folder, readable only by your user account (or only by the agent user with `CLAWBOO_AGENT_USER` set), on the task's first run. A turn that holds no task, such as the lead's turn or your message in team chat, still starts in the team's folder. OpenClaw agents work in their Gateway's own workspace and get no task folder.
+
+The task folders sit inside the team's folder on purpose: the team's [work check](/using/teams#work-check) measures the team's folder, so a change in a task folder counts, and deleting a team deletes its task folders with it. Archiving a team keeps them.
+
+When the server starts, Clawboo removes the empty folders of finished tasks:
+
+- **Only empty folders.** The remove is plain and not recursive, so a folder that holds any file is kept. Unlike a worktree, a task folder has no branch that keeps its work, so its files stay until you delete them or delete the team.
+- **Only finished tasks.** A task that is Done, Cancelled or dropped loses its empty folder. A task that is still going or could still run (To do, Blocked, In progress or In review) keeps it.
+- **Only this install's tasks.** The cleanup looks in the folders of this install's teams and `_no-team`, and leaves alone a folder whose name is not one of this install's tasks, so a work folder two installs share is safe.
+- **Links are never followed.** A `tasks/` folder that is a link is skipped, and a link inside it is left as it is.
+- **As the agent user, with `CLAWBOO_AGENT_USER` set.** Every look, listing and removal goes through the agent host, so Clawboo never removes anything in the agents' folders as your user.
+
+Claude Code files its saved sessions under the folder they ran in, and task runs used to start in the team's folder. So once, at the first start with task folders, Clawboo drops the Claude Code task sessions it saved before, and those tasks start a fresh session on their next run. Codex, Hermes and Clawboo Native agents keep theirs.
 
 ### Move older work into it
 
@@ -121,6 +140,8 @@ Older versions kept team folders in `~/.clawboo/workspaces` and task checkouts i
 - **One server moves at a time.** A second server started on the same data folder waits for the first one's move to end, answering `migrating` meanwhile, and then starts.
 
 Claude Code files its saved sessions under the folder they ran in. After a team folder moves, Clawboo drops the session ids it saved for Claude Code agents (1:1 chat, team chat and task pointers), and after a checkout moves, the session id in its handoff. Their next turn starts a fresh session with the brief and the chat history. Codex, Hermes and Clawboo Native agents keep their sessions.
+
+With `CLAWBOO_AGENT_USER` set, the move does not run. The work folder belongs to the agent user, so Clawboo copies older work into it instead; see [With agents as their own user](#with-agents-as-their-own-user).
 
 ### What the move leaves where it is
 
@@ -164,6 +185,23 @@ When `CLAWBOO_WORK_DIR` is not set and Clawboo cannot create or write to the def
 ### Roll back to 0.6.x
 
 You can go back to 0.6.x after the move. 0.6.0 already reads checkouts in the work folder, and finds team folders through the links. One limit: 0.6.x's work check refuses a team folder in the work folder, so team chat work checks fail on 0.6.x until you upgrade again. Versions before 0.6.0 do not read the work folder, so do not go below 0.6.0 after the move.
+
+### With agents as their own user
+
+With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set, agents run as a separate user, and their folders belong to it, in its home folder. With the commands `clawboo agent-user plan` prints, that home is `/var/lib/clawboo-agent` on Linux and `/var/clawboo-agent` on macOS.
+
+| What                                                                     | Where                                                                                      | Owner                  |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | ---------------------- |
+| The work folder                                                          | `<agent home>/work`, or the folder `CLAWBOO_WORK_DIR` names, which the agent user must own | The agent user, `0700` |
+| Each Codex and Hermes agent's runtime home (`CODEX_HOME`, `HERMES_HOME`) | `<agent home>/runtimes/<runtime>/<agent>`                                                  | The agent user, `0700` |
+| Claude Code's settings and sessions, shared by every Claude Code agent   | The agent user's own `~/.claude`                                                           | The agent user         |
+| Each agent's browser profile                                             | `<agent home>/browser-profiles/`                                                           | The agent user, `0700` |
+| The agent user's copy of each repository                                 | `mirrors/<repository hash>.git` in the work folder                                         | The agent user         |
+| The database, the vault, settings, the token, Clawboo Native's history   | The data folder, as before                                                                 | You                    |
+
+The move above does not run, since Clawboo cannot write in the agent user's folders as you. Instead, the first start with the setting copies what agents already had into the agent user's space: each runtime home (Hermes memory and skills, Codex sessions) and each team folder, from the data folder's `workspaces/` and from the work folder used before. It never copies a link, a file with more than one hard link, a sign-in or key file (`auth.json`, `.env`: before, those were copies of your own logins and keys) or Clawboo Native's history, and names what it skipped in the log. Task checkouts are not copied: they are rebuilt in the new work folder from their branches. The originals stay where they were, so turning the setting off again is the way back.
+
+With the setting on, Clawboo never falls back to the old layout: the agent user must be able to write in its work folder, or Clawboo refuses to start (see [What the startup check proves](/operating/agent-isolation#what-the-startup-check-proves)).
 
 ## The runtimes folder
 

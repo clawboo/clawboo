@@ -2,7 +2,7 @@
 // server can read, such as the vault key in Clawboo's own data folder. Every
 // route that reads agent-written files back to the dashboard is asked for one
 // here, over HTTP, against a real task worktree: the artifact preview, the
-// Workspace tab's file read, and the task drawer's detail. None may answer with
+// Computer tab's file read, and the task drawer's detail. None may answer with
 // the linked file's bytes.
 
 import { execFile } from 'node:child_process'
@@ -102,7 +102,7 @@ describe('a link planted in a worktree is never served', () => {
     }
   })
 
-  it("the Workspace tab's file read refuses it, as a file and through a folder", async () => {
+  it("the Computer tab's file read refuses it, as a file and through a folder", async () => {
     for (const rel of ['leak.txt', 'site/master.key']) {
       const r = await get(`/workspace/file?path=${encodeURIComponent(rel)}`)
       expect(r.status, rel).toBe(400)

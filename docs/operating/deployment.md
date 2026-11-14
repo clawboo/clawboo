@@ -22,7 +22,7 @@ Clawboo runs as one server process. On one port it serves the dashboard, its API
 ## Before you begin
 
 - **Node.js 22.12 or newer.** The `clawboo` command checks this and stops with a message on an older Node.
-- **Clawboo installed** with `npm install -g clawboo` ([Install Clawboo](/getting-started/installation)). The package holds the launcher, the server (`dist/server.js`), the dashboard files (`dist/ui`) and the four MCP programs (`dist/bin`).
+- **Clawboo installed** with `npm install -g clawboo` ([Install Clawboo](/getting-started/installation)). The package holds the launcher, the server (`dist/server.js`), the dashboard files (`dist/ui`), the four MCP programs (`dist/bin`), and the agent host and container launcher for [agent isolation](/operating/agent-isolation) (`dist/agent-host.js`, `dist/clawboo-launch`).
 
 ## Ways to run it
 
@@ -62,9 +62,10 @@ NODE_ENV=production node "$(npm root -g)/clawboo/dist/server.js"
 
 - **It runs in the foreground** and logs to the terminal. `NODE_ENV=production` gives plain JSON log lines, as with the launcher.
 - **Ctrl+C stops it cleanly.** It stops the agent processes it started, waits up to 5 seconds for them, and closes the database.
-- **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder in the [work folder](/operating/data-and-state#the-work-folder), `~/clawboo-work/teams` by default.
+- **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder, or in the task's own folder inside it on a task, in the [work folder](/operating/data-and-state#the-work-folder), `~/clawboo-work/teams` by default.
 - **The dashboard files** come from the `ui` folder next to `server.js`. `CLAWBOO_UI_DIR` points somewhere else. If Clawboo cannot read `index.html` there, page loads answer `503` with "The Clawboo dashboard could not be read from disk. Check CLAWBOO_UI_DIR."
 - **MCP attach snippets.** To make the stdio snippets from `GET /api/mcp/config` name the bundled MCP programs, also set `CLAWBOO_MCP_BIN_DIR="$(npm root -g)/clawboo/dist/bin"`, as the launcher does.
+- **Faster starts.** The launcher sets `NODE_COMPILE_CACHE=~/.clawboo/cache/compile`, so Node keeps its compiled copy of the server between starts. Set it yourself to get the same, which matters most when something stops the server when idle and starts it on demand.
 - **Signing in.** Without `STUDIO_ACCESS_TOKEN`, the server locks itself with the per-install token in `~/.clawboo/access-token` of the user account it runs as. Run `clawboo open` as that user to open a signed-in browser, or `clawboo open --print` for a one-time link to open elsewhere.
 
 ### Run it as a service
@@ -107,7 +108,7 @@ CLAWBOO_ALLOWED_ORIGINS=https://dash.example.com
 
 Generate the token with `openssl rand -hex 24` and save it in your password manager before you start the server. Use only letters, digits, `.`, `_`, `~` and `-`: with any other character the server refuses to start.
 
-The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network and other accounts, not your own account. Leave `STUDIO_ACCESS_TOKEN` out and the server uses its per-install token file instead, with the same limits.
+The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network and other accounts, not your own account. With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set and your home folder closed to other users, agents cannot. Leave `STUDIO_ACCESS_TOKEN` out and the server uses its per-install token file instead, with the same limits.
 
 Then turn the service on, and let it run while you are logged out:
 
@@ -118,6 +119,23 @@ loginctl enable-linger "$USER"
 ```
 
 `journalctl --user -u clawboo` shows its log. On macOS, run the same server command under launchd, with the same working directory and variables. Under launchd there is no journal, so set `StandardOutPath` and `StandardErrorPath` in its plist to a log file (a full path, as launchd does not expand `~`) and read that file.
+
+### Run it in a container with agents on their own user
+
+In a container, `clawboo-launch` runs the server and its agents as two users, so agents cannot read Clawboo's database, vault, key, settings or token. It works under `--security-opt no-new-privileges`, which rules out sudo, because it only drops privileges, once for each process, with `setpriv` or `gosu`. Make it the container's entrypoint, run as root, with an init process (`docker run --init`, or tini):
+
+```bash
+CLAWBOO_SERVER_USER=clawboo CLAWBOO_AGENT_USER=clawboo-agent \
+CLAWBOO_HOME=/data CLAWBOO_WORK_DIR=/work \
+  sh "$(npm root -g)/clawboo/dist/clawboo-launch"
+```
+
+- **Two users in the image.** `CLAWBOO_SERVER_USER` runs the server and `CLAWBOO_AGENT_USER` runs every agent. Neither may be root, and they must differ.
+- **Two folders.** Keep the data folder and the work folder apart: two volumes, or two top-level folders with different owners, such as `/data` and `/work`. On the first start the launcher gives the work folder to the agent user.
+- **Runtimes both users can run.** Install Node and each runtime (Claude Code, Codex, Hermes) outside any one user's home.
+- **One restart policy for both.** When the server or the agent host exits, the launcher stops the other and every agent process, then exits, so the container's restart policy starts both again.
+
+[Set it up in a container](/operating/agent-isolation#set-it-up-in-a-container) covers what the launcher does step by step. On a computer or virtual machine, use the sudo setup that `clawboo agent-user plan` prints instead.
 
 ## Ports
 
@@ -132,7 +150,7 @@ The server writes the port it chose to `~/.clawboo/api-port.txt`, and removes th
 
 ## Where the server keeps its files
 
-Clawboo's own data lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME` moves it): the database, settings, the encrypted key vault and logs. Your agents' work, task worktrees and each team's folder, lives in the work folder: `~/clawboo-work` by default, `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, or the folder `CLAWBOO_WORK_DIR` names. It must be outside the Clawboo folder, or the server refuses to start. In a container whose Clawboo folder is a volume, set `CLAWBOO_WORK_DIR` to a second volume or folder; when it is unset and the default cannot be created, Clawboo keeps new work in the Clawboo folder and logs a warning. Clawboo also writes to OpenClaw's folder (`~/.openclaw`) when you connect a key under **Providers**, set up OpenClaw, or change OpenClaw settings from the dashboard. [Data and state](/operating/data-and-state) lists every file and covers backups and resets.
+Clawboo's own data lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME` moves it): the database, settings, the encrypted key vault and logs. Your agents' work, task worktrees and each team's folder with its task folders, lives in the work folder: `~/clawboo-work` by default, `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, or the folder `CLAWBOO_WORK_DIR` names. It must be outside the Clawboo folder, or the server refuses to start. In a container whose Clawboo folder is a volume, set `CLAWBOO_WORK_DIR` to a second volume or folder; when it is unset and the default cannot be created, Clawboo keeps new work in the Clawboo folder and logs a warning. Clawboo also writes to OpenClaw's folder (`~/.openclaw`) when you connect a key under **Providers**, set up OpenClaw, or change OpenClaw settings from the dashboard. [Data and state](/operating/data-and-state) lists every file and covers backups and resets.
 
 ## Logs
 
@@ -220,6 +238,14 @@ Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere 
 - **A sign-in proxy for a team:** have Clawboo check the proxy's signed identity tokens, so approvals, chat and task moves record who did them. See [Run Clawboo behind a sign-in proxy](/guides/sso-proxy).
 
 [Reach Clawboo from another machine](/guides/self-host-securely) has the steps and the nginx, Caddy and Cloudflare Tunnel configs. On Clawboo 0.5.0 and older the `/api/mcp/` rule is required: see the advisory in the [Security model](/operating/security).
+
+## Stop it when nobody is using it
+
+A computer or service manager can stop Clawboo when it is idle and start it again on demand, so it does not run all day for a dashboard nobody has open. Clawboo is made for this:
+
+- **It says when it is idle.** `GET /api/system/idle` answers whether a person is at a dashboard (counted from the dashboard's presence beat, never from its polling), whether an agent run is going, and when the next routine or OpenClaw cron job is due. A stop script stops it once nobody has been there and nothing has run for a few minutes, after a [drain](/reference/rest-api/system#drain-and-hold), and starts it again a minute before the next due time. See [Sleep and wake](/reference/rest-api/system#sleep-and-wake).
+- **It starts quickly.** The startup checks run SQLite's quick integrity check in a background thread, so the server answers while they read the database; the full check runs the same way once a day, and on **Re-run probe** in **System Health**. Right after a start, `/api/health` answers once those checks finish, while other routes, `/api/system/idle` among them, answer at once. Node keeps its compiled copy of the server between starts (see [Start the server directly](#start-the-server-directly)).
+- **It catches up once.** A routine whose time passed while Clawboo was stopped runs once when it starts again; missed times are not made up. A due OpenClaw routine waits up to 5 minutes for the Gateway to connect rather than failing on it, and while it waits it counts as work, so the server is not stopped in the middle of the wait.
 
 ## Check that it is running
 

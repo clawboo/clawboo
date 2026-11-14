@@ -1,8 +1,11 @@
 // MUST stay the first import: it moves a server started in a deleted working
 // directory into one that exists, before express (via depd) calls process.cwd().
 import './lib/cwdGuard'
+// Before anything can spawn: Node's compile cache is for this server only (see it).
+import './lib/compileCacheEnv'
 
 import http from 'node:http'
+import nodeModule from 'node:module'
 import path from 'node:path'
 
 import express from 'express'
@@ -30,12 +33,14 @@ import {
 import { apiRouter } from './api/index'
 import { carriesAttachToken, redactAttachCredentials } from './api/mcp'
 import { attachIdentity } from './lib/auth'
+import { recordPersonActions } from './lib/personActions'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
 import { setDashboardPort } from './lib/connectors/dashboardGuard'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
+import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
 import { stopAgentUser } from './lib/agentUser/boot'
@@ -59,7 +64,10 @@ import { pumpChatReportUps, startChatReportUps } from './lib/agentChat/chatHandO
 import { pumpTaskWakes, pumpTaskWakesByRoom, type TaskWakePumpDeps } from './lib/teamChat/taskWakes'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
-import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
+import {
+  clearClaudeCodeTaskPointersOnce,
+  sweepTaskSessionPointers,
+} from './lib/teamChat/taskSessionPointers'
 import {
   getTeamOrchestrator,
   roomCanRun,
@@ -90,7 +98,7 @@ import {
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { resolveBootAccessToken } from './lib/bootAccessToken'
-import { runBootProbe } from './lib/bootProbe'
+import { runBootProbe, startBackgroundFullDatabaseCheck } from './lib/bootProbe'
 import { sweepLeftoverBudgetHolds } from './lib/budgetHold'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
@@ -548,6 +556,11 @@ async function main() {
     next()
   })
 
+  // A write that is something a person does counts as them being here, for a host
+  // that stops an idle server. After the identity middleware, so it can read who a
+  // request names; it looks once the response is sent, when the route is known.
+  app.use(recordPersonActions())
+
   // API routes
   app.use(apiRouter)
 
@@ -700,6 +713,11 @@ async function main() {
   try {
     const swept = sweepTaskSessionPointers(getDb())
     if (swept > 0) log.info({ swept }, 'Board: dropped task resume pointers nothing will resume')
+    // Once: Claude Code task sessions filed under the team folder, from before
+    // task runs started in their own folders.
+    const moved = clearClaudeCodeTaskPointersOnce(getDb())
+    if (moved > 0)
+      log.info({ moved }, 'Board: dropped Claude Code task sessions from before task folders')
   } catch (err) {
     log.error({ err }, 'Board: sweeping task resume pointers failed (non-fatal)')
   }
@@ -764,6 +782,20 @@ async function main() {
       }
     })
     .catch((err: unknown) => log.error({ err }, 'Worktrees: startup GC failed (non-fatal)'))
+
+  // ── Task folders: remove the empty ones of finished tasks ───────────────────
+  // Same rules as the worktree sweep: live tasks are skipped and no work is lost
+  // (a folder with files stays). Best-effort; never blocks boot.
+  void gcTaskFolders(getDb())
+    .then(({ removed }) => {
+      if (removed.length > 0) {
+        log.info(
+          { removed: removed.length },
+          'Task folders: removed empty folders of finished tasks',
+        )
+      }
+    })
+    .catch((err: unknown) => log.error({ err }, 'Task folders: startup cleanup failed (non-fatal)'))
 
   // ── Tools broker: seed the registry ─────────────────────────────────────────
   // Insert a tool_registry row for every builtin brokered tool so the enabled /
@@ -1169,6 +1201,29 @@ async function main() {
           await refreshConnectedApps(BROKERED_TOOLKITS).catch(() => undefined)
         })
         .catch(() => undefined)
+    })
+
+    // ── Full database check ───────────────────────────────────────────────────
+    // The boot probe below runs SQLite's quick check; the full one, with its index
+    // and UNIQUE checks, runs off the main thread a couple of minutes after the
+    // start when the last one is a day old, then daily (see bootProbe).
+    safeStart('database-full-check', () => {
+      startBackgroundFullDatabaseCheck({ log })
+    })
+
+    // ── Compiled-code cache ───────────────────────────────────────────────────
+    // When the launcher turned on Node's compile cache (NODE_COMPILE_CACHE, see the
+    // CLI's compileCacheEnv), write it once boot is done instead of only at a clean
+    // exit: a host that stops this server hard would otherwise never leave one, and
+    // every start would compile the whole bundle again. A no-op without the cache.
+    safeStart('compile-cache-flush', () => {
+      setTimeout(() => {
+        try {
+          ;(nodeModule as { flushCompileCache?: () => void }).flushCompileCache?.()
+        } catch (err) {
+          log.warn({ err }, 'Could not write the compiled-code cache (non-fatal)')
+        }
+      }, 15_000).unref()
     })
 
     // ── Boot probe ────────────────────────────────────────────────────────────

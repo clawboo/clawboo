@@ -124,7 +124,7 @@ Embeddings are what let memory match on meaning. Clawboo picks a provider in thi
 
 <Note>
 
-Claude Code agents do not load your own Claude Code memory: not your `~/.claude/CLAUDE.md` or rules, not a `CLAUDE.md` in any folder above the one they work in, and not Claude Code's auto memory. They do read the `CLAUDE.md` of the folder they work in, such as a repository's, so a `CLAUDE.md` in a team's folder reaches every Claude Code agent of that team. See [Claude Code](/runtimes/claude-code#your-own-claude-code-setup-stays-out).
+Claude Code agents do not load your own Claude Code memory: not your `~/.claude/CLAUDE.md` or rules, not a `CLAUDE.md` in any folder above the one they work in, and not Claude Code's auto memory. They do read the `CLAUDE.md` of the folder they work in, such as a repository's. A run on a task in the task's own folder also reads the team's folder's `CLAUDE.md`, so a `CLAUDE.md` in a team's folder reaches every Claude Code agent of that team. See [Claude Code](/runtimes/claude-code#your-own-claude-code-setup-stays-out).
 
 </Note>
 

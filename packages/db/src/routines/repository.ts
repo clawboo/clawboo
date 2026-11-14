@@ -181,6 +181,27 @@ export function queueDueRuns(db: ClawbooDb, now: number): DbScheduledRun[] {
   )
 }
 
+/** Idle rows with a next run that may start (the rows `minNextRunAt` reads),
+ *  earliest first. */
+export function listArmedRuns(db: ClawbooDb): DbScheduledRun[] {
+  return db
+    .select()
+    .from(scheduledRuns)
+    .where(and(eq(scheduledRuns.status, 'idle'), isNotNull(scheduledRuns.nextRunAt), MAY_START))
+    .orderBy(asc(scheduledRuns.nextRunAt))
+    .all() as DbScheduledRun[]
+}
+
+/** Fires under way: claimed, or dispatched and not finished. */
+export function countScheduledRunsInFlight(db: ClawbooDb): number {
+  const row = db
+    .select({ n: sql<number>`count(*)` })
+    .from(scheduledRuns)
+    .where(inArray(scheduledRuns.status, ['claimed', 'running']))
+    .get() as { n: number } | undefined
+  return row?.n ?? 0
+}
+
 export function listQueuedRuns(db: ClawbooDb): DbScheduledRun[] {
   return db
     .select()

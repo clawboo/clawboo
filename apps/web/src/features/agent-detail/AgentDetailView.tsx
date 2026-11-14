@@ -71,7 +71,7 @@ function PaneFallback() {
 //
 // The chat sits flat on the left with its own 44 px header (agent identity,
 // card toggles, GitHub Star). The graph, its tasks and routines, its browser, the
-// live activity feed and the details (workspace, settings, files) are floating
+// live activity feed and the details (computer, settings, files) are floating
 // cards on the right, each closable from its own header or from the toggles:
 // ┌──────────────────────────┬─╭──────────────────────╮─┐
 // │ identity    [▣][▤] Star  │ │ Graph                │ │

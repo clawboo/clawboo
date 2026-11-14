@@ -41,7 +41,7 @@
 // on every restart. The existence check below is what makes a revoke stick.
 
 import { connectorsByCategory } from '@clawboo/connector-catalog'
-import { getConnector, listGrants, upsertGrant, type ClawbooDb } from '@clawboo/db'
+import { getConnector, listGrants, upsertGrant, type ClawbooDb, type GrantRow } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 
 import { connectorInstanceIdForSlug } from '../capabilitySource/connectorIdentity'
@@ -70,14 +70,30 @@ export function browserConnectorIds(): readonly string[] {
  */
 export function ensureBrowserGrantsForAgent(db: ClawbooDb, agentId: string): number {
   if (!agentId) return 0
+  try {
+    return mintMissingBrowserGrants(
+      db,
+      agentId,
+      decidedConnectors(listGrants(db, { subjectId: agentId })),
+    )
+  } catch (err) {
+    log.warn({ agentId, err: String(err) }, 'could not ensure browser grants for agent')
+    return 0
+  }
+}
+
+/** The connectors these grants already decide, in every state, revoked included. */
+function decidedConnectors(grants: readonly GrantRow[]): Set<string> {
+  return new Set(
+    grants
+      .filter((g) => g.capabilityKind === 'connector' && g.connectorId)
+      .map((g) => g.connectorId as string),
+  )
+}
+
+function mintMissingBrowserGrants(db: ClawbooDb, agentId: string, decided: Set<string>): number {
   let minted = 0
   try {
-    // Every state, revoked included. See the insert-only note above.
-    const decided = new Set(
-      listGrants(db, { subjectId: agentId })
-        .filter((g) => g.capabilityKind === 'connector' && g.connectorId)
-        .map((g) => g.connectorId as string),
-    )
     for (const connectorId of browserConnectorIds()) {
       if (decided.has(connectorId)) continue
       // The connector need not be connected yet. There is no foreign key, and a
@@ -105,7 +121,6 @@ export function ensureBrowserGrantsForAgent(db: ClawbooDb, agentId: string): num
     }
   } catch (err) {
     log.warn({ agentId, err: String(err) }, 'could not ensure browser grants for agent')
-    return minted
   }
   return minted
 }
@@ -123,8 +138,28 @@ export function ensureBrowserGrantsForAllAgents(
   db: ClawbooDb,
   agentIds: readonly string[],
 ): number {
+  // One read of every grant, grouped by agent. Asking per agent scanned the whole
+  // grants table once per agent on every boot (the subject index leads with the
+  // subject's kind, which that lookup does not name).
+  let byAgent: Map<string, GrantRow[]>
+  try {
+    byAgent = new Map()
+    for (const grant of listGrants(db)) {
+      // Keyed like the per-agent lookup: by subject id alone.
+      if (!grant.subjectId) continue
+      const list = byAgent.get(grant.subjectId)
+      if (list) list.push(grant)
+      else byAgent.set(grant.subjectId, [grant])
+    }
+  } catch (err) {
+    log.warn({ err: String(err) }, 'could not read grants to ensure browser grants')
+    return 0
+  }
   let minted = 0
-  for (const id of agentIds) minted += ensureBrowserGrantsForAgent(db, id)
+  for (const id of agentIds) {
+    if (!id) continue
+    minted += mintMissingBrowserGrants(db, id, decidedConnectors(byAgent.get(id) ?? []))
+  }
   if (minted > 0)
     log.info({ minted, agents: agentIds.length }, 'granted browser to existing agents')
   return minted

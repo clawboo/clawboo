@@ -16,11 +16,11 @@ keywords:
   ]
 ---
 
-Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs and what it supports (`self-version`, `capabilities`), installing a newer one (`self-update`), holding new agent runs back before a stop (`hold`), and the settings an administrator can pin (`operator-settings`).
+Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs and what it supports (`self-version`, `capabilities`), installing a newer one (`self-update`), holding new agent runs back before a stop (`hold`), what a host that stops an idle server needs to know (`idle`, `presence`), and the settings an administrator can pin (`operator-settings`).
 
 <Note>
 
-Every route here except `self-version`, `capabilities`, `self-update`, `hold` and `operator-settings` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
+Every route here except `self-version`, `capabilities`, `self-update`, `hold`, `idle`, `presence` and `operator-settings` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
 
 </Note>
 
@@ -45,6 +45,8 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 | GET    | `/api/system/hold`                    | Whether the server is held, and whether agent runs are going    | general   | No                        |
 | POST   | `/api/system/hold`                    | Hold the server, or renew a hold: no new agent run starts       | general   | No                        |
 | DELETE | `/api/system/hold/:owner`             | Release the hold that owner placed                              | general   | No                        |
+| GET    | `/api/system/idle`                    | Is a person here, is work going, when is scheduled work due     | general   | No                        |
+| POST   | `/api/system/presence`                | A client says a person is at it (only this counts as a person)  | general   | No                        |
 | GET    | `/api/system/operator-settings`       | Settings an administrator can pin, and where each value is from | general   | No                        |
 | PUT    | `/api/system/operator-settings/:key`  | Save a value for a setting nobody pinned, for the whole install | sensitive | No                        |
 
@@ -785,6 +787,7 @@ The answer is built from the running process alone: no database read, no network
     "stream.events.resume": true,
     "system.selfUpdate": true,
     "system.hold": true,
+    "system.idle": true,
     "auth.proxyIdentity": false,
     "auth.appLink": false
   }
@@ -821,7 +824,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.planDocuments`                                                       | Always. A task's plan as a document, in revisions: `GET /api/board/:taskId/plan`, and `write_plan` for an agent's run.                                                                                                                                                                                            |
 | `board.planApproval`                                                        | Always. A team can ask a person before a plan starts: `/api/team-plan-approval/:teamId`.                                                                                                                                                                                                                          |
 | `board.personCheck`                                                         | Always. Moves, Retry, Assign, Reopen, approval and question answers, the card about agents waking each other, labels, read marks and a team's work check take a person's authority only from the dashboard's page or a person a sign-in proxy vouched for (see [Security](/operating/security#the-person-check)). |
-| `workspace.view`                                                            | Always. The read-only view of a task's worktree: tree, file, diff and status.                                                                                                                                                                                                                                     |
+| `workspace.view`                                                            | Always. The read-only view of a task's worktree (tree, file, diff and status) and of a task's own folder (tree and file).                                                                                                                                                                                         |
 | `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                                                                                                                                                                                        |
 | `agent.nativeShell`                                                         | Always. The per-agent switch that lets a Clawboo Native agent ask to run shell commands.                                                                                                                                                                                                                          |
 | `agent.screenshots`                                                         | Always. Screenshots of what an agent's browser shows.                                                                                                                                                                                                                                                             |
@@ -834,6 +837,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume` | Always. The team chat stream, the 1:1 chat stream and the event stream each resume from `Last-Event-ID`.                                                                                                                                                                                                          |
 | `system.selfUpdate`                                                         | `POST /api/system/self-update` can succeed here: a global npm install this user can write, with in-app updates not turned off. The same answer as `self-version`'s `applyable`.                                                                                                                                   |
 | `system.hold`                                                               | Always. The server can be held before a stop or an update (`/api/system/hold`), and the in-app update waits for agent runs before it restarts.                                                                                                                                                                    |
+| `system.idle`                                                               | Always. A host that stops this server when nobody is using it reads `GET /api/system/idle`, and the dashboard reports a person with `POST /api/system/presence`.                                                                                                                                                  |
 | `board.pause`                                                               | Always. A person can pause an agent, a team or a task tree until they resume it (`/api/pauses`).                                                                                                                                                                                                                  |
 | `auth.proxyIdentity`                                                        | An administrator turned the [proxy identity lane](/guides/sso-proxy) `on` or `required`: a sign-in proxy's signed identity tokens are checked, and the person each names is recorded. `GET /api/access/identity` says which mode, and who the request is.                                                         |
 | `auth.appLink`                                                              | The app that started this server, such as the desktop app, gave it a key (`CLAWBOO_APP_LINK_PUBLIC_KEY`): the tokens it signs for its own `account:` people are checked, and each person is recorded. See [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo).                             |
@@ -942,7 +946,7 @@ A typical stop:
 2. Poll `GET /api/system/hold` until `backgroundWork` is `none`. Place the hold again every 20 seconds or so while you wait. Give up at a bound of your own.
 3. Stop the server. To cancel instead, `DELETE /api/system/hold/<owner>`.
 
-Runs waiting to start when the server stops do not run. Tasks agents handed to each other are picked up again after the next start, as after any restart; a chat message or a task run a person started during the hold has to be started again.
+Runs waiting to start when the server stops do not run. Tasks agents handed to each other are picked up again after the next start, as after any restart; a chat message or a task run a person started during the hold has to be started again. A routine fire that had already begun and was waiting for a free run slot counts as cut off: a recurring routine waits for its next time and a one-time routine stops with an error, as after any restart in the middle of a fire (`work.routinesInFlight` on `GET /api/system/idle` ([Sleep and wake](#sleep-and-wake)) counts these fires).
 
 ### `GET /api/system/hold`
 
@@ -1025,6 +1029,161 @@ curl http://localhost:18790/api/system/hold
 
 # Changed your mind: let the server start new work again
 curl -X DELETE http://localhost:18790/api/system/hold/my-stop-script
+```
+
+---
+
+## Sleep and wake
+
+A host can stop the server when nobody is using it and start it again when it is needed: a process supervisor, a service manager, a desktop app, or a computer that sleeps when idle. Before it stops the server it needs three answers, and `GET /api/system/idle` gives all three in one read:
+
+- **Is a person here?** Not "is anything asking". An open board polls the API dozens of times a minute whether or not anyone is looking at it, so request traffic says nothing about people. A person counts as here for 60 seconds after either of these:
+  - **A presence beat** a client sends on purpose (`POST /api/system/presence`, below). The dashboard sends one every 20 seconds while its tab is visible and focused and someone has touched the page in the last 15 minutes, and one more as that stops. Opening the page or switching to it counts for 2 minutes without a touch, so a window restored on its own, or left focused on a locked screen, soon stops counting. A hidden or background tab sends nothing.
+  - **Something a person does**, seen by the server from any client (the dashboard, the API, a linked device): answering an approval or an agent's question, sending a chat message or a comment, and creating, moving, retrying, reopening, assigning, stopping or pausing work, or pressing **Run now**. Beyond those, any other write the [identity lane](/guides/sso-proxy) names a person on counts too, except the automatic writes listed below.
+
+  A read never counts, whoever sent it, and neither does a request just because a sign-in proxy or an app link vouched for it: a proxy vouches for everything it forwards, a background tab's polling included.
+
+- **Is work going?** The same answer as `GET /api/system/hold` ([Drain and hold](#drain-and-hold)): `backgroundWork` is `present` while an agent run or a team chat's work check is going. `routinesInFlight` counts routine fires that have begun, a due OpenClaw routine waiting for the Gateway to connect included: it runs or fails within 5 minutes, and stopping the server meanwhile would only mean starting it again for it.
+- **When is scheduled work next due?** The earliest next run across every schedule: Clawboo's own routines, the cron jobs of an OpenClaw Gateway that stops when this machine does, and the jobs of a Hermes gateway Clawboo runs. A Gateway counts unless its address is another machine's IP address; a name this server cannot place (a LAN or tailnet name) counts, since waking for jobs that would have run anyway only costs a wake. Wake the server a minute before it.
+
+A typical idle stop:
+
+1. Read `GET /api/system/idle` every 30 seconds or so.
+2. Wait until `people.present` has been `false`, `work.backgroundWork` has been `none` and `work.routinesInFlight` has been `0` for as long as you like (a few minutes; `people.lastSeenAt` and `people.lastActedAt` let you measure your own window). Compare times with `at`, the server's own clock, rather than yours: a virtual machine's clock can fall behind after a sleep.
+3. Drain the server as in [Drain and hold](#drain-and-hold), note `nextDue.at`, and stop it.
+4. Start it again a minute before `nextDue.at`, or when a person asks for it. When `nextDue.complete` is `false`, a source could not be read and something may be due sooner, so pick a shorter bound of your own.
+
+A routine whose time passed while the server was stopped runs once when the server starts again, then carries on with its schedule. Missed times are not made up, so waking late costs one run, not one per missed time. See [How routines run](/concepts/scheduling#missed-and-overlapping-runs).
+
+### What the dashboard sends on its own
+
+So a host can check its idle rule against them, these are the requests an open dashboard sends without anyone doing anything. None of them counts as a person.
+
+Writes. Several of these routes are also used when a person does something (saving a file, creating a team); they never count either, because the server cannot tell the two apart.
+
+| Request                                                                                                                                                              | When                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `POST /api/system/presence`                                                                                                                                          | The presence beat itself                                                                                       |
+| `POST /api/graph-layout`                                                                                                                                             | After each automatic graph layout, page load included, and when nodes are moved to fit                         |
+| `POST /api/agents/sync`, `PUT /api/boo-zero/display-name/:agentId`, `PUT /api/agents/:agentId/files/:name`                                                           | On each OpenClaw Gateway connect, page load included; the last also when an editor with unsaved changes closes |
+| `POST /api/teams`, `POST /api/teams/:id/agents`, `DELETE /api/teams/:id/agents/:agentId`, `PATCH /api/teams/:id`                                                     | On a Gateway connect or a team list load, when agents need a team or a team's colour needs fixing              |
+| `POST /api/board/inbox/read`, `POST /api/board/:taskId/read`                                                                                                         | As a view opens, marking what it shows as read                                                                 |
+| `POST /api/agents/:agentId/screenshot/capture`                                                                                                                       | When a browser card opens, or picks another agent by itself                                                    |
+| `POST /api/settings`                                                                                                                                                 | Once, when the first-run note sees a finished task                                                             |
+| `POST /api/cost-records`, `POST /api/chat-history`                                                                                                                   | Records kept from the Gateway's events                                                                         |
+| `POST /api/access/launch-code`, `POST /api/system/auto-configure-openclaw`, `POST /api/system/install-openclaw`, `POST /api/system/gateway`, `POST /api/personality` | As a dialog or setup panel opens, or a personality edit is left                                                |
+| `POST /api/connectors/:slug/authorize/await`, `POST /api/providers/:id/models`                                                                                       | A sign-in's long wait, and a model list fetched as you stop typing                                             |
+| `POST /api/system/hold`, `DELETE /api/system/hold/:owner`                                                                                                            | Never sent by the dashboard; a stop script's                                                                   |
+
+Reads, which never count anyway. While its tab is visible the dashboard polls, depending on what is open: pending approvals and an agent's latest browser frame every 3 seconds; the board, the run graph's health and the budgets every 5 seconds; runtimes, fleet health and routines every 8 seconds; system status, previews and a task's workspace every 10 seconds; workspaces and an agent's routines every 15; routine runs, System Health and runtimes every 30; the memory provider every 2 to 30; brokered apps every 60 to 120. A hidden tab polls nothing, except that with background alerts on it reads the board and pending approvals when something happens. Event streams stay open: `GET /api/obs/stream` from every open dashboard, hidden or not, and the chat streams of an open chat.
+
+### `GET /api/system/idle`
+
+- **Path/query params**: none.
+- **Request body**: none.
+- Answers with `Cache-Control: no-store`. Reading it writes nothing and starts nothing.
+
+**`200 OK`**:
+
+| Field                   | Type                                                                                                                           | Notes                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `at`                    | `number`                                                                                                                       | The server's clock when it answered, epoch ms                                                                       |
+| `people.present`        | `boolean`                                                                                                                      | A visible, focused tab beat, or something a person did (see above), within the last 60 seconds                      |
+| `people.lastSeenAt`     | `number \| null`                                                                                                               | The latest focused-tab beat or action, epoch ms; `null` when none since the server started                          |
+| `people.lastActedAt`    | `number \| The latest action: a beat's `acted`, or something a person did. Epoch ms; `null` when none since the server started |
+| `people.focusedTabs`    | `number`                                                                                                                       | Tabs whose latest beat said visible and focused                                                                     |
+| `work.backgroundWork`   | `'present' \| 'none'`                                                                                                          | As on `GET /api/system/hold`: `none` when stopping now cuts no agent run or work check short                        |
+| `work.runs`             | `object`                                                                                                                       | `running`, `queued` and `limit`, as on `GET /api/system/hold`                                                       |
+| `work.checks`           | `number`                                                                                                                       | Team chat work checks going, or waiting for the team folder                                                         |
+| `work.routinesInFlight` | `number`                                                                                                                       | Routine fires under way: waiting for the Gateway to connect, claimed, or started and not finished                   |
+| `work.held`             | `boolean`                                                                                                                      | `true` while a hold is placed                                                                                       |
+| `nextDue.at`            | `number \| null`                                                                                                               | The earliest next run any source named, epoch ms. At or before `at` means due now. `null` when nothing is scheduled |
+| `nextDue.complete`      | `boolean`                                                                                                                      | `false` when a source is `unknown`: something may be due sooner than `nextDue.at`                                   |
+| `nextDue.timeZone`      | `string`                                                                                                                       | The time zone routines are worked out in                                                                            |
+| `nextDue.sources`       | `object[]`                                                                                                                     | One entry per schedule source (below)                                                                               |
+
+Each entry in `nextDue.sources`:
+
+| Field      | Type                                                                                                                                                                                                     | Notes                                                                                                                                                                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`       | `string`                                                                                                                                                                                                 | `clawboo-routine` for Clawboo's routines, `openclaw-gateway-cron` for the OpenClaw Gateway's own cron jobs, `hermes-gateway-jobs` for a Hermes gateway's jobs                                                                                                                                                                |
+| `state`    | `'ok' \| `ok`: read now. `off`: not in use, so nothing is due from it. `unknown`: in use but not readable now, such as a running Gateway this server is still connecting to in the seconds after a start | 'unknown'`                                                                                                                                                                                                                                                                                                                   | `ok`: read now. `off`: not in use, so nothing is due from it. `unknown`: in use but not readable now, such as a Gateway still connecting in the seconds after a start, or one that is set up and stopped |
+| `at`       | `number \| null`                                                                                                                                                                                         | Its earliest next run. For an `unknown` source, the earliest it reported before, if that is still ahead                                                                                                                                                                                                                      |
+| `count`    | `number`                                                                                                                                                                                                 | Schedules with a next run                                                                                                                                                                                                                                                                                                    |
+| `timeZone` | `string \| null`                                                                                                                                                                                         | The zone its earliest time was worked out in, when the source says: the routines' zone, or a Gateway job's own. `null` for a fixed interval or time, or a source that leaves it to its own system. Every `at` is epoch ms                                                                                                    |
+| `reason`   | `string`                                                                                                                                                                                                 | Why it is `off` or `unknown`, for example `not_configured` (nothing set up), `remote` (the Gateway's address is another machine's, so its jobs run whether or not this server sleeps), `gateway_stopped` (nothing listens at the Gateway's address, so it fires nothing), `gateway_disconnected`, `stale_cache` or `timeout` |
+
+What counts as due, for Clawboo's routines: a routine waiting for its next time, and one that is due and not yet fired (its time passed, or someone pressed **Run now**). A paused routine, one stopped after a failure, a spent one-time routine, one on an archived team, and one whose agent or team is paused are not counted: they do not run until a person acts, and a person acting brings the server up anyway. A routine that is running is work, not due. For the Gateway's cron jobs: enabled jobs with a next run.
+
+```json
+{
+  "at": 1793782800000,
+  "people": {
+    "present": false,
+    "lastSeenAt": 1793782500000,
+    "lastActedAt": 1793782440000,
+    "focusedTabs": 0
+  },
+  "work": {
+    "backgroundWork": "none",
+    "runs": { "running": 0, "queued": 0, "limit": 8 },
+    "checks": 0,
+    "routinesInFlight": 0,
+    "held": false
+  },
+  "nextDue": {
+    "at": 1793786400000,
+    "complete": true,
+    "timeZone": "Europe/London",
+    "sources": [
+      {
+        "id": "clawboo-routine",
+        "state": "ok",
+        "at": 1793786400000,
+        "count": 3,
+        "timeZone": "Europe/London"
+      },
+      {
+        "id": "openclaw-gateway-cron",
+        "state": "off",
+        "at": null,
+        "count": 0,
+        "timeZone": null,
+        "reason": "not_configured"
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/system/presence`
+
+A client says whether a person is at it. Send one beat when that changes and every 20 seconds while a person is there; a beat counts for 60 seconds. Each client names its own tab or window with a `tabId`, so its later beats replace its earlier ones.
+
+| Field     | Type      | Required | Notes                                                                                                |
+| --------- | --------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `tabId`   | `string`  | Yes      | 1 to 64 letters, digits, `_` or `-`, chosen by the client                                            |
+| `visible` | `boolean` | Yes      | The tab or window is on screen                                                                       |
+| `focused` | `boolean` | Yes      | It has focus. Only a beat with both `true` counts as a person                                        |
+| `acted`   | `boolean` | No       | The person did something since the last beat; it counts for 60 seconds, even after the tab goes away |
+
+| Status | When                      | Body                                   |
+| ------ | ------------------------- | -------------------------------------- |
+| `200`  | Taken                     | `people`, as in `GET /api/system/idle` |
+| `400`  | A field failed the checks | `{ "error": "<which field and why>" }` |
+
+Presence lives in memory, so a server that just started has seen nobody until the next beat.
+
+### Example
+
+```bash
+# Is anyone here, is anything running, and when must the server be up next?
+curl http://localhost:18790/api/system/idle
+
+# A client with a person at it
+curl -X POST http://localhost:18790/api/system/presence \
+  -H 'Content-Type: application/json' \
+  -d '{"tabId": "phone-1", "visible": true, "focused": true, "acted": true}'
 ```
 
 ---

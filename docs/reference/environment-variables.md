@@ -18,6 +18,8 @@ keywords:
     'CLAWBOO_PROXY_IDENTITY',
     'OPENROUTER_BASE_URL',
     'ANTHROPIC_BASE_URL',
+    'CLAWBOO_AGENT_USER',
+    'clawboo-launch',
   ]
 ---
 
@@ -47,6 +49,14 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                              |
 | `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                                |
 | `CLAWBOO_CATALOG_INDEX_URL`            | this release's catalog on GitHub  | Where the marketplace catalog comes from                               |
+| **Agent isolation**                    |                                   |                                                                        |
+| `CLAWBOO_AGENT_USER`                   | unset (off)                       | Runs every agent as this separate operating system user                |
+| `CLAWBOO_AGENT_SWITCH`                 | `sudo`                            | How the server starts the agent host: `sudo` or `doas`                 |
+| `CLAWBOO_AGENT_HOST_SOCKET`            | unset                             | Set by `clawboo-launch`: the socket of the agent host it started       |
+| `CLAWBOO_AGENT_HOST_SCRIPT`            | `<server folder>/agent-host.js`   | The agent host script                                                  |
+| `CLAWBOO_SERVER_USER`                  | none                              | `clawboo-launch` only: the user the server runs as                     |
+| `CLAWBOO_RUN_DIR`                      | `/run/clawboo`                    | `clawboo-launch` only: the folder for the agent host's socket          |
+| `CLAWBOO_NODE`                         | `node` on `PATH`                  | `clawboo-launch` only: the Node that runs the server and the host      |
 | **Pinned by an administrator**         |                                   |                                                                        |
 | `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                             |
 | `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off                   |
@@ -247,7 +257,7 @@ The data folder, where Clawboo keeps its own state.
 - Default: `~/.clawboo`
 - Example: `CLAWBOO_HOME=/srv/clawboo`
 
-It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, agent browser profiles, per-agent runtime homes and the history of team folders. It also moves the default work folder, which becomes `<CLAWBOO_HOME>-work` (see [CLAWBOO_WORK_DIR](#clawboo_work_dir)), and the default runtimes folder, which becomes `<CLAWBOO_HOME>-runtimes` (see [CLAWBOO_RUNTIMES_DIR](#clawboo_runtimes_dir)). The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
+It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, agent browser profiles, per-agent runtime homes and the history of team folders. It also moves the default work folder, which becomes `<CLAWBOO_HOME>-work` (see [CLAWBOO_WORK_DIR](#clawboo_work_dir)), and the default runtimes folder, which becomes `<CLAWBOO_HOME>-runtimes` (see [CLAWBOO_RUNTIMES_DIR](#clawboo_runtimes_dir)). With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, the work folder, the runtime homes and the browser profiles are in the agent user's home instead. The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
 
 ### CLAWBOO_WORK_DIR
 
@@ -260,6 +270,8 @@ The work folder, where all agent work goes: team folders (`teams/`), task worktr
 Clawboo uses the folder by its real path, with links resolved, and creates what it puts there readable only by you (`0700`). At startup it moves team folders and task checkouts that an older version made in `CLAWBOO_HOME` into this folder, leaving a link at each old path. Changing the value is a move too: the next start moves this install's work from the previous folder to the new one.
 
 The server refuses to start when this folder is the data folder, sits inside it or contains it, and when a value you set names a folder it cannot create. When the variable is unset and the default cannot be created, Clawboo logs a warning and keeps new work in `CLAWBOO_HOME`. In a container, set it to a second volume or folder. See [The work folder](/operating/data-and-state#the-work-folder).
+
+With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, the default is `<agent home>/work`, in the agent user's home folder, and a folder you name must already exist and belong to the agent user. Clawboo does not fall back to `CLAWBOO_HOME`, and it does not move older work: it copies team folders in once and leaves the originals where they were (see [With agents as their own user](/operating/data-and-state#with-agents-as-their-own-user)).
 
 ### CLAWBOO_RUNTIMES_DIR
 
@@ -314,6 +326,80 @@ Where the marketplace catalog index comes from.
 A `catalog/dist/v1/` folder above the server, as in a source checkout, takes precedence. Pack files are fetched relative to the index, and each is checked against the index's digest before use. The index is cached for 6 hours. When it cannot be reached, the marketplace still shows the built-in pack. When the release's tag has no index (GitHub answers 404), Clawboo reads the `main` branch's index for that refresh. An override is used as it is, with no fallback.
 
 The operator settings file key `catalogIndexUrl` sets the same thing; this variable wins over the file. A value Clawboo cannot use stops the server at startup (see [CLAWBOO_OPERATOR_SETTINGS](#clawboo_operator_settings)).
+
+## Agent isolation
+
+These variables control agent isolation, which runs every agent as a separate operating system user that cannot read Clawboo's database, vault, key, settings or access token. [Run agents as their own user](/operating/agent-isolation) covers setup, the startup check, and what it does not protect. It is not available on Windows: with `CLAWBOO_AGENT_USER` set there, the server refuses to start.
+
+### CLAWBOO_AGENT_USER
+
+The operating system user every agent runs as. Setting it turns agent isolation on.
+
+- Type: user name: letters, digits, `_`, `-` and `.`, starting with a letter or `_`, at most 32 characters
+- Default: unset, so agents run as the user Clawboo runs as
+- Example: `CLAWBOO_AGENT_USER=clawboo-agent`
+
+With it set, Clawboo starts one agent host as that user, and every agent process starts through it: Claude Code, Codex and Hermes runs, Clawboo Native's approved commands and file tools, the verify command a task's check runs, git in task checkouts, connectors with local reach and no saved credential, and each agent's browser. OpenClaw agents are not covered. The user must exist, must be neither root nor the user Clawboo runs as, and must have no sudo rights.
+
+Before it accepts any run, the server checks from inside that user's account that it cannot open the database, the vault, its key, settings or the token file. When a check fails it logs `SECURITY: refusing to start.` with the step and the reason, and exits with code 1. It also refuses to start without an access token. A value that is not a user name stops it with `CONFIG: refusing to start.` Clawboo stops every process the agent user runs when it starts and when it stops, so give each install an agent user of its own. `clawboo agent-user plan` prints the setup commands, and `clawboo agent-user check` runs the check without starting the dashboard (see the [CLI reference](/reference/cli#clawboo-agent-user)).
+
+### CLAWBOO_AGENT_SWITCH
+
+How the server starts the agent host as `CLAWBOO_AGENT_USER` on a computer or virtual machine.
+
+- Type: `sudo` or `doas`
+- Default: `sudo`
+- Example: `CLAWBOO_AGENT_SWITCH=doas`
+
+Any other value stops the server with `CONFIG: refusing to start.` It is not used when `CLAWBOO_AGENT_HOST_SOCKET` is set. The switch needs a rule that lets the user Clawboo runs as start processes as the agent user without a password; `clawboo agent-user plan` prints the sudoers rule.
+
+### CLAWBOO_AGENT_HOST_SOCKET
+
+The socket of an agent host that `clawboo-launch` started.
+
+- Type: absolute path
+- Default: unset, so the server starts the agent host itself through `CLAWBOO_AGENT_SWITCH`
+- Set by: `clawboo-launch`, on the server it starts, as `<CLAWBOO_RUN_DIR>/agent.sock`
+
+The server connects to this socket instead of using sudo. Before it connects, it checks the owners and modes of the socket and its folder, and refuses anything else. A relative path stops the server with `CONFIG: refusing to start.` See [Set it up in a container](/operating/agent-isolation#set-it-up-in-a-container).
+
+### CLAWBOO_AGENT_HOST_SCRIPT
+
+The agent host script, the program that runs as the agent user.
+
+- Type: path
+- Default: `agent-host.js` beside the server bundle (`dist/agent-host.js` in the package), or the build output when the server runs from source
+- Example: `CLAWBOO_AGENT_HOST_SCRIPT=/opt/clawboo/dist/agent-host.js`
+
+The server reads it when it starts the agent host through sudo or doas, and `clawboo-launch` reads it too. The agent user must be able to read the file. Normally you leave it unset.
+
+### CLAWBOO_SERVER_USER
+
+The user `clawboo-launch` runs the server as. Only `clawboo-launch` reads it.
+
+- Type: user name
+- Default: none; the launcher exits with `set CLAWBOO_SERVER_USER to the user the server runs as`
+- Example: `CLAWBOO_SERVER_USER=clawboo`
+
+It must be neither root nor the agent user. The launcher passes the server its environment unchanged, apart from `HOME`, `USER`, `LOGNAME`, `CLAWBOO_AGENT_USER` and `CLAWBOO_AGENT_HOST_SOCKET`.
+
+### CLAWBOO_RUN_DIR
+
+The folder where `clawboo-launch` makes the agent host's socket, `agent.sock`. Only `clawboo-launch` reads it.
+
+- Type: path
+- Default: `/run/clawboo`
+- Example: `CLAWBOO_RUN_DIR=/var/run/clawboo`
+
+The launcher makes the folder owned by the agent user and the server's group, mode `0710`, and gives the socket the server's group, mode `0660`.
+
+### CLAWBOO_NODE
+
+The Node.js that `clawboo-launch` runs the server and the agent host with. Only `clawboo-launch` reads it.
+
+- Type: path
+- Default: `node` on `PATH`
+- Example: `CLAWBOO_NODE=/usr/local/bin/node`
 
 ## Pinned by an administrator
 
@@ -826,19 +912,21 @@ Clawboo does not read `GATEWAY_AUTH_TOKEN` as its own setting. When `settings.js
 
 Clawboo sets these on processes it starts. Do not set them yourself.
 
-| Variable                                                                          | Set on                                     | Value                                                                                                                                                                                                                                  |
-| --------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAWBOO_VERSION`                                                                 | The server the CLI starts                  | The CLI's version, which the server reports as its own. Without it the server reads its version from its package, or `0.0.0-dev` in a source checkout. The in-app update leaves it out, so the new server reads its version from disk. |
-| `CLAWBOO_LAUNCH_DIR`                                                              | The server the CLI starts                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" in connector setup. Ignored unless it is an absolute path to an existing folder.                                                                             |
-| `CLAWBOO_MCP_BIN_DIR`                                                             | The server the CLI starts (normal install) | The bundled `bin` folder, so stdio attach snippets point at the right files. Without it, snippets show a `<path-to>/dist/bin/<server>.js` placeholder.                                                                                 |
-| `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`                                      | A restarted server                         | The port to keep; the new server waits up to 15 seconds for it to free. The new server also gets the old one's node options, such as `--max-old-space-size`, except the inspector's.                                                   |
-| `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS`, `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` | The Chrome DevTools connector              | `1`, which turns off its usage statistics and its daily check for a newer version. If the server's own environment sets either variable, that value is passed on instead.                                                              |
-| `NODE_ENV`                                                                        | The server the CLI starts                  | `production`                                                                                                                                                                                                                           |
-| `CODEX_HOME`, `HERMES_HOME`                                                       | Each Codex or Hermes run                   | That agent's own home folder under `~/.clawboo/runtimes/`                                                                                                                                                                              |
-| The runtime's provider key, such as `ANTHROPIC_API_KEY`                           | Each runtime run                           | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                       |
-| `NO_PROXY`, `no_proxy`                                                            | Each runtime run, when a proxy is set      | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                               |
-| `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`                                      | The `openclaw doctor --fix` repair run     | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                            |
-| `CLAWBOO_DB_PATH`                                                                 | Stdio attach snippets                      | The dashboard's database file                                                                                                                                                                                                          |
+| Variable                                                                          | Set on                                                | Value                                                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLAWBOO_VERSION`                                                                 | The server the CLI starts                             | The CLI's version, which the server reports as its own. Without it the server reads its version from its package, or `0.0.0-dev` in a source checkout. The in-app update leaves it out, so the new server reads its version from disk.                                   |
+| `CLAWBOO_LAUNCH_DIR`                                                              | The server the CLI starts                             | The folder you ran `clawboo` from, offered as "Where you started clawboo" in connector setup. Ignored unless it is an absolute path to an existing folder.                                                                                                               |
+| `CLAWBOO_MCP_BIN_DIR`                                                             | The server the CLI starts (normal install)            | The bundled `bin` folder, so stdio attach snippets point at the right files. Without it, snippets show a `<path-to>/dist/bin/<server>.js` placeholder.                                                                                                                   |
+| `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`                                      | A restarted server                                    | The port to keep; the new server waits up to 15 seconds for it to free. The new server also gets the old one's node options, such as `--max-old-space-size`, except the inspector's.                                                                                     |
+| `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS`, `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` | The Chrome DevTools connector                         | `1`, which turns off its usage statistics and its daily check for a newer version. If the server's own environment sets either variable, that value is passed on instead.                                                                                                |
+| `NODE_ENV`                                                                        | The server the CLI starts                             | `production`                                                                                                                                                                                                                                                             |
+| `CODEX_HOME`, `HERMES_HOME`                                                       | Each Codex or Hermes run                              | That agent's own home folder under `~/.clawboo/runtimes/`, or under `<agent home>/runtimes/` with `CLAWBOO_AGENT_USER` set                                                                                                                                               |
+| `CLAUDE_CONFIG_DIR`                                                               | Not set by Clawboo                                    | Claude Code runs use the `~/.claude` of the user they run as: yours, or with `CLAWBOO_AGENT_USER` set, the agent user's one `~/.claude`, which every Claude Code agent shares. A value in the server's environment is not passed to agents with `CLAWBOO_AGENT_USER` set |
+| `CLAWBOO_AGENT_HOST_SOCKET`                                                       | The server and the agent host `clawboo-launch` starts | The agent host's socket in `CLAWBOO_RUN_DIR`. The launcher also passes the server your `CLAWBOO_AGENT_USER`, and gives the agent host only `PATH`, `HOME`, the locale and the socket path                                                                                |
+| The runtime's provider key, such as `ANTHROPIC_API_KEY`                           | Each runtime run                                      | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                                                         |
+| `NO_PROXY`, `no_proxy`                                                            | Each runtime run, when a proxy is set                 | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                                                                 |
+| `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`                                      | The `openclaw doctor --fix` repair run                | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                                                              |
+| `CLAWBOO_DB_PATH`                                                                 | Stdio attach snippets                                 | The dashboard's database file                                                                                                                                                                                                                                            |
 
 ## Testing and development
 
@@ -867,6 +955,8 @@ Runtimes Clawboo starts (Claude Code, Codex, Hermes) and the verification comman
 - AWS access keys, unless `CLAUDE_CODE_USE_BEDROCK` is set.
 
 The removal works by name. Any other secret in the server's environment, including provider keys such as `OPENAI_API_KEY`, reaches every agent those runtimes run. Start Clawboo from a shell that holds only what agents may see. [What agents can do](/concepts/permissions) covers what else they can reach.
+
+With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, every process the agent host starts also loses the variables that describe your account and Clawboo's folders: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the `XDG_*` folders, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `DBUS_SESSION_BUS_ADDRESS`, `CLAWBOO_HOME`, `CLAWBOO_WORK_DIR` and the agent isolation variables, among others. The agent host fills in the agent user's own `HOME`, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`.
 
 ## What connectors and approved commands inherit
 

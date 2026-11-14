@@ -1,7 +1,8 @@
-// The agent-detail Workspace tab: a read-only view of the agent's task
-// worktree, or of its team folder (where the agent starts when it has no
-// worktree). Three parts and nothing else: the file tree
-// with change badges (worktrees only; the team folder is not a git checkout),
+// The agent-detail Computer tab: a read-only view of the agent's task
+// worktrees, its tasks' own folders (where a task with no worktree runs and its
+// files land), and its team folder (where its other runs start). Three parts and
+// nothing else: the file tree with change badges (worktrees only; the folders
+// are not git checkouts),
 // the now line (the file and command the agent most recently touched, from the
 // obs tail), and a right pane showing the selected file's diff or content.
 //
@@ -20,6 +21,8 @@ import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { Spinner } from '@/features/shared/Spinner'
 import {
   getAgentWorkspaces,
+  getTaskFolderFile,
+  getTaskFolderTree,
   getTeamFolderFile,
   getTeamFolderTree,
   getWorkspaceFile,
@@ -27,6 +30,7 @@ import {
   getWorkspaceStatus,
   getWorkspaceTree,
   statusBadge,
+  type AgentTaskFolder,
   type AgentTeamFolder,
   type AgentWorkspace,
   type AgentWorkspaceList,
@@ -42,13 +46,32 @@ const EVENT_INVALIDATE_MS = 1500
 /** Ancestors of at most this many changed files are auto-expanded on load. */
 const AUTO_EXPAND_PATHS = 8
 
-/** What the panel shows: one task's worktree, or the agent's team folder. */
+/** What the panel shows: one task's worktree, one task's own folder, or the
+ *  agent's team folder. A task has a worktree or a folder, never both, so both
+ *  are keyed by the task id. */
 type Source =
   | { kind: 'task'; key: string; ws: AgentWorkspace }
+  | { kind: 'taskFolder'; key: string; tf: AgentTaskFolder }
   | { kind: 'folder'; key: string; folder: AgentTeamFolder }
+
+/** Where the file pane reads from. */
+type FileSource =
+  | { kind: 'worktree'; taskId: string }
+  | { kind: 'taskFolder'; taskId: string }
+  | { kind: 'teamFolder' }
 
 /** The team folder's selection key. Task ids are UUIDs, so it cannot collide. */
 const FOLDER_KEY = 'team-folder'
+
+const sourceTitle = (src: Source): string =>
+  src.kind === 'task'
+    ? src.ws.title
+    : src.kind === 'taskFolder'
+      ? src.tf.title
+      : folderLabel(src.folder)
+
+const sourceUpdatedAt = (src: Source): number =>
+  src.kind === 'task' ? src.ws.updatedAt : src.kind === 'taskFolder' ? src.tf.updatedAt : 0
 
 const folderLabel = (folder: AgentTeamFolder): string =>
   folder.teamId ? 'Team folder' : 'Shared folder (no team)'
@@ -250,15 +273,16 @@ function diffLineStyle(line: string): CSSProperties {
 
 function FilePane({
   agentId,
-  taskId,
+  source,
   path,
   changed,
   refreshKey,
   onViewKind,
 }: {
   agentId: string
-  /** The task worktree to read from; null reads the agent's team folder. */
-  taskId: string | null
+  /** What to read from: a task worktree, a task's own folder, or the agent's
+   *  team folder. */
+  source: FileSource
   path: string
   changed: boolean
   /** Reports which view actually rendered, so the header label cannot claim
@@ -278,6 +302,9 @@ function FilePane({
     | null
   >(null)
 
+  const sourceKind = source.kind
+  const sourceTaskId = source.kind === 'teamFolder' ? null : source.taskId
+
   // `first` distinguishes opening a file from re-reading it: only the initial
   // open shows the spinner, so a background refresh does not flash the pane.
   const first = useRef(true)
@@ -290,8 +317,8 @@ function FilePane({
     void (async () => {
       // A changed file shows its diff; an unchanged or untracked one (empty
       // diff) falls back to content.
-      if (changed && taskId) {
-        const d = await getWorkspaceFileDiff(taskId, path)
+      if (changed && sourceKind === 'worktree' && sourceTaskId) {
+        const d = await getWorkspaceFileDiff(sourceTaskId, path)
         if (cancelled) return
         if (d && d.diff.trim()) {
           setView({ kind: 'diff', diff: d.diff, truncated: d.truncated })
@@ -301,9 +328,12 @@ function FilePane({
           return
         }
       }
-      const f = taskId
-        ? await getWorkspaceFile(taskId, path)
-        : await getTeamFolderFile(agentId, path)
+      const f =
+        sourceKind === 'worktree' && sourceTaskId
+          ? await getWorkspaceFile(sourceTaskId, path)
+          : sourceKind === 'taskFolder' && sourceTaskId
+            ? await getTaskFolderFile(sourceTaskId, path)
+            : await getTeamFolderFile(agentId, path)
       if (cancelled) return
       if (!f) setView({ kind: 'error' })
       else if (f.binary) setView({ kind: 'binary', size: f.size })
@@ -317,12 +347,14 @@ function FilePane({
     }
     // `onViewKind` is intentionally NOT a dependency: it is a reporting
     // callback, and including it would refetch whenever the parent re-renders.
-  }, [agentId, taskId, path, changed, refreshKey])
+    // `source` is read through its two parts, so a new object with the same
+    // meaning does not refetch.
+  }, [agentId, sourceKind, sourceTaskId, path, changed, refreshKey])
 
   // A DIFFERENT file is a fresh open, not a refresh.
   useEffect(() => {
     first.current = true
-  }, [agentId, taskId, path])
+  }, [agentId, sourceKind, sourceTaskId, path])
 
   if (loading) {
     return (
@@ -372,12 +404,18 @@ function FilePane({
 export function WorkspacePanel({
   agentId,
   pinnedTaskId,
+  pinnedTaskFolder,
 }: {
   agentId: string
-  /** Show exactly this task's workspace and hide the picker. Set by hosts that
-   *  already scope the view to one task (the board's task drawer), where the
-   *  agent-wide list would let the user navigate away from the task they opened. */
+  /** Show exactly this task's files (its worktree or its own folder) and hide
+   *  the picker. Set by hosts that already scope the view to one task (the
+   *  board's task drawer), where the agent-wide list would let the user navigate
+   *  away from the task they opened. */
   pinnedTaskId?: string
+  /** The pinned task's own folder, from a host that already knows it (the task
+   *  drawer), so the panel shows it even when the agent's list leaves it out:
+   *  that list holds only the agent's recent folders. */
+  pinnedTaskFolder?: AgentTaskFolder
 }) {
   const [list, setList] = useState<AgentWorkspaceList | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(pinnedTaskId ?? null)
@@ -390,16 +428,30 @@ export function WorkspacePanel({
   const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
   const running = agent?.status === 'running'
 
-  // Task worktrees first (newest first), then the team folder. A pinned host
-  // scopes the view to one task, so it never offers the folder.
+  // Its tasks' worktrees and folders first, newest first, then the team folder.
+  // A pinned host scopes the view to one task, so it never offers the folder.
   const sources = useMemo<Source[] | null>(() => {
     if (!list) return null
-    const out: Source[] = list.workspaces.map((ws) => ({ kind: 'task', key: ws.taskId, ws }))
+    const out: Source[] = [
+      ...list.workspaces.map((ws): Source => ({ kind: 'task', key: ws.taskId, ws })),
+      ...list.taskFolders.map((tf): Source => ({ kind: 'taskFolder', key: tf.taskId, tf })),
+    ].sort((a, b) => sourceUpdatedAt(b) - sourceUpdatedAt(a))
+    if (
+      pinnedTaskFolder &&
+      pinnedTaskFolder.taskId === pinnedTaskId &&
+      !out.some((src) => src.key === pinnedTaskFolder.taskId)
+    ) {
+      out.push({ kind: 'taskFolder', key: pinnedTaskFolder.taskId, tf: pinnedTaskFolder })
+    }
     if (list.teamFolder && !pinnedTaskId) {
       out.push({ kind: 'folder', key: FOLDER_KEY, folder: list.teamFolder })
     }
     return out
-  }, [list, pinnedTaskId])
+  }, [list, pinnedTaskId, pinnedTaskFolder])
+  // Read by the listing loader, whose identity must not change on every poll:
+  // a new loader resets the open tree.
+  const sourcesRef = useRef(sources)
+  sourcesRef.current = sources
 
   // The selection is PINNED to a key, never positional. The list arrives
   // ordered by updatedAt DESC, so resolving `active` as sources[0] meant any
@@ -410,13 +462,29 @@ export function WorkspacePanel({
     return sources.find((src) => src.key === selectedKey) ?? null
   }, [sources, selectedKey])
   const activeKey = active?.key ?? null
-  /** The task whose git status and diffs apply; null for the team folder. */
+  /** The task whose git status and diffs apply; null for a folder. */
   const taskId = active?.kind === 'task' ? active.ws.taskId : null
-  const onDisk = active ? (active.kind === 'task' ? active.ws.onDisk : active.folder.onDisk) : false
+  // A task folder is listed only once it is on disk.
+  const onDisk = active
+    ? active.kind === 'task'
+      ? active.ws.onDisk
+      : active.kind === 'taskFolder'
+        ? true
+        : active.folder.onDisk
+    : false
   const rootPath = active
     ? active.kind === 'task'
       ? active.ws.worktreePath
-      : active.folder.path
+      : active.kind === 'taskFolder'
+        ? active.tf.path
+        : active.folder.path
+    : null
+  const fileSource: FileSource | null = active
+    ? active.kind === 'task'
+      ? { kind: 'worktree', taskId: active.ws.taskId }
+      : active.kind === 'taskFolder'
+        ? { kind: 'taskFolder', taskId: active.tf.taskId }
+        : { kind: 'teamFolder' }
     : null
 
   // ── Workspace list: load + slow poll (tasks claim/complete over minutes) ──
@@ -454,8 +522,13 @@ export function WorkspacePanel({
 
   const loadDir = useCallback(
     (key: string, dir: string) => {
+      const kind = sourcesRef.current?.find((src) => src.key === key)?.kind
       const listingFor =
-        key === FOLDER_KEY ? getTeamFolderTree(agentId, dir) : getWorkspaceTree(key, dir)
+        key === FOLDER_KEY
+          ? getTeamFolderTree(agentId, dir)
+          : kind === 'taskFolder'
+            ? getTaskFolderTree(key, dir)
+            : getWorkspaceTree(key, dir)
       void listingFor.then((listing) => {
         if (activeKeyRef.current !== key) return // stale: workspace switched
         setDirs((prev) => {
@@ -569,7 +642,7 @@ export function WorkspacePanel({
     if (invalidateTimer.current) clearTimeout(invalidateTimer.current)
     invalidateTimer.current = setTimeout(() => {
       refreshStatus()
-      // The team folder has no git status to bump the open file's re-read.
+      // A folder has no git status to bump the open file's re-read.
       if (!taskId) setStatusGen((g) => g + 1)
       // Reload the listing of the touched path's directory when it is loaded
       // already (a new file must appear without a full tree reload).
@@ -615,15 +688,17 @@ export function WorkspacePanel({
       </div>
     )
   }
-  if (!active) {
+  if (!active || !fileSource) {
     const isGateway = agent?.runtime === 'openclaw'
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
         <FileText size={20} strokeWidth={1.5} className="text-foreground/25" />
         <div className="text-[12px] leading-relaxed text-muted-foreground">
           {isGateway
-            ? 'This agent runs on the OpenClaw Gateway; its files live in the Gateway workspace, not in a local task worktree.'
-            : 'No task workspace yet. When this agent takes a file-mutating board task, its worktree shows up here.'}
+            ? 'This agent runs on the OpenClaw Gateway; its files live in the Gateway workspace, not in a local task folder.'
+            : pinnedTaskId
+              ? 'No files for this task yet.'
+              : "No files yet. When this agent works on a task, the task's folder shows up here with the files it makes."}
         </div>
       </div>
     )
@@ -656,7 +731,7 @@ export function WorkspacePanel({
           // own home). Showing it under "Editing" beside this workspace's tree
           // would claim the edit happened here.
           <span className="truncate font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            Working outside this workspace
+            Working outside this folder
           </span>
         ) : (
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -685,11 +760,11 @@ export function WorkspacePanel({
               value={active.key}
               onChange={(e) => setSelectedKey(e.target.value)}
               className="max-w-[200px] cursor-pointer rounded-md border border-border bg-input px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-              aria-label="Workspace task"
+              aria-label="Folder"
             >
               {sources.map((src) => (
                 <option key={src.key} value={src.key}>
-                  {src.kind === 'task' ? src.ws.title : folderLabel(src.folder)}
+                  {sourceTitle(src)}
                 </option>
               ))}
             </select>
@@ -707,8 +782,8 @@ export function WorkspacePanel({
       {!onDisk && active.kind === 'folder' ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
           <div className="text-[12px] leading-relaxed text-muted-foreground">
-            No files yet. This folder is created the first time the agent runs without a task
-            worktree, in team chat or on a task that only reads.
+            No files yet. This folder is created the first time the agent runs in team chat or in
+            its own chat.
           </div>
           <div className="font-mono text-[11px] text-foreground/40">{active.folder.path}</div>
         </div>
@@ -716,7 +791,7 @@ export function WorkspacePanel({
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber">Paused</div>
           <div className="text-[12px] leading-relaxed text-muted-foreground">
-            This workspace's checkout was paused or cleaned up. The branch
+            This task's checkout was paused or cleaned up. The branch
             {active.ws.branch ? ` (${active.ws.branch})` : ''} keeps the work; resuming the task
             restores the files.
           </div>
@@ -727,11 +802,9 @@ export function WorkspacePanel({
           <div className="w-[228px] shrink-0 overflow-y-auto border-r border-border py-1.5">
             <div
               className="truncate px-3 pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/40"
-              title={active.kind === 'task' ? active.ws.repoPath : active.folder.path}
+              title={active.kind === 'task' ? active.ws.repoPath : (rootPath ?? undefined)}
             >
-              {active.kind === 'task'
-                ? (active.ws.branch ?? active.ws.title)
-                : folderLabel(active.folder)}
+              {active.kind === 'task' ? (active.ws.branch ?? active.ws.title) : sourceTitle(active)}
             </div>
             <TreeLevel
               dir=""
@@ -767,7 +840,7 @@ export function WorkspacePanel({
                     // a background status refresh should not flash a spinner.
                     key={`${active.key}:${selectedPath}`}
                     agentId={agentId}
-                    taskId={taskId}
+                    source={fileSource}
                     path={selectedPath}
                     changed={selectedChanged}
                     refreshKey={statusGen}

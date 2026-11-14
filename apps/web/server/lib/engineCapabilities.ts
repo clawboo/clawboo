@@ -74,6 +74,8 @@ export const FEATURE_ROUTES = {
     'GET /api/board/:taskId/workspace/file',
     'GET /api/board/:taskId/workspace/file-diff',
     'GET /api/board/:taskId/workspace/status',
+    'GET /api/board/:taskId/folder/tree',
+    'GET /api/board/:taskId/folder/file',
   ],
   'workspace.preview': ['GET /api/board/:taskId/preview', 'GET /api/board/:taskId/preview/*splat'],
   'agent.nativeShell': ['GET /api/agents/:agentId/shell', 'POST /api/agents/:agentId/shell'],
@@ -117,6 +119,7 @@ export const FEATURE_ROUTES = {
     'POST /api/system/hold',
     'DELETE /api/system/hold/:owner',
   ],
+  'system.idle': ['GET /api/system/idle', 'POST /api/system/presence'],
   'board.pause': ['GET /api/pauses', 'POST /api/pauses', 'DELETE /api/pauses/:kind/:id'],
   'auth.proxyIdentity': ['GET /api/access/identity'],
   'auth.appLink': ['GET /api/access/identity'],
@@ -191,6 +194,7 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // write, with in-app updates not turned off by an administrator.
     'system.selfUpdate': selfUpdateRefusal() === null,
     'system.hold': true,
+    'system.idle': true,
     'board.pause': true,
     // The administrator's switch, on or required. Either way a verified token
     // names the person; whether one is required is the lane's own business.

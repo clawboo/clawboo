@@ -14,7 +14,9 @@
 //     `.claude/rules/` up from the working folder to `/`. Clawboo's folders live
 //     under the home folder (`~/clawboo-work` by default), so that walk reaches
 //     `~/.claude/CLAUDE.md` and loads it as a project file. `claudeMdExcludes` cuts every directory above the
-//     working folder, and the home directory itself.
+//     working folder, and the home directory itself. A run in a task's own
+//     folder keeps its team folder (and the `tasks/` between them): the team's
+//     `CLAUDE.md` reached its runs when they all started in the team folder.
 //   - `autoMemoryEnabled: false`, because auto memory is not a settings source,
 //     plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the child env, because the CLI
 //     reads that variable before any setting: an inherited `0` turns auto memory
@@ -60,15 +62,36 @@ function ancestors(dir: string): string[] {
   }
 }
 
-export function claudeCodeIsolation(cwd: string, home: string): ClaudeCodeIsolation {
-  const bases = new Set([path.resolve(cwd)])
+const within = (dir: string, root: string): boolean =>
+  dir === root || dir.startsWith(root.endsWith(path.sep) ? root : root + path.sep)
+
+/** `p` and its real path, when it has one. */
+function spellings(p: string): Set<string> {
+  const out = new Set([path.resolve(p)])
   try {
-    bases.add(realpathSync.native(cwd))
+    out.add(realpathSync.native(p))
   } catch {
     // Not there yet: the SDK reports a missing cwd itself.
   }
+  return out
+}
+
+/**
+ * `readRoot`: the team folder of a run in a task's own folder (see
+ * RuntimeRunContext). The folders from it down to the working folder stay
+ * readable; everything above it is cut as before.
+ */
+export function claudeCodeIsolation(
+  cwd: string,
+  home: string,
+  opts: { readRoot?: string | null } = {},
+): ClaudeCodeIsolation {
+  const bases = spellings(cwd)
+  const roots = opts.readRoot ? spellings(opts.readRoot) : new Set<string>()
+  const keep = (dir: string, base: string): boolean =>
+    [...roots].some((root) => within(base, root) && within(dir, root))
   const dirs = new Set([path.resolve(home)])
-  for (const base of bases) for (const dir of ancestors(base)) dirs.add(dir)
+  for (const base of bases) for (const dir of ancestors(base)) if (!keep(dir, base)) dirs.add(dir)
   return {
     settingSources: ['project'],
     settings: {

@@ -10,7 +10,7 @@
 import { WebSocket as NodeWebSocket } from 'ws'
 
 import { AgentRegistry } from '@clawboo/agent-registry'
-import { loadSettings } from '@clawboo/config'
+import { isGatewayConfigured, loadSettings } from '@clawboo/config'
 import { GatewayClient, type WebSocketLikeCtor } from '@clawboo/gateway-client'
 import {
   loadOrCreateProxyDeviceIdentity,
@@ -75,6 +75,7 @@ class ServerAgentRegistry {
         const s = loadSettings(process.env)
         return { gatewayUrl: s.gatewayUrl, gatewayToken: s.gatewayToken }
       },
+      isConfigured: () => isGatewayConfigured(process.env),
       mcpBaseUrl: () => this.mcpBaseUrl,
       makeClient: () => new GatewayClient() as unknown as OpenClawClientLike,
       connectOptions: () => {

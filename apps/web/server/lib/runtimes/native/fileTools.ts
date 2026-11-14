@@ -1,9 +1,12 @@
 // Built-in file tools for the native runtime — the runtime's PRIVATE plane
 // (every coding runtime ships its own file primitives; the shared MCP spine
 // carries coordination, not workspace edits). Strictly jailed to the run's cwd
-// (a task worktree, or the team's folder): every path resolves under it, on disk
-// as well as by name, or the call is rejected, so a model cannot read or write
-// outside it. No cwd ⇒ no file tools.
+// (a task worktree, a task's own folder, or the team's folder): every path
+// resolves under it, on disk as well as by name, or the call is rejected, so a
+// model cannot write outside it. A run in a task's folder may also READ its team
+// folder (`readRoot`, which holds the task folder), where the team's shared files
+// and the other tasks' folders are; paths still start from the cwd. No cwd ⇒ no
+// file tools.
 
 import { lstat, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -53,12 +56,13 @@ export interface NativeLocalTool {
 
 const READ_CAP_BYTES = 64 * 1024
 
-/** Resolve `rel` under `cwd`; null when it escapes the jail. */
-export function resolveJailed(cwd: string, rel: string): string | null {
+/** Resolve `rel` from `cwd`; null when it escapes the jail, `jail` (the cwd
+ *  unless a wider folder holding it is given). */
+export function resolveJailed(cwd: string, rel: string, jail: string = cwd): string | null {
   if (typeof rel !== 'string' || rel.length === 0) return null
   if (path.isAbsolute(rel)) return null
   const resolved = path.resolve(cwd, rel)
-  const root = path.resolve(cwd)
+  const root = path.resolve(jail)
   if (resolved !== root && !resolved.startsWith(root + path.sep)) return null
   return resolved
 }
@@ -71,12 +75,16 @@ export function resolveJailed(cwd: string, rel: string): string | null {
  * reach. Checked, not locked: a link swapped in between this check and the read
  * or write is not caught.
  */
-export async function resolveJailedOnDisk(cwd: string, rel: string): Promise<string | null> {
-  const lexical = resolveJailed(cwd, rel)
+export async function resolveJailedOnDisk(
+  cwd: string,
+  rel: string,
+  jail: string = cwd,
+): Promise<string | null> {
+  const lexical = resolveJailed(cwd, rel, jail)
   if (!lexical) return null
   let realRoot: string
   try {
-    realRoot = await realpath(cwd)
+    realRoot = await realpath(jail)
   } catch {
     return null
   }
@@ -108,13 +116,18 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message : Stri
 // stays here; only the file access moves.
 //
 // The jail is the same lexical one (`resolveJailed`: relative, no way out of
-// the run folder by name). The on-disk half is not repeated: a link inside the
-// folder can only take the host where the agent user could go anyway, and the
-// server could not resolve real paths in a folder it cannot enter. The last
-// component is still never followed: a link there is refused, as it is locally.
+// the run folder by name, or for reads of a run in a task's folder, out of its
+// team folder). The on-disk half is not repeated: a link inside the folder can
+// only take the host where the agent user could go anyway, and the server could
+// not resolve real paths in a folder it cannot enter. The last component is
+// still never followed: a link there is refused, as it is locally.
 
-async function readInAgentSpace(cwd: string, rel: string): Promise<NativeToolOutcome> {
-  const target = resolveJailed(cwd, rel)
+async function readInAgentSpace(
+  cwd: string,
+  rel: string,
+  jail: string,
+): Promise<NativeToolOutcome> {
+  const target = resolveJailed(cwd, rel, jail)
   if (!target) return err(OUTSIDE)
   try {
     const info = await agentStat(target)
@@ -163,8 +176,12 @@ async function writeInAgentSpace(
   }
 }
 
-async function listInAgentSpace(cwd: string, rel: string): Promise<NativeToolOutcome> {
-  const target = resolveJailed(cwd, rel)
+async function listInAgentSpace(
+  cwd: string,
+  rel: string,
+  jail: string,
+): Promise<NativeToolOutcome> {
+  const target = resolveJailed(cwd, rel, jail)
   if (!target) return err(OUTSIDE)
   try {
     const info = await agentStat(target)
@@ -183,8 +200,21 @@ async function listInAgentSpace(cwd: string, rel: string): Promise<NativeToolOut
   }
 }
 
-export function buildFileTools(cwd: string | null): NativeLocalTool[] {
+/**
+ * The run's file tools. `readRoot`, when it is a folder holding `cwd` (the team
+ * folder of a run in a task's folder), widens what `read_file` and `list_files`
+ * may reach; `write_file` stays in `cwd`.
+ */
+export function buildFileTools(
+  cwd: string | null,
+  opts: { readRoot?: string | null } = {},
+): NativeLocalTool[] {
   if (!cwd) return []
+  const wider = opts.readRoot ? path.resolve(opts.readRoot) : null
+  const readJail =
+    wider && path.resolve(cwd).startsWith(wider.endsWith(path.sep) ? wider : wider + path.sep)
+      ? wider
+      : cwd
 
   return [
     {
@@ -197,8 +227,10 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
         required: ['path'],
       },
       async run(args) {
-        if (isAgentUserMode()) return readInAgentSpace(cwd, String(args['path'] ?? ''))
-        const target = await resolveJailedOnDisk(cwd, String(args['path'] ?? ''))
+        if (isAgentUserMode()) {
+          return readInAgentSpace(cwd, String(args['path'] ?? ''), readJail)
+        }
+        const target = await resolveJailedOnDisk(cwd, String(args['path'] ?? ''), readJail)
         if (!target) return err('path must be a relative path inside the workspace')
         try {
           const info = await stat(target)
@@ -255,8 +287,8 @@ export function buildFileTools(cwd: string | null): NativeLocalTool[] {
       async run(args) {
         const rel =
           typeof args['path'] === 'string' && args['path'] ? (args['path'] as string) : '.'
-        if (isAgentUserMode()) return listInAgentSpace(cwd, rel)
-        const target = await resolveJailedOnDisk(cwd, rel)
+        if (isAgentUserMode()) return listInAgentSpace(cwd, rel, readJail)
+        const target = await resolveJailedOnDisk(cwd, rel, readJail)
         if (!target) return err('path must be a relative path inside the workspace')
         try {
           const entries = await readdir(target, { withFileTypes: true })

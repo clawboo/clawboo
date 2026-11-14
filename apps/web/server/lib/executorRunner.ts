@@ -119,7 +119,7 @@ import {
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
 import { loadAgentConfig } from './runtimes/native/agentConfigStore'
 import { startFolderRun, type FolderRun } from './runtimes/teamFolderActivity'
-import { ensureTeamWorkdir, taskRunWorkdirFor } from './runtimes/teamWorkdir'
+import { ensureTeamWorkdir, taskRunFolderFor, TASK_FOLDER_NOTE } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
 import { notifyBlockedByAgent } from './teamChat/inboxNotices'
 import {
@@ -364,22 +364,25 @@ function unsafeWorkspace(r: { worktreePath: string; why: string }): WorkspaceOut
 /**
  * Where a run with no worktree starts. `cwd` stays the WORKTREE (null here), since
  * the handoff and native-resume bookkeeping key on it; `runDir` is only the folder
- * the driver is started in: the team's folder (see teamWorkdir.ts), null for a
- * runtime that does not get one.
+ * the driver is started in: the task's own folder inside its team folder (see
+ * teamWorkdir.ts), null for a runtime that does not get one. `teamFolder` is the
+ * team folder holding it, where the run reports that it is working.
  */
 async function folderForRun(
   runtimeId: string,
-  teamId: string | null,
-): Promise<{ ok: true; runDir: string | null } | { ok: false; reason: string }> {
-  const runDir = taskRunWorkdirFor(runtimeId, teamId)
-  if (!runDir) return { ok: true, runDir: null }
+  task: { id: string; teamId: string | null },
+): Promise<
+  { ok: true; runDir: string | null; teamFolder: string | null } | { ok: false; reason: string }
+> {
+  const folder = taskRunFolderFor(runtimeId, task)
+  if (!folder) return { ok: true, runDir: null, teamFolder: null }
   try {
-    await ensureTeamWorkdir(runDir)
-    return { ok: true, runDir }
+    await ensureTeamWorkdir(folder.dir)
+    return { ok: true, runDir: folder.dir, teamFolder: folder.teamFolder }
   } catch (e) {
     return {
       ok: false,
-      reason: `Could not create the working folder ${runDir} for this run: ${e instanceof Error ? e.message : String(e)}`,
+      reason: `Could not create the working folder ${folder.dir} for this run: ${e instanceof Error ? e.message : String(e)}`,
     }
   }
 }
@@ -460,8 +463,8 @@ async function acquireWorkspace(
     }
   }
 
-  // Read-only work (research / review) mutates no files, so it legitimately runs
-  // without a worktree.
+  // Read-only work (research / review) changes no repository, so it legitimately
+  // runs without a worktree, in the task's own folder (see folderForRun).
   if (isolationForTask(kind) !== 'worktree') return { ok: true, cwd: null, resume: null }
 
   // From here the task DOES mutate files, so isolation is mandatory. Returning a
@@ -965,11 +968,11 @@ async function runTaskInner(
   const kind = input.kind ?? 'code'
   const acquired = await acquireWorkspace(taskId, caps, input.repoPath, kind)
   // No worktree (read-only work): the run still starts in a folder of its own,
-  // never the server's working directory.
+  // the task's, never the server's working directory.
   const runFolder =
     acquired.ok && acquired.cwd === null
-      ? await folderForRun(runtimeId, task.teamId ?? null)
-      : ({ ok: true, runDir: null } as const)
+      ? await folderForRun(runtimeId, { id: taskId, teamId: task.teamId ?? null })
+      : ({ ok: true, runDir: null, teamFolder: null } as const)
   const workspace: WorkspaceOutcome = runFolder.ok
     ? acquired
     : { ...runFolder, refusal: 'no_isolation' }
@@ -1009,10 +1012,11 @@ async function runTaskInner(
   }
   const { cwd, resume } = workspace
   const runDir = runFolder.ok ? runFolder.runDir : null
-  // No worktree: this run shares the team folder with the team chat, so it reports
-  // that it is working there, and a team-chat work check waits for it. A run in a
-  // worktree has its own checkout (see teamFolderActivity).
-  if (runDir) claimState.folderRun = startFolderRun(runDir, assigneeAgentId)
+  // No worktree: this run's folder sits in the team folder the team chat shares,
+  // so it reports that it is working there, and a team-chat work check waits for
+  // it. A run in a worktree has its own checkout (see teamFolderActivity).
+  const teamFolder = runFolder.ok ? runFolder.teamFolder : null
+  if (teamFolder) claimState.folderRun = startFolderRun(teamFolder, assigneeAgentId)
 
   // Memory auto-injection: seed the most-relevant facts for the task into the
   // VOLATILE tier (cache-safe — never the cached prefix, per the KV-cache
@@ -1057,14 +1061,17 @@ async function runTaskInner(
   const memoryGuidance = buildMemoryGuidance(runtimeId, Boolean(input.mcpBaseUrl))
   // A worktree run is checked when it ends, by the VERIFY_CMD in its init.sh,
   // which starts as a placeholder that fails the check. Say so up front, or the
-  // first check always fails and spends an attempt.
-  const worktreeNote = cwd
+  // first check always fails and spends an attempt. A run in its task's folder
+  // is told where its files go.
+  const folderNote = cwd
     ? "You are working in this task's own git worktree. Read `TASK.md` there first. When you finish, Clawboo checks the work by running `VERIFY_CMD` from `init.sh`, and the placeholder it starts with counts as a failed check, so set it to the command that proves the work (for example `npm test`) before you finish."
-    : ''
+    : runDir
+      ? TASK_FOLDER_NOTE
+      : ''
   const baseContext = [
     resumeCtx,
     mcpNote,
-    worktreeNote,
+    folderNote,
     memoryGuidance,
     degrNotes.length ? `Degradations applied: ${degrNotes.join('; ')}.` : '',
   ]
@@ -1151,6 +1158,8 @@ async function runTaskInner(
   const baseSessionKey = `runtime:${runtimeId}:task:${taskId}`
   const ctx: RuntimeRunContext = {
     cwd: cwd ?? runDir,
+    // A run in its task's folder may still read the team folder holding it.
+    ...(cwd === null && runDir && teamFolder ? { readRoot: teamFolder } : {}),
     model: input.model ?? null,
     // Same-runtime continuation resumes the prior NATIVE session (the id rides
     // the worktree handoff); a cross-runtime pickup gets the prose ResumeState

@@ -641,6 +641,10 @@ export interface WorkspaceDetail {
   sorFilesTruncated?: string[]
   diffStat?: DiffStat | null
   diff?: string
+  /** With no worktree (`ok: false`): the task's own folder, where its runs start
+   *  and its files land. `onDisk` is false until the first run makes it, and
+   *  `holdsFiles` while nothing is in it. */
+  taskFolder?: { path: string; onDisk: boolean; holdsFiles?: boolean } | null
 }
 
 export async function getWorkspaceDetail(taskId: string): Promise<WorkspaceDetail | null> {

@@ -108,11 +108,18 @@ import {
 import { isAgentUserMode } from '../lib/agentUser/config'
 import {
   agentTeamFolder,
+  folderHoldsAnything,
   folderOnDiskInAgentSpace,
+  listTaskFolderDir,
   listTeamFolderDir,
   listWorkspaceDir,
+  readTaskFolderFile,
   readTeamFolderFile,
   readWorkspaceFile,
+  taskFolderInAgentSpace,
+  taskFolderOf,
+  taskFolderOfTask,
+  type TaskFolder,
   workspaceFileDiff,
   workspaceGitStatus,
   WorkspacePathError,
@@ -1336,10 +1343,13 @@ export function boardExecutionsGET(req: Request, res: Response): void {
 }
 
 // ─── GET /api/board/:taskId/workspace/detail ─────────────────────────────────
-// The task-detail drawer's Workspace tab: SoR file contents + the unified diff
+// The task-detail drawer's Files section: SoR file contents + the unified diff
 // (baseline vs working tree, SoR bookkeeping excluded). Most tasks never get a
 // worktree, and the drawer asks on every open, so a known task without one is
-// an ordinary answer (`ok: false`), not a 404; only an unknown task is.
+// an ordinary answer (`ok: false`), not a 404; only an unknown task is. That
+// answer carries the task's own folder instead, where its runs start and its
+// files land (`onDisk: false` until the first run makes it, `holdsFiles: false`
+// while nothing is in it).
 export async function boardWorkspaceDetailGET(req: Request, res: Response): Promise<void> {
   try {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
@@ -1349,7 +1359,18 @@ export async function boardWorkspaceDetailGET(req: Request, res: Response): Prom
         res.status(404).json({ error: 'task not found' })
         return
       }
-      res.json({ ok: false, reason: 'no_workspace' })
+      const folder = taskFolderOf(taskId)
+      res.json({
+        ok: false,
+        reason: 'no_workspace',
+        // With agent isolation on the folder is the agent user's: the server's
+        // own look says false for every one, so the host is asked.
+        taskFolder: !folder
+          ? null
+          : isAgentUserMode()
+            ? await taskFolderInAgentSpace(folder)
+            : { ...folder, holdsFiles: folder.onDisk && folderHoldsAnything(folder.path) },
+      })
       return
     }
     res.json(detail)
@@ -1358,7 +1379,7 @@ export async function boardWorkspaceDetailGET(req: Request, res: Response): Prom
   }
 }
 
-// ─── Workspace filesystem view (agent-detail Workspace tab) ──────────────────
+// ─── Workspace filesystem view (agent-detail Computer tab) ───────────────────
 // Read-only. Paths resolve from the stored workspaces row and are confined to
 // the worktree root by lib/workspaceFs; a refused path answers 400 with the
 // refusal message, and a paused/reaped checkout answers 404 with reason 'gone'
@@ -1419,10 +1440,63 @@ export async function boardWorkspaceFileGET(req: Request, res: Response): Promis
   }
 }
 
+/** A task folder route's failure. A folder removed while it was read (the boot
+ *  cleanup, or a team delete) is not found, as on the preview route; anything
+ *  else is logged and answered without the server's paths. */
+function sendTaskFolderError(res: Response, err: unknown): void {
+  if (err instanceof WorkspacePathError) {
+    res.status(400).json({ ok: false, error: err.message })
+    return
+  }
+  const code = (err as { code?: unknown } | null)?.code
+  if (code === 'ENOENT' || code === 'ENOTDIR') {
+    sendWorkspaceMiss(res, 'gone')
+    return
+  }
+  log.error({ err }, 'task folder read failed')
+  res.status(500).json({ ok: false, error: 'task folder could not be read' })
+}
+
+// ─── GET /api/board/:taskId/folder/tree?dir=<rel> ────────────────────────────
+// One directory level of the task's own folder (a task with no worktree). Read-
+// only; the folder comes from the task's row, never the request. It is not a
+// git checkout, so there is no status or diff.
+export async function boardTaskFolderTreeGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = await listTaskFolderDir(taskId, relParam(req, 'dir'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    sendTaskFolderError(res, err)
+  }
+}
+
+// ─── GET /api/board/:taskId/folder/file?path=<rel> ───────────────────────────
+// Bounded read-only file content from the task's own folder, same shape as the
+// worktree file route.
+export async function boardTaskFolderFileGET(req: Request, res: Response): Promise<void> {
+  try {
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = await readTaskFolderFile(taskId, relParam(req, 'path'))
+    if (!result.ok) {
+      sendWorkspaceMiss(res, result.reason)
+      return
+    }
+    res.json(result)
+  } catch (err) {
+    sendTaskFolderError(res, err)
+  }
+}
+
 // ─── GET /api/board/:taskId/preview/* ────────────────────────────────────────
-// Serve the artifact the agent built, straight out of the task worktree, so the
-// task drawer can iframe the actual rendered page beside the diff that produced
-// it. Static files only — clawboo never runs an agent-authored build command.
+// Serve the artifact the agent built, straight out of the task worktree (or the
+// task's own folder when it has none), so the task drawer can iframe the actual
+// rendered page beside the diff that produced it. Static files only: clawboo
+// never runs an agent-authored build command.
 //
 // Mounted under /api on purpose: it inherits the origin guard and the access
 // gate, and stays same-origin with the dashboard, so the gate's host-only
@@ -1550,18 +1624,78 @@ export async function boardWorkspaceFileDiffGET(req: Request, res: Response): Pr
   }
 }
 
+/** Task folders listed per agent: the picker is for recent work. */
+const MAX_LISTED_TASK_FOLDERS = 50
+/** Tasks looked at on disk per listing, newest first. Each one costs a look at
+ *  the disk on every poll of the Computer tab, so older tasks are not looked at
+ *  (the task drawer shows any task's folder on its own). */
+const MAX_CHECKED_TASK_FOLDERS = 200
+
+/** A task that can still put files in its folder: listed even while empty. */
+function taskStillGoing(task: DbTask): boolean {
+  return task.status === 'in_progress' || task.status === 'in_review'
+}
+
+function listedTaskFolder(task: DbTask, folderPath: string) {
+  return {
+    taskId: task.id,
+    title: task.title,
+    taskStatus: task.status,
+    path: folderPath,
+    updatedAt: task.updatedAt,
+  }
+}
+
+/**
+ * The listing's task folders with agent isolation on. The folders are the agent
+ * user's, so the server's own `existsSync` and `opendirSync` cannot see into
+ * them (they say false for every one): the host is asked about each, newest
+ * first, until the listing is full.
+ */
+async function taskFoldersInAgentSpace(
+  candidates: ReadonlyArray<{ task: DbTask; folder: TaskFolder }>,
+): Promise<Array<ReturnType<typeof listedTaskFolder>>> {
+  const listed: Array<ReturnType<typeof listedTaskFolder>> = []
+  for (const { task, folder } of candidates) {
+    if (listed.length >= MAX_LISTED_TASK_FOLDERS) break
+    const state = await taskFolderInAgentSpace(folder)
+    if (!state.onDisk) continue
+    if (!taskStillGoing(task) && !state.holdsFiles) continue
+    listed.push(listedTaskFolder(task, folder.path))
+  }
+  return listed
+}
+
 // ─── GET /api/agents/:agentId/workspaces ─────────────────────────────────────
 // The task workspaces belonging to one agent's assigned tasks, newest first.
 // `onDisk: false` marks a paused/reaped checkout (row + branch survive). The
-// Workspace tab uses this to pick what to show and to render an honest empty
-// state when the agent has no local workspace at all. `teamFolder` is the folder
-// the agent starts in when it has no worktree (team chat, read-only tasks), or
-// null for a runtime that gets none (OpenClaw).
+// Computer tab uses this to pick what to show and to render an honest empty
+// state when the agent has nothing local at all. `taskFolders` are the own
+// folders of its tasks with no worktree, newest first: each one on disk that
+// holds a file, or whose task is still going. `teamFolder` is the folder its
+// other runs start in (team chat, its own chat), or null for a runtime that gets
+// none (OpenClaw).
 export async function agentWorkspacesGET(req: Request, res: Response): Promise<void> {
   try {
     const agentId = (req.params['agentId'] as string | undefined) ?? ''
     const db = getDb()
-    const tasks = listTasks(db).filter((t) => t.assigneeAgentId === agentId && t.worktreeRef)
+    const assigned = listTasks(db).filter((t) => t.assigneeAgentId === agentId)
+    const tasks = assigned.filter((t) => t.worktreeRef)
+    const foldersToCheck = assigned
+      .filter((t) => !t.worktreeRef)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_CHECKED_TASK_FOLDERS)
+      .flatMap((t) => {
+        const folder = taskFolderOfTask(t)
+        return folder ? [{ task: t, folder }] : []
+      })
+    let taskFolders = foldersToCheck
+      .flatMap(({ task, folder }) => {
+        if (!folder.onDisk) return []
+        if (!taskStillGoing(task) && !folderHoldsAnything(folder.path)) return []
+        return [listedTaskFolder(task, folder.path)]
+      })
+      .slice(0, MAX_LISTED_TASK_FOLDERS)
     const workspaces = tasks.flatMap((t) => {
       const ws = getWorkspaceForTask(db, t.id)
       if (!ws || !ws.worktreePath || ws.status === 'archived') return []
@@ -1587,8 +1721,9 @@ export async function agentWorkspacesGET(req: Request, res: Response): Promise<v
     if (isAgentUserMode()) {
       for (const ws of workspaces) ws.onDisk = await folderOnDiskInAgentSpace(ws.worktreePath)
       if (teamFolder) teamFolder.onDisk = await folderOnDiskInAgentSpace(teamFolder.path)
+      taskFolders = await taskFoldersInAgentSpace(foldersToCheck)
     }
-    res.json({ ok: true, workspaces, teamFolder })
+    res.json({ ok: true, workspaces, taskFolders, teamFolder })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

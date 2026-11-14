@@ -1205,7 +1205,7 @@ export function TaskDetailDrawer({
               )}
 
               {workspace?.ok && workspace.workspace ? (
-                <Section title="Workspace" testId="task-workspace">
+                <Section title="Files" testId="task-workspace">
                   <div className="flex flex-col">
                     <PropRow label="Branch">
                       <span className="font-mono text-xs">
@@ -1266,6 +1266,37 @@ export function TaskDetailDrawer({
                   ) : null}
                   {/* The rendered result, beside the diff that produced it. Needs
                       no assignee: it reads the task's worktree directly. */}
+                  <WorkspacePreview taskId={task.id} />
+                </Section>
+              ) : workspace?.taskFolder?.onDisk &&
+                (workspace.taskFolder.holdsFiles ||
+                  task.status === 'in_progress' ||
+                  task.status === 'in_review') ? (
+                // No worktree: the task's own folder, where its runs start and the
+                // files they make land. Not a git checkout, so no branch or diff.
+                // Shown once it holds a file, or while the task is going, the same
+                // rule as the agent's Computer tab.
+                <Section title="Files" testId="task-folder">
+                  <div className="flex flex-col">
+                    <PropRow label="Folder">
+                      <span className="font-mono text-xs">{workspace.taskFolder.path}</span>
+                    </PropRow>
+                  </div>
+                  {task.assigneeAgentId ? (
+                    <div className="mt-3 h-[380px]">
+                      <WorkspacePanel
+                        agentId={task.assigneeAgentId}
+                        pinnedTaskId={task.id}
+                        pinnedTaskFolder={{
+                          taskId: task.id,
+                          title: task.title ?? '',
+                          taskStatus: task.status,
+                          path: workspace.taskFolder.path,
+                          updatedAt: task.updatedAt ?? 0,
+                        }}
+                      />
+                    </div>
+                  ) : null}
                   <WorkspacePreview taskId={task.id} />
                 </Section>
               ) : null}

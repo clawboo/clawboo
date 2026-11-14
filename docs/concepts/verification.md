@@ -38,8 +38,8 @@ A Routine you create in the app sends only its instructions, so it runs without 
 A task that runs in team chat is checked when all three of these are true:
 
 1. **The team has a work check.** That is the verify command you set in the team's settings (see [Teams](/using/teams#work-check)). Without one, team-chat work is not checked: a lot of it writes documents rather than code, and a check with no command can only fail.
-2. **The agent works in the team folder.** Claude Code, Codex, Hermes and Clawboo Native runs start in `~/clawboo-work/teams/<team id>`, in the [work folder](/operating/data-and-state#the-work-folder). OpenClaw agents work in their Gateway's workspace and are not checked.
-3. **The run changed the team folder**, compared with the folder as it was when the task first started. A run that changed nothing, with no failed attempt before it, lands in **Done** without a check.
+2. **The agent works in the team folder.** A Claude Code, Codex, Hermes or Clawboo Native run on a task starts in the task's own folder, `~/clawboo-work/teams/<team id>/tasks/<task id>`, which sits inside the team folder in the [work folder](/operating/data-and-state#the-work-folder). OpenClaw agents work in their Gateway's workspace and are not checked.
+3. **The run changed the team folder**, task folders included, compared with the folder as it was when the task first started. A run that changed nothing, with no failed attempt before it, lands in **Done** without a check.
 
 This covers work handed off in General or a room, the steps of a plan, and tasks you give an agent on the Board that run through the team, including their reruns from **Retry** or **Assign**.
 
@@ -147,7 +147,7 @@ How the reviewer works:
 
 ## Checks in team chat
 
-A team-chat task has no worktree: every teammate works in the same team folder. To see what a task changed, Clawboo keeps a history of the folder outside it, in `~/.clawboo/team-folder-history/<team id>.git`, and saves the folder there when the task first starts and again each time a run of it ends well. A later run (a fix round, or a **Retry**) keeps that first starting point. A run that fails or is stopped saves nothing: its changes are seen by the task's next checked run, and a cancelled task's are never checked. The folder itself never becomes a git checkout, and no `VERIFICATION.md` is written into it; the result is stored on the task.
+A team-chat task has no worktree: each task's run works in the task's own folder, and every task folder sits inside the same team folder. To see what a task changed, Clawboo keeps a history of the folder outside it, in `~/.clawboo/team-folder-history/<team id>.git`, and saves the folder there when the task first starts and again each time a run of it ends well. A later run (a fix round, or a **Retry**) keeps that first starting point. A run that fails or is stopped saves nothing: its changes are seen by the task's next checked run, and a cancelled task's are never checked. The folder itself never becomes a git checkout, and no `VERIFICATION.md` is written into it; the result is stored on the task.
 
 - **A fix round** gets the note of what failed together with the task itself, because a team-chat run starts a fresh session. Its check compares the folder with how it was when the task first started, so it covers all of the task's work.
 - **The reviewer** reads a separate checkout of the folder as it was when the check started, made from that history.
@@ -165,7 +165,7 @@ What a team-chat check cannot see:
 - **A run that starts after the check began.** The check runs on the live folder, and the wait never delays a run's start, so a teammate can start changing the folder under a running check. A check at the limit runs beside whatever is still going too. The result says so, and the fix note warns the agent.
 - **A process a run left behind.** A dev server or a watcher an agent started in the background can keep changing the folder after its run ends. It reports no run, so a check does not wait for it.
 - **A teammate caught at the task's start.** The folder is saved as the task starts, without waiting, so it can hold a teammate's half-written change. The rest of that change then counts as this task's.
-- **Files outside the team folder.** Claude Code, Codex and Hermes can change any file your user account can; only the team folder is compared.
+- **Files outside the team folder.** Claude Code, Codex and Hermes can change any file your user account can; only the team folder, with its task folders, is compared.
 - **Dependency folders.** `node_modules`, `.venv`, `venv`, `__pycache__`, `.next`, `.turbo` and `target` are not counted as changes.
 - **Uncommitted edits inside a git repository** an agent cloned into the team folder. Only a new commit there counts as a change.
 - **Files a `.gitignore` in the team folder ignores.** They are not counted as changes, so a run that changed only those is not checked. They stay out on purpose: they include files such as `.env`, which would otherwise land in the history and the reviewer's checkout.

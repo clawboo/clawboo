@@ -31,4 +31,30 @@ test.describe('Fleet Sidebar', () => {
       timeout: 5_000,
     })
   })
+
+  test('the agent page names its files tab Computer, and Settings keeps Workspace', async ({
+    page,
+    request,
+    gateway,
+  }) => {
+    await connectToMockGateway(page, request, gateway.url)
+
+    const sidebar = page.locator('[data-testid="agent-list-column"]')
+    await expect(sidebar.getByText('Research Boo')).toBeVisible({ timeout: 5_000 })
+    await page
+      .locator('[data-testid="teamspace-mascot-a2"], [data-testid="fleet-agent-row-a2"]')
+      .first()
+      .click()
+
+    // "Workspace" means a whole Clawboo, so the agent's own tab is Computer.
+    const details = page.getByRole('tablist', { name: 'Agent details' })
+    await expect(details.getByRole('tab', { name: 'Computer' })).toBeVisible({ timeout: 5_000 })
+    await expect(details.getByRole('tab', { name: 'Workspace' })).toHaveCount(0)
+
+    // Settings still groups the install-wide panes under Workspace.
+    await sidebar.locator('[data-testid="nav-settings"]').click()
+    const settings = page.locator('[data-testid="settings-modal"]')
+    await expect(settings).toBeVisible({ timeout: 5_000 })
+    await expect(settings.getByText('Workspace', { exact: true })).toBeVisible()
+  })
 })

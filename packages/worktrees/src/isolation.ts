@@ -1,4 +1,4 @@
-// Isolation-level policy. The spectrum runs shared-cwd → worktree → container →
+// Isolation-level policy. The spectrum runs task folder → worktree → container →
 // VM; this module decides the *default execution-isolation* tier for a task by
 // kind. Worktrees give concurrency isolation only (no write races) — NOT a
 // privilege boundary. Anything that runs untrusted code, runs Docker itself, or
@@ -10,14 +10,15 @@ import type { IsolationLevel, TaskKind } from './types'
 /**
  * Decide the isolation level for a task by kind.
  *
- * - Read-only / research work → `none`: it mutates no files, so paying the
- *   worktree cost (a checkout + per-worktree dep install) buys nothing.
+ * - Research work → `folder`: it changes no repository, so paying the worktree
+ *   cost (a checkout + per-worktree dep install) buys nothing, but the documents
+ *   it writes still get a home of their own, a plain folder for the task.
  * - File-mutating work → `worktree`: its own checkout + branch so parallel
  *   teammates can't trample each other ("collisions are impossible, not merely
  *   discouraged").
  * - `review` is read-only by design but runs in a *detached* worktree at a
  *   specific commit (see `provisionReviewWorktree`) so a reviewer literally has
- *   no branch to push — hence `none` here (no writable worktree is provisioned
+ *   no branch to push — hence `folder` here (no writable worktree is provisioned
  *   for it through the normal path).
  *
  * `container` is never returned automatically in v0.x; it is an explicit opt-in
@@ -28,12 +29,12 @@ export function isolationForTask(kind: TaskKind): IsolationLevel {
   switch (kind) {
     case 'research':
     case 'review':
-      return 'none'
+      return 'folder'
     case 'code':
       return 'worktree'
     default:
       // Unknown kinds default to the safe-for-concurrency choice: isolate
-      // file mutation. A caller that knows the work is read-only passes
+      // file mutation. A caller that knows the work changes no repository passes
       // 'research' to opt out.
       return 'worktree'
   }

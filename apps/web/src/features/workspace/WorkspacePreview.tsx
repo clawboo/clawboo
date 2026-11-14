@@ -2,7 +2,8 @@
 //
 // The tree and the diff answer "what changed"; this answers "what does it look
 // like now". It is an iframe over `GET /api/board/:taskId/preview`, which serves
-// static files straight out of the task worktree.
+// static files straight out of the task worktree, or the task's own folder when
+// it has none.
 //
 // Same-origin on purpose. The access gate's cookie is host-only and
 // `SameSite=Lax`, so a separate proxy origin would receive no cookie and 401 on
@@ -69,8 +70,8 @@ export function WorkspacePreview({ taskId }: { taskId: string }) {
   if (probe === 'absent') {
     return (
       <div className="mt-3 rounded border border-border bg-surface px-3 py-2 text-[11px] text-muted-foreground">
-        Nothing to preview yet. This shows the workspace&apos;s <code>index.html</code> once the
-        agent writes one.
+        Nothing to preview yet. This shows the task&apos;s <code>index.html</code> once the agent
+        writes one.
       </div>
     )
   }
@@ -95,7 +96,7 @@ export function WorkspacePreview({ taskId }: { taskId: string }) {
       </div>
       <iframe
         key={generation}
-        title="Workspace preview"
+        title="Task preview"
         src={apiUrl(previewPath(taskId))}
         // `allow-same-origin` WITHOUT `allow-scripts`, which reads backwards and
         // is the safer of the two options here.

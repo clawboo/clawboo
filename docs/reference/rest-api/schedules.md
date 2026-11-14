@@ -102,13 +102,13 @@ Every schedule from both sources, with each one's `teamName` and `agentName` fil
     sourceId: 'clawboo-routine' | 'openclaw-gateway-cron'
     ok: boolean
     degraded: boolean
-    reason?: string // 'gateway_disconnected', 'stale_cache', or an error message
+    reason?: string // 'gateway_disconnected', 'stale_cache', 'not_configured', or an error message
     at: number      // epoch ms of this read
   }>
 }
 ```
 
-The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs.
+The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs.
 
 ### Example
 

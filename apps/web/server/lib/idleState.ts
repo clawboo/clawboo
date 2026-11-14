@@ -1,0 +1,270 @@
+// The answer a host that sleeps and wakes this engine reads before it stops it:
+// is a person here, is work going, and when is the next scheduled work due.
+// Served by GET /api/system/idle. Read-only: it writes nothing, starts nothing,
+// and reading it is not presence.
+//
+// The next due time is read from every schedule source, each in one of three
+// states, so a source that is not set up never reads as one that could not be
+// read:
+//   ok       read now; `at` is its earliest next run, or null with none
+//   off      not in use: nothing set up (no Gateway configured, say), its jobs
+//            run somewhere this engine's stopping does not stop (a Gateway at
+//            another machine's address), or nothing is listening for it (a
+//            Gateway that is set up and stopped)
+//   unknown  in use but not readable now (a Gateway running that this engine
+//            is still connecting to after a wake); `at` is the earliest next run
+//            it reported before, if one is still ahead
+// The engine's own routines are read from the ledger with the ticker's rules
+// (see routinesDue), not from the merged schedules list, which also lists paused
+// routines and ones on archived teams.
+
+import type { EngineIdleState, IdleDueSource, IdleNextDue, IdleWork } from '@clawboo/control-client'
+import type { ClawbooDb } from '@clawboo/db'
+import {
+  SCHEDULE_SOURCE_NOT_CONFIGURED,
+  decodeCronSpec,
+  type ScheduleReadResult,
+  type ScheduleSource,
+} from '@clawboo/scheduler'
+
+import { engineHoldState } from '../api/systemHold'
+import { getRegistry } from './agentSource'
+import { getDb } from './db'
+import { presence } from './presence'
+import { placeGateway, probeListening, type PlacedGateway } from './gatewayPlace'
+import type { GatewayState } from './routines/gatewayWait'
+import { routinesDue, serverGateway } from './routines/ticker'
+import { readSchedulerTimeZone } from './routines/timeZone'
+import { getScheduleMultiplexer } from './scheduleSource/registry'
+import { teamChecksInFlight } from './teamChat/teamOrchestrator'
+
+/** How long one schedule source may take to answer before it reads as `unknown`. */
+export const IDLE_SOURCE_READ_TIMEOUT_MS = 3_000
+
+const ROUTINES_SOURCE_ID = 'clawboo-routine'
+const GATEWAY_CRON_SOURCE_ID = 'openclaw-gateway-cron'
+
+export interface IdleStateDeps {
+  db?: ClawbooDb
+  now?: () => number
+  /** The schedule sources besides the engine's own routines. */
+  sources?: () => readonly ScheduleSource[]
+  /** Where the configured OpenClaw Gateway runs, or null when none is set up. */
+  gatewayPlace?: () => PlacedGateway | null
+  /** Whether anything listens at the Gateway's address. */
+  probe?: (host: string, port: number) => Promise<'open' | 'closed' | 'unknown'>
+  /** The Gateway connection due OpenClaw routines wait for; null to count no waits. */
+  gateway?: GatewayState | null
+}
+
+/** The hold route's answer, plus the work checks and routine fires it folds in. */
+function workState(routinesInFlight: number): IdleWork {
+  const hold = engineHoldState()
+  return {
+    backgroundWork: hold.backgroundWork,
+    runs: hold.runs,
+    checks: teamChecksInFlight(),
+    routinesInFlight,
+    held: hold.held,
+  }
+}
+
+function withTimeout(source: ScheduleSource): Promise<ScheduleReadResult | 'timeout'> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve('timeout'), IDLE_SOURCE_READ_TIMEOUT_MS)
+    timer.unref?.()
+    source.read().then(
+      (result) => {
+        clearTimeout(timer)
+        resolve(result)
+      },
+      (err: unknown) => {
+        clearTimeout(timer)
+        resolve({
+          records: [],
+          status: {
+            sourceId: source.id,
+            ok: false,
+            degraded: true,
+            reason: err instanceof Error ? err.message : String(err),
+            at: Date.now(),
+          },
+        })
+      },
+    )
+  })
+}
+
+/** The zone a schedule's next run was worked out in, when its spec names one. A
+ *  fixed interval or a fixed time has none, and neither has a cron expression that
+ *  leaves the zone to the system that runs it. */
+function zoneOf(cronSpec: string): string | null {
+  try {
+    const shape = decodeCronSpec(cronSpec)
+    return shape.kind === 'cron' && shape.tz ? shape.tz : null
+  } catch {
+    return null
+  }
+}
+
+/** The earliest next run among a source's schedules that are switched on. */
+function earliest(result: ScheduleReadResult): {
+  at: number | null
+  count: number
+  timeZone: string | null
+} {
+  let at: number | null = null
+  let count = 0
+  let timeZone: string | null = null
+  for (const record of result.records) {
+    if (record.status === 'paused') continue
+    const next = record.nextRunAt
+    if (typeof next !== 'number' || !Number.isFinite(next)) continue
+    count += 1
+    if (at === null || next < at) {
+      at = next
+      timeZone = zoneOf(record.cronSpec)
+    }
+  }
+  return { at, count, timeZone }
+}
+
+async function readSource(
+  source: ScheduleSource,
+  nowMs: number,
+  deps: IdleStateDeps,
+): Promise<IdleDueSource> {
+  // Where the Gateway runs. Reading this machine's names can fail on some hosts;
+  // that only leaves the Gateway unplaced, and its jobs are read as usual.
+  let placed: PlacedGateway | null = null
+  if (source.id === GATEWAY_CRON_SOURCE_ID) {
+    try {
+      placed = deps.gatewayPlace?.() ?? null
+    } catch {
+      placed = null
+    }
+    if (placed?.place === 'elsewhere') {
+      // Its cron fires on the Gateway's own machine whether or not this engine sleeps.
+      return { id: source.id, state: 'off', at: null, count: 0, timeZone: null, reason: 'remote' }
+    }
+  }
+  const result = await withTimeout(source)
+  if (result === 'timeout') {
+    return {
+      id: source.id,
+      state: 'unknown',
+      at: null,
+      count: 0,
+      timeZone: null,
+      reason: 'timeout',
+    }
+  }
+  if (result.status.ok) return { id: source.id, state: 'ok', ...earliest(result) }
+  if (result.status.reason === SCHEDULE_SOURCE_NOT_CONFIGURED) {
+    return {
+      id: source.id,
+      state: 'off',
+      at: null,
+      count: 0,
+      timeZone: null,
+      reason: result.status.reason,
+    }
+  }
+  // Set up but not connected. If nothing listens at the Gateway's address, no
+  // Gateway is running there to fire its jobs, so the source is off rather than
+  // unknown: otherwise a Gateway left stopped would keep the answer incomplete for
+  // good. One still starting reads as stopped for the seconds until it listens.
+  if (placed && deps.probe) {
+    let listening: 'open' | 'closed' | 'unknown' = 'unknown'
+    try {
+      listening = await deps.probe(placed.host, placed.port)
+    } catch {
+      listening = 'unknown'
+    }
+    if (listening === 'closed') {
+      return {
+        id: source.id,
+        state: 'off',
+        at: null,
+        count: 0,
+        timeZone: null,
+        reason: 'gateway_stopped',
+      }
+    }
+  }
+  // What it sent last, if it sent anything: only times still ahead, since a cache
+  // is not refreshed while the source is down and a passed time would read as due
+  // now for as long as it stays down.
+  const ahead = { ...result, records: result.records.filter((r) => (r.nextRunAt ?? 0) > nowMs) }
+  return {
+    id: source.id,
+    state: 'unknown',
+    ...earliest(ahead),
+    reason: result.status.reason ?? 'unreadable',
+  }
+}
+
+async function nextDueState(
+  routines: IdleDueSource,
+  timeZone: string,
+  nowMs: number,
+  deps: IdleStateDeps,
+): Promise<IdleNextDue> {
+  const others = (deps.sources ?? defaultSources)().filter((s) => s.id !== ROUTINES_SOURCE_ID)
+  const entries = [
+    routines,
+    ...(await Promise.all(others.map((source) => readSource(source, nowMs, deps)))),
+  ]
+  let at: number | null = null
+  for (const entry of entries) {
+    if (entry.at !== null && (at === null || entry.at < at)) at = entry.at
+  }
+  return {
+    at,
+    complete: entries.every((entry) => entry.state !== 'unknown'),
+    timeZone,
+    sources: entries,
+  }
+}
+
+function defaultSources(): readonly ScheduleSource[] {
+  return getScheduleMultiplexer().list()
+}
+
+function defaultGatewayPlace(): PlacedGateway | null {
+  const source = getRegistry().source
+  return source.isConfigured() ? placeGateway(source.gatewayUrl()) : null
+}
+
+export async function buildIdleState(deps: IdleStateDeps = {}): Promise<EngineIdleState> {
+  const at = (deps.now ?? Date.now)()
+  // The engine's own routines, from the ledger. A database that cannot be read
+  // leaves them unknown rather than failing the whole answer.
+  let routines: IdleDueSource
+  let inFlight = 0
+  let timeZone = 'UTC'
+  try {
+    const db = deps.db ?? getDb()
+    timeZone = readSchedulerTimeZone(db).timeZone
+    // A fire waiting for the Gateway is work about to run, so it counts with the
+    // fires under way: a host that stopped the engine now would only start it again.
+    const due = routinesDue(db, at, deps.gateway === undefined ? serverGateway() : deps.gateway)
+    inFlight = due.inFlight
+    routines = { id: ROUTINES_SOURCE_ID, state: 'ok', at: due.at, count: due.count, timeZone }
+  } catch (err) {
+    routines = {
+      id: ROUTINES_SOURCE_ID,
+      state: 'unknown',
+      at: null,
+      count: 0,
+      timeZone: null,
+      reason: err instanceof Error ? err.message : String(err),
+    }
+  }
+  const nextDue = await nextDueState(routines, timeZone, at, {
+    ...deps,
+    gatewayPlace: deps.gatewayPlace ?? defaultGatewayPlace,
+    probe: deps.probe ?? probeListening,
+  })
+  return { at, people: presence().state(), work: workState(inFlight), nextDue }
+}

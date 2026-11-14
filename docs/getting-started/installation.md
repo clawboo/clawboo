@@ -152,7 +152,7 @@ If you only used npx, there is no global package: run `npx clawboo@latest stop`,
 
 ## Where your data lives
 
-Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK and Codex) go in a third folder, `~/clawboo-runtimes` (set `CLAWBOO_RUNTIMES_DIR` to use another), never in npm's global folder. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
+Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder (with a folder for each task inside it) and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK and Codex) go in a third folder, `~/clawboo-runtimes` (set `CLAWBOO_RUNTIMES_DIR` to use another), never in npm's global folder. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
 
 ## Troubleshooting
 

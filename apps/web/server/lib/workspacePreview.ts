@@ -1,4 +1,5 @@
-// Serve the artifact an agent built, straight out of the task's worktree.
+// Serve the artifact an agent built, straight out of the task's worktree, or out
+// of the task's own folder when it has no worktree.
 //
 // This is the "show me the thing" half of the workspace view: the tree and the
 // diff say what changed, this renders the result. It is deliberately a STATIC
@@ -33,8 +34,8 @@ import {
   openConfinedFile,
   type ConfinedFile,
   readConfinedInAgentSpace,
+  resolveTaskFilesRoot,
   resolveWorkspaceRelPath,
-  resolveWorkspaceRoot,
   statInAgentSpace,
   WorkspacePathError,
 } from './workspaceFs'
@@ -145,7 +146,7 @@ export async function resolvePreviewFile(
   taskId: string,
   relPath: string,
 ): Promise<PreviewResolution> {
-  const rootRes = await resolveWorkspaceRoot(taskId)
+  const rootRes = await resolveTaskFilesRoot(taskId)
   if (!rootRes.ok) {
     return { ok: false, status: 404, error: `workspace ${rootRes.reason}` }
   }
@@ -154,7 +155,9 @@ export async function resolvePreviewFile(
   let abs: string
   let realRoot: string
   try {
-    ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, wanted || '.'))
+    ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, wanted || '.', {
+      exactRoot: rootRes.exactRoot,
+    }))
   } catch (err) {
     if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
     const code = (err as NodeJS.ErrnoException).code
@@ -173,7 +176,9 @@ export async function resolvePreviewFile(
     // confined on exactly the terms every other path is.
     const indexRel = wanted ? `${trimTrailingSlashes(wanted)}/${INDEX_FILE}` : INDEX_FILE
     try {
-      ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, indexRel))
+      ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, indexRel, {
+        exactRoot: rootRes.exactRoot,
+      }))
     } catch {
       return { ok: false, status: 404, error: 'No index.html in that directory.' }
     }

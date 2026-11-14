@@ -164,8 +164,8 @@ Boo Zero reads a team's brief only when you start a message in Boo Zero's own ch
 
 The work check is the command Clawboo runs to check an agent's work on the team's tasks, such as `npm test`. It checks two kinds of task, and a checked task reaches **Done** only if the command succeeds:
 
-- **Team chat work**: a task handed out in team chat, or one you give an agent on the Board, that changed the team's folder. Clawboo runs the command in the team's folder after the agent's run ends. Without a work check, this work is not checked. OpenClaw agents work outside the team's folder and are not checked. If Clawboo cannot record the folder when a task starts, that task is not checked, and a comment on it says so.
-- **Task-runner tasks** that changed files. Clawboo runs the command in the task's own folder.
+- **Team chat work**: a task handed out in team chat, or one you give an agent on the Board, that changed the team's folder. The task's own folder sits inside the team's folder, so a change there counts. Clawboo runs the command in the team's folder after the agent's run ends. Without a work check, this work is not checked. OpenClaw agents work outside the team's folder and are not checked. If Clawboo cannot record the folder when a task starts, that task is not checked, and a comment on it says so.
+- **Task-runner tasks** that changed files in their own git worktree. Clawboo runs the command in the task's worktree.
 
 Agent routines you create in the app are not checked. See [When work is checked](/using/board#when-work-is-checked).
 
@@ -173,12 +173,12 @@ In the team's settings, type the command in **Work check**, then click **Save ch
 
 Above the box, **Active check** says which check runs now. It reads the team's command again when you come back to the window, so it also shows a change made elsewhere, for example through the API:
 
-- **The command, set for the team**: every check of the team's tasks runs it from the next check on, and each new task folder starts with it. The task's **Verification** section shows it as **set for the team**. An agent cannot change it by editing its own files.
-- **Each agent's own, written by the agent in its task folder**: no work check is set, so each agent writes its own check in its task folder's `init.sh`, and the task shows it as **written by the agent**. An agent that writes no check fails the check. This applies only to task-runner tasks; team chat work goes unchecked.
+- **The command, set for the team**: every check of the team's tasks runs it from the next check on, and each new task worktree starts with it. The task's **Verification** section shows it as **set for the team**. An agent cannot change it by editing its own files.
+- **Each agent's own, written by the agent in its task worktree**: no work check is set, so each agent writes its own check in its task worktree's `init.sh`, and the task shows it as **written by the agent**. An agent that writes no check fails the check. This applies only to task-runner tasks; team chat work goes unchecked.
 
 <Warning>
 
-The command runs on your computer, in the task's folder or the team's folder, each time a task is checked. Set only a command you would run yourself.
+The command runs on your computer, in the task's worktree or the team's folder, each time a task is checked. Set only a command you would run yourself.
 
 </Warning>
 
@@ -196,7 +196,7 @@ Refresh Protocol needs the OpenClaw Gateway connected, even for a team with no O
 
 ## Archive a team
 
-Right-click the team's icon in the team rail and choose **Archive**. The team leaves the list of teams for the rail's **Archived** group, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats, tasks and the files in its team folder stay in Clawboo.
+Right-click the team's icon in the team rail and choose **Archive**. The team leaves the list of teams for the rail's **Archived** group, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats, tasks and the files in its team folder, task folders included, stay in Clawboo.
 
 To bring a team back:
 
@@ -213,7 +213,7 @@ Right-click the team's icon in the team rail and choose how much to delete.
 | **Delete team only**   | The team. Its agents stay in Clawboo, with no team.                     | **Delete team**       |
 | **Delete with agents** | Every agent on the team, with their files and own chats, then the team. | **Delete everything** |
 
-Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/clawboo-work/teams/<team id>`) with every file its agents saved there, and the link to it that an older version's `~/.clawboo/workspaces/<team id>` may hold. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
+Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/clawboo-work/teams/<team id>`) with every file its agents saved there, including each task's folder under `tasks/`, and the link to it that an older version's `~/.clawboo/workspaces/<team id>` may hold. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
 
 Both choices stop whatever the team is doing first. Its runs end, a person's request still open on its board is cancelled with the work under it, and its other tasks stay on the board, where nothing can start them again. A result still on its way to one of its agents is dropped. The result stays on its task.
 

@@ -1,7 +1,8 @@
 // Read-only filesystem view over a task's worktree: directory listing, bounded
 // file reads, git status, and a per-file diff against the task's baseline.
-// This powers the agent-detail Workspace tab, which also lists the agent's team
-// folder (where its runs start when there is no worktree; see teamWorkdir.ts).
+// This powers the agent-detail Computer tab, which also lists each task's own
+// folder (where a task run starts when there is no worktree) and the agent's team
+// folder (where its other runs start; see teamWorkdir.ts).
 // Every root is resolved server-side, from the stored `workspaces` row or the
 // agent's own row, never from the request, and every relative path is confined
 // to that root before any filesystem call.
@@ -33,22 +34,22 @@
 // when they have the wrong shape. The boundary itself is the agent user's
 // permissions: whatever the host reads, it reads as that user.
 
-import { constants as fsConstants, existsSync } from 'node:fs'
+import { constants as fsConstants, existsSync, opendirSync } from 'node:fs'
 import { lstat, open, readdir, readlink, realpath, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
-import { agents, getWorkspaceForTask, type DbWorkspace } from '@clawboo/db'
+import { agents, getTask, getWorkspaceForTask, type DbWorkspace } from '@clawboo/db'
 import { branchNameForTask, execGit, GitError, loadWorktree } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
-import { agentList, agentReadFile, agentStat } from './agentUser/agentFs'
+import { agentList, agentReadFile, agentRealpath, agentStat } from './agentUser/agentFs'
 import { AgentHostError } from './agentUser/client'
 import { isAgentUserMode } from './agentUser/config'
 import { AGENT_GIT_OUTPUT_CHARS, MirrorError, runAgentGit } from './agentUser/mirror'
 import { MAX_READ_BYTES, type FsEntry, type FsStat } from './agentUser/protocol'
 import { getDb } from './db'
-import { taskRunWorkdirFor } from './runtimes/teamWorkdir'
+import { taskFolderPath, taskRunWorkdirFor } from './runtimes/teamWorkdir'
 
 /** A refused path. The message is safe to surface to the caller verbatim. */
 export class WorkspacePathError extends Error {
@@ -113,7 +114,13 @@ export interface ResolvedWorkspacePath {
 export async function resolveWorkspaceRelPath(
   root: string,
   rel: string,
-  opts: { mustExist?: boolean } = {},
+  opts: {
+    mustExist?: boolean
+    /** `root` is a real path already checked to hold no link, and must still
+     *  resolve to itself: a part of it swapped for a link since the check is
+     *  refused instead of followed. */
+    exactRoot?: boolean
+  } = {},
 ): Promise<ResolvedWorkspacePath> {
   const mustExist = opts.mustExist ?? true
   if (typeof rel !== 'string') throw new WorkspacePathError('A file path is required.')
@@ -135,10 +142,15 @@ export async function resolveWorkspaceRelPath(
       "A path may not contain '..'. Only files inside the workspace are reachable.",
     )
   }
-  if (isAgentUserMode()) return resolveInAgentSpace(root, wanted, mustExist)
+  if (isAgentUserMode()) {
+    return resolveInAgentSpace(root, wanted, mustExist, opts.exactRoot ?? false)
+  }
 
   // The root must exist and resolve; a reaped worktree surfaces here.
   const realRoot = await realpath(root)
+  if (opts.exactRoot && realRoot !== root) {
+    throw new WorkspacePathError('The folder is reached through a link, so it is not served.')
+  }
   const abs = path.resolve(realRoot, wanted)
   const rootPrefix = rootPrefixOf(realRoot)
   // Both unconditional (see rootPrefixOf): the first covers the root itself, the
@@ -241,11 +253,15 @@ function missingError(p: string): NodeJS.ErrnoException {
  * root as stored. The host is then asked about the root and each component
  * below it, in order, which is how a link anywhere on the way is refused here:
  * `realpath`, which refuses one with the setting off, would run as the server.
+ * With `exactRoot` (a task folder's real path, see `realTaskFolder`) the host
+ * also resolves the root, which must still be itself, so a folder above it
+ * swapped for a link since that check is refused as it is with the setting off.
  */
 async function resolveInAgentSpace(
   root: string,
   wanted: string,
   mustExist: boolean,
+  exactRoot: boolean,
 ): Promise<ResolvedWorkspacePath> {
   const lexRoot = path.resolve(root)
   const abs = path.resolve(lexRoot, wanted)
@@ -264,6 +280,9 @@ async function resolveInAgentSpace(
   if (rootStat === null) throw missingError(lexRoot)
   if (rootStat.type === 'link') throw new WorkspacePathError('Symbolic links are not served.')
   if (rootStat.type !== 'dir') throw new WorkspacePathError('Not a directory.')
+  if (exactRoot && (await agentRealpath(lexRoot)) !== root) {
+    throw new WorkspacePathError('The folder is reached through a link, so it is not served.')
+  }
 
   let at = lexRoot
   const segments = abs === lexRoot ? [] : abs.slice(rootPrefix.length).split(path.sep)
@@ -547,10 +566,12 @@ export interface WorkspaceDirListing {
 export async function listDirAt(
   root: string,
   relDir: string,
-  opts: { maxEntries?: number } = {},
+  opts: { maxEntries?: number; exactRoot?: boolean } = {},
 ): Promise<WorkspaceDirListing> {
   const maxEntries = opts.maxEntries ?? MAX_DIR_ENTRIES
-  const { abs, realRoot } = await resolveWorkspaceRelPath(root, relDir)
+  const { abs, realRoot } = await resolveWorkspaceRelPath(root, relDir, {
+    exactRoot: opts.exactRoot ?? false,
+  })
   const sinkPrefix = rootPrefixOf(realRoot)
   if (!abs.startsWith(realRoot)) {
     throw new WorkspacePathError('The path escapes the workspace.')
@@ -606,10 +627,12 @@ export type WorkspaceFileRead =
 export async function readFileAt(
   root: string,
   relPath: string,
-  opts: { maxBytes?: number } = {},
+  opts: { maxBytes?: number; exactRoot?: boolean } = {},
 ): Promise<WorkspaceFileRead> {
   const maxBytes = opts.maxBytes ?? MAX_FILE_BYTES
-  const { abs, realRoot } = await resolveWorkspaceRelPath(root, relPath)
+  const { abs, realRoot } = await resolveWorkspaceRelPath(root, relPath, {
+    exactRoot: opts.exactRoot ?? false,
+  })
   const sinkPrefix = rootPrefixOf(realRoot)
   if (!abs.startsWith(realRoot)) {
     throw new WorkspacePathError('The path escapes the workspace.')
@@ -947,4 +970,181 @@ export async function readTeamFolderFile(
   if (!rootRes.ok) return rootRes
   const read = await readFileAt(rootRes.root, relPath)
   return { ok: true, path: relPath, ...read }
+}
+
+// ─── Task-level wrappers: the task folder ────────────────────────────────────
+
+/** The folder a task run with no worktree starts in (see teamWorkdir.ts). */
+export interface TaskFolder {
+  path: string
+  /** False until the task's first run creates it, and after a cleanup removed it
+   *  empty. */
+  onDisk: boolean
+}
+
+/** A task's own folder, or null for an unknown task. The path comes from the
+ *  task's row (its team and id), never the request. */
+export function taskFolderOf(taskId: string): TaskFolder | null {
+  const task = getTask(getDb(), taskId)
+  return task ? taskFolderOfTask(task) : null
+}
+
+/**
+ * {@link taskFolderOf} for a task row already read. With agent isolation on,
+ * `onDisk` here is the server's own look, which cannot see into the agent
+ * user's folders and says false for every one: a caller that needs it asks the
+ * host with {@link taskFolderInAgentSpace} instead.
+ */
+export function taskFolderOfTask(task: { id: string; teamId?: string | null }): TaskFolder | null {
+  let dir: string
+  try {
+    dir = taskFolderPath(task.teamId, task.id)
+  } catch {
+    return null
+  }
+  return { path: dir, onDisk: existsSync(dir) }
+}
+
+/** Whether a folder has any entry at all. One entry is read, not the listing. */
+export function folderHoldsAnything(dir: string): boolean {
+  let handle: ReturnType<typeof opendirSync> | null = null
+  try {
+    handle = opendirSync(dir)
+    return handle.readSync() !== null
+  } catch {
+    return false
+  } finally {
+    try {
+      handle?.closeSync()
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+/** {@link folderHoldsAnything} with agent isolation on: the host lists one name. */
+export async function folderHoldsAnythingInAgentSpace(dir: string): Promise<boolean> {
+  try {
+    const listed = await agentList(dir, { max: 1 })
+    return listed.entries.length > 0 || listed.truncated
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A task folder's `onDisk`, and whether it holds anything, with agent isolation
+ * on: the folder is the agent user's, so the host is asked. A link where the
+ * folder should be does not count as on disk, as for a checkout or a team
+ * folder (see {@link folderOnDiskInAgentSpace}).
+ */
+export async function taskFolderInAgentSpace(
+  folder: TaskFolder,
+): Promise<TaskFolder & { holdsFiles: boolean }> {
+  const onDisk = await folderOnDiskInAgentSpace(folder.path)
+  const holdsFiles = onDisk && (await folderHoldsAnythingInAgentSpace(folder.path))
+  return { ...folder, onDisk, holdsFiles }
+}
+
+/** Windows and macOS file systems ignore case by default, so a `Tasks` folder an
+ *  agent made is where `tasks/<id>` lands, and the real path spells it `Tasks`. */
+const foldCase = (p: string): string =>
+  process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p
+
+/**
+ * The real path of `dir`, a task folder `<team folder>/tasks/<task id>`, when it
+ * is a real folder reached through no link from its team folder's parent down,
+ * else null. An agent can write the team folder, so it could swap the task
+ * folder, `tasks/` or the team folder itself for a link to anywhere on disk.
+ * Every component it owns is checked by name, and the real path must be the path
+ * built from the parent's real path. Readers take the real path returned here
+ * with `exactRoot`, so a link swapped in after this check is refused when they
+ * resolve the folder again; a file read is then checked from its open handle
+ * (see openConfinedFile).
+ *
+ * With agent isolation on, the folders are the agent user's and the server
+ * cannot look into them, so the host answers every look and every real path,
+ * as the agent user. Its answers are only compared here, never used as a place
+ * to read: the reads go through the host too (see resolveInAgentSpace).
+ */
+export async function realTaskFolder(dir: string): Promise<string | null> {
+  const tasksDir = path.dirname(dir)
+  const teamFolder = path.dirname(tasksDir)
+  const inAgentSpace = isAgentUserMode()
+  const realOf = (p: string): Promise<string> => (inAgentSpace ? agentRealpath(p) : realpath(p))
+  try {
+    for (const p of [teamFolder, tasksDir, dir]) {
+      if (inAgentSpace) {
+        if ((await statInAgentSpace(p))?.type !== 'dir') return null
+        continue
+      }
+      const st = await lstat(p)
+      if (st.isSymbolicLink() || !st.isDirectory()) return null
+    }
+    const expected = path.join(
+      await realOf(path.dirname(teamFolder)),
+      path.basename(teamFolder),
+      path.basename(tasksDir),
+      path.basename(dir),
+    )
+    const real = await realOf(dir)
+    return foldCase(real) === foldCase(expected) ? real : null
+  } catch {
+    return null
+  }
+}
+
+/** A task folder's root for a read: its real path, to be read with
+ *  `exactRoot` (see {@link realTaskFolder}). */
+async function resolveTaskFolderRoot(
+  taskId: string,
+): Promise<{ ok: true; root: string } | { ok: false; reason: WorkspaceMissReason }> {
+  const folder = taskFolderOf(taskId)
+  if (!folder) return { ok: false, reason: 'not_found' }
+  // With agent isolation on the server cannot see the folder, so the host is
+  // asked, as `resolveWorkspaceRoot` does for a checkout.
+  const onDisk = isAgentUserMode() ? await folderOnDiskInAgentSpace(folder.path) : folder.onDisk
+  if (!onDisk) return { ok: false, reason: 'gone' }
+  const real = await realTaskFolder(folder.path)
+  if (!real) return { ok: false, reason: 'unreadable' }
+  return { ok: true, root: real }
+}
+
+export async function listTaskFolderDir(
+  taskId: string,
+  relDir: string,
+): Promise<{ ok: false; reason: WorkspaceMissReason } | (WorkspaceDirListing & { ok: true })> {
+  const rootRes = await resolveTaskFolderRoot(taskId)
+  if (!rootRes.ok) return rootRes
+  const listing = await listDirAt(rootRes.root, relDir, { exactRoot: true })
+  return { ok: true, ...listing }
+}
+
+export async function readTaskFolderFile(
+  taskId: string,
+  relPath: string,
+): Promise<
+  { ok: false; reason: WorkspaceMissReason } | ({ ok: true; path: string } & WorkspaceFileRead)
+> {
+  const rootRes = await resolveTaskFolderRoot(taskId)
+  if (!rootRes.ok) return rootRes
+  const read = await readFileAt(rootRes.root, relPath, { exactRoot: true })
+  return { ok: true, path: relPath, ...read }
+}
+
+/**
+ * Where a task's files are: its worktree when it has one (a row with a checkout
+ * path, on disk or not), else its own folder, which is read with `exactRoot`.
+ * The preview serves from it.
+ */
+export async function resolveTaskFilesRoot(
+  taskId: string,
+): Promise<
+  { ok: true; root: string; exactRoot: boolean } | { ok: false; reason: WorkspaceMissReason }
+> {
+  const worktree = await resolveWorkspaceRoot(taskId)
+  if (worktree.ok) return { ok: true, root: worktree.root, exactRoot: false }
+  if (worktree.reason !== 'not_found') return worktree
+  const folder = await resolveTaskFolderRoot(taskId)
+  return folder.ok ? { ...folder, exactRoot: true } : folder
 }

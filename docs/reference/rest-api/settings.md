@@ -130,7 +130,7 @@ curl http://localhost:18790/api/health
 
 ### `POST /api/health/recheck`
 
-Runs the boot probe again: the **Re-run probe** button in System Health. When the Gateway cannot be reached, the answer waits out the Gateway check, about 1.5 seconds. Takes no body.
+Runs the boot probe again: the **Re-run probe** button in System Health. It runs SQLite's full `integrity_check`, where the boot probe runs the quicker `quick_check`, so on a large database the answer can take several seconds; the server keeps answering other requests meanwhile. When the Gateway cannot be reached, the answer also waits out the Gateway check, about 1.5 seconds. Takes no body.
 
 #### Responses
 
@@ -189,7 +189,7 @@ The checks, in the order they run:
 | `clawbooHomeWritable`      | The Clawboo home folder exists (it is created if missing) and is writable                                                                                                                                                                                   | **Yes** |
 | `vaultPerms`               | `secrets/`, the master key and `proxy-device-identity.json` give no access to group or others. Passes on Windows, and before any of them exist                                                                                                              | No      |
 | `masterKeyBootSentinel`    | A value encrypted on first boot still decrypts, so the master key has not changed. When it fails, saved runtime keys cannot be read                                                                                                                         | No      |
-| `databaseIntegrity`        | SQLite's `PRAGMA integrity_check` returns `ok`                                                                                                                                                                                                              | **Yes** |
+| `databaseIntegrity`        | SQLite's `PRAGMA quick_check` returns `ok` at boot; its full `PRAGMA integrity_check` on a recheck and daily in the background. All run in a worker thread; a check that could not run there is degraded, not fatal                                         | **Yes** |
 | `databaseSchema`           | The core tables exist and no column the schema declares is missing                                                                                                                                                                                          | **Yes** |
 | `apiPortFileMatches`       | The api-port file holds the port the server listens on. Passes without checking when the probe runs before the server has a port                                                                                                                            | No      |
 | `mcpServersHealthy`        | Each built-in MCP server (Tasks, Memory, Tools, TeamChat) can be built and lists its tools                                                                                                                                                                  | No      |

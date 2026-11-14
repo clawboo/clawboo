@@ -572,7 +572,12 @@ export function createClaudeCodeDriver(
       }
       // Off the operator's own Claude Code settings, memory and MCP servers; the
       // working folder's project files still apply. See claudeCodeIsolation.ts.
-      Object.assign(options, claudeCodeIsolation(ctx.cwd ?? process.cwd(), os.homedir()))
+      Object.assign(
+        options,
+        claudeCodeIsolation(ctx.cwd ?? process.cwd(), os.homedir(), {
+          readRoot: ctx.readRoot ?? null,
+        }),
+      )
       const model = ctx.model ?? opts.model
       if (ownBinary) options['pathToClaudeCodeExecutable'] = ownBinary
       if (ctx.cwd) options['cwd'] = ctx.cwd

@@ -36,6 +36,7 @@ export {
   type ScheduleSourceId,
   type ScheduleStatus,
 } from './records'
+export { SCHEDULE_SOURCE_NOT_CONFIGURED } from './source'
 export type {
   ScheduleCreateSpec,
   ScheduleReadResult,

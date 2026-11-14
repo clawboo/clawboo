@@ -38,17 +38,17 @@ Everything else runs without a worktree:
 
 In the task runner, the task's kind decides too:
 
-| Kind                 | Gets a worktree |
-| -------------------- | --------------- |
-| `code` (the default) | Yes             |
-| `research`, `review` | No              |
-| Any other value      | Yes             |
+| Kind                 | Gets a worktree                      |
+| -------------------- | ------------------------------------ |
+| `code` (the default) | Yes                                  |
+| `research`, `review` | No: it runs in the task's own folder |
+| Any other value      | Yes                                  |
 
 A task-runner run of a kind that needs a worktree, with no repository path, is refused rather than run somewhere else. The task gets the comment `[blocked: no isolation] This task changes files, so it needs an isolated git worktree, but no repository path was provided for it.` and goes back to To do.
 
 <Warning>
 
-**Without a worktree, coding agents start in their team's folder.** In team chat, and in any other run without a worktree, Claude Code, Codex, Hermes and Clawboo Native start in `teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default). Every member of the team shares it, and a task or an agent with no team uses `teams/_no-team`. The work folder is outside Clawboo's data folder, so `../..` from a team folder does not reach the database. The folder only sets where Claude Code, Codex and Hermes start: they run with their own approval prompts turned off, so they can still open any file your user account can by its full path, Clawboo's database and saved keys in `~/.clawboo` included. See [What agents can do](/concepts/permissions).
+**Without a worktree, coding agents start in the task's folder or the team's folder.** A run on a task with no worktree (in team chat, from the Board, or a research or review run) starts Claude Code, Codex, Hermes and Clawboo Native in the task's own folder, `teams/<team id>/tasks/<task id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default); see [Task folders](/operating/data-and-state#task-folders). A turn that holds no task, such as the lead's turn or your message in team chat, and an agent's own chat start in the team's folder, `teams/<team id>`, which every member of the team shares. A task or an agent with no team uses `teams/_no-team`. The work folder is outside Clawboo's data folder, so `../..` from a team folder does not reach the database. The folder only sets where Claude Code, Codex and Hermes start: they run with their own approval prompts turned off, so they can still open any file your user account can by its full path, Clawboo's database and saved keys in `~/.clawboo` included. See [What agents can do](/concepts/permissions).
 
 </Warning>
 
@@ -101,7 +101,7 @@ Clawboo never merges. When a run in a worktree finishes, what happens next depen
 - **It changed files.** The worktree and the `clawboo/task-<id>` branch are kept, and the task goes to verification. Review the work and merge it into your own branch yourself.
 - **It changed nothing.** The worktree and its branch are removed, and the task lands Done without a verification check.
 
-Changes can still be uncommitted in the worktree folder when a run ends. Clawboo commits them to the branch when the verify command passes on a task-runner run, when a worktree is paused, and before a cleanup removes the folder. To see the work in the app, open the **Workspace** tab on the agent's page, or the **Workspace** section of the task on the Board, which shows the changed files and the diff.
+Changes can still be uncommitted in the worktree folder when a run ends. Clawboo commits them to the branch when the verify command passes on a task-runner run, when a worktree is paused, and before a cleanup removes the folder. To see the work in the app, open the **Computer** tab on the agent's page, or the **Files** section of the task on the Board, which shows the changed files and the diff.
 
 When a task runs again and its folder has to be rebuilt from the branch, Clawboo first checks that the folder holds nothing the rebuild would lose. A checkout that is still on the task branch with nothing uncommitted is kept as it is, along with files git ignores. Any other folder is never replaced if it holds uncommitted changes, files git ignores (an `.env` file or build output, for example), a commit no branch holds, a separate git repository, or anything git cannot read. The run does not start, and the task waits in **Needs you** with a comment that starts `[blocked: worktree kept]` and names the folder. Commit or copy what you need from it, or remove it, then move the task back to **To do**. If git does not answer when Clawboo checks the folder, the run does not start either: nothing is changed, and the task goes back to **To do** with a `[not started: worktree unchecked]` comment.
 
@@ -111,12 +111,14 @@ When the Clawboo server starts, it removes worktree folders that are older than 
 
 Branches are never deleted by cleanup. Delete the `clawboo/task-<id>` branches you no longer need with git.
 
+A task's own folder, where a task with no worktree runs, has no branch to keep its work, so the cleanup at start removes it only when it is empty and the task is finished. See [Task folders](/operating/data-and-state#task-folders).
+
 <AccordionGroup>
 
 <Accordion title="Under the hood">
 
 - Clawboo's commits on a task branch use the messages `clawboo: scaffold task <id>`, `clawboo: checkpoint task <id>` (after the verify command passes, before the reviewer), `clawboo: pause task <id>`, `clawboo: gc autosave task <id>` and `clawboo: save work before moving task <id>` (before the [move into the work folder](/operating/data-and-state#move-older-work-into-it)).
-- `PATCH /api/board/:taskId/workspace` with `{ "action": "pause" }` commits the work, removes the folder and keeps the branch. `{ "action": "complete" }` runs the empty-or-changed decision above and, for changed work, the verify command without the reviewer. `POST /api/board/:taskId/workspace` refuses a `research` or `review` kind with `422 no_isolation`, and a folder at the task's path that holds uncommitted changes, or that git cannot read, with `409 unsafe_to_rebuild`.
+- `PATCH /api/board/:taskId/workspace` with `{ "action": "pause" }` commits the work, removes the folder and keeps the branch. `{ "action": "complete" }` runs the empty-or-changed decision above and, for changed work, the verify command without the reviewer. `POST /api/board/:taskId/workspace` refuses a `research` or `review` kind with `422 no_isolation` and `isolation: 'folder'`, since those kinds run in the task's own folder, and a folder at the task's path that holds uncommitted changes, or that git cannot read, with `409 unsafe_to_rebuild`.
 - The reviewer works in a detached checkout at the committed work, under `reviews/<install>/<hash>/<short sha>` in the work folder, where `<install>` is a folder of this install's own. The checkout has no branch of its own.
 - Clawboo reads and writes the task files at the top of a checkout or team folder (`AGENT_HANDOFF.json`, `init.sh`, `task-progress.md`, `VERIFICATION.md`) without following a link or a hard link an agent put there. A linked file reads as missing, and a write replaces the name instead of writing through it. The verification check's evidence is the one exception that adds to a file rather than replacing it: when `VERIFICATION.md` is a link or a hard link, the check leaves it as it is and skips the evidence, and its verdict on the task stands.
 - If `AGENT_HANDOFF.json` cannot be read or parsed, or is a link, Clawboo treats it as missing and falls back to the `## Done` and `## Blocked` sections of `task-progress.md`.

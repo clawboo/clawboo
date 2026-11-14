@@ -3,7 +3,7 @@
 // clawboo home, its secrets/ dir, or anywhere outside the team folders' root.
 
 import { realpathSync } from 'node:fs'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, symlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -14,6 +14,8 @@ import { setWorkDirJournal } from '../../workDirJournal'
 import {
   ensureTeamWorkdir,
   legacyTeamFolderPath,
+  taskFolderPath,
+  taskRunFolderFor,
   taskRunWorkdirFor,
   teamWorkdirFor,
   teamWorkdirPath,
@@ -91,12 +93,31 @@ describe('team-chat working folder', () => {
     expect(teamWorkdirFor('codex', '')).toBeNull()
   })
 
-  it('a task run with no worktree uses its team folder, or _no-team without a team', () => {
+  it("an agent's team folder is its team's, or _no-team without a team", () => {
     expect(taskRunWorkdirFor('codex', 'team-1')).toBe(teamWorkdirFor('codex', 'team-1'))
     expect(taskRunWorkdirFor('claude-code', null)).toBe(path.join(teams, '_no-team'))
     expect(taskRunWorkdirFor('hermes', '')).toBe(path.join(teams, '_no-team'))
     expect(taskRunWorkdirFor('clawboo-native', 'team-1')).toBe(teamWorkdirFor('codex', 'team-1'))
     expect(taskRunWorkdirFor('openclaw', null)).toBeNull()
+  })
+
+  it("a task run with no worktree starts in the task's folder inside its team folder", () => {
+    expect(taskRunFolderFor('codex', { id: 'task-1', teamId: 'team-1' })).toEqual({
+      dir: path.join(teams, 'team-1', 'tasks', 'task-1'),
+      teamFolder: path.join(teams, 'team-1'),
+    })
+    expect(taskRunFolderFor('clawboo-native', { id: 'task-2', teamId: null })).toEqual({
+      dir: path.join(teams, '_no-team', 'tasks', 'task-2'),
+      teamFolder: path.join(teams, '_no-team'),
+    })
+    expect(taskRunFolderFor('openclaw', { id: 'task-1', teamId: 'team-1' })).toBeNull()
+    expect(taskRunFolderFor('clawboo-mock', { id: 'task-1', teamId: 'team-1' })).toBeNull()
+  })
+
+  it('a task id is one path segment, never a way out of the team folder', () => {
+    for (const hostile of ['..', '../x', 'a/b', '/etc', '.hidden', '']) {
+      expect(() => taskFolderPath('team-1', hostile)).toThrow()
+    }
   })
 
   it('a hostile team id stays one segment under teams/, never the home or secrets/', () => {
@@ -126,6 +147,23 @@ describe('team-chat working folder', () => {
       expect((await stat(path.dirname(dir))).mode & 0o777).toBe(0o700)
       // Idempotent on the next run.
       await expect(ensureTeamWorkdir(dir)).resolves.toBeUndefined()
+    },
+  )
+
+  it.skipIf(isWindows)(
+    'ensureTeamWorkdir refuses a task folder that was swapped for a link',
+    async () => {
+      // A teammate in the same team folder can replace a task's folder with a
+      // link elsewhere. The run must not start there: its write jail is the
+      // folder's real path, which would then be the link's target.
+      const team = teamWorkdirPath('team-1')
+      await ensureTeamWorkdir(team)
+      const elsewhere = path.join(home, 'elsewhere')
+      await mkdir(elsewhere)
+      const taskDir = path.join(team, 'tasks', 'task-1')
+      await mkdir(path.dirname(taskDir), { recursive: true })
+      await symlink(elsewhere, taskDir)
+      await expect(ensureTeamWorkdir(taskDir)).rejects.toMatchObject({ code: 'ENOTDIR' })
     },
   )
 })

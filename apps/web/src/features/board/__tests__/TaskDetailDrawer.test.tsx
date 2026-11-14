@@ -40,7 +40,7 @@ function detailHandlers() {
       }),
     ),
     http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
-    // The Workspace section always fetches; default to "no worktree provisioned".
+    // The Files section always fetches; default to "no worktree provisioned".
     http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
     // The Activity section mounts an ActivityTerminal → useObsStream backfills here.
     http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
@@ -564,7 +564,7 @@ describe('TaskDetailDrawer', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('renders the Workspace section from /workspace/detail', async () => {
+  it('renders the Files section of a worktree from /workspace/detail', async () => {
     server.use(
       http.get('/api/board/t1', () =>
         HttpResponse.json({
@@ -588,6 +588,98 @@ describe('TaskDetailDrawer', () => {
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
 
     expect(await screen.findByText('clawboo/task-t1')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Files' })).toBeInTheDocument()
+    // "Workspace" names a whole Clawboo now, not a task's files.
+    expect(screen.queryByRole('button', { name: /^Workspace/ })).toBeNull()
+  })
+
+  it("renders the Files section from a task's own folder when it has no worktree", async () => {
+    const folder = '/home/me/clawboo-work/teams/T/tasks/t1'
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Ship it',
+            status: 'done',
+            assigneeAgentId: 'agent-7',
+            updatedAt: 5,
+          },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () =>
+        HttpResponse.json({
+          ok: false,
+          reason: 'no_workspace',
+          taskFolder: { path: folder, onDisk: true, holdsFiles: true },
+        }),
+      ),
+      // The agent's list leaves this older folder out: the drawer hands it over.
+      http.get('/api/agents/agent-7/workspaces', () =>
+        HttpResponse.json({ ok: true, workspaces: [], taskFolders: [], teamFolder: null }),
+      ),
+      http.get('/api/board/t1/folder/tree', () =>
+        HttpResponse.json({
+          dir: '',
+          entries: [{ name: 'notes.md', kind: 'file', size: 5 }],
+          truncated: false,
+        }),
+      ),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    expect(await screen.findByText(folder)).toBeInTheDocument()
+    expect(screen.getByTestId('task-folder')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Files' })).toBeInTheDocument()
+    // The pinned file view shows the task's files, not "no files".
+    expect(await screen.findByRole('button', { name: 'notes.md' })).toBeInTheDocument()
+    expect(screen.queryByText('No files for this task yet.')).toBeNull()
+  })
+
+  it('draws no Files section for a finished task whose folder holds nothing', async () => {
+    // Handlers listed first win, so the overrides go before the defaults.
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/workspace/detail', () =>
+        HttpResponse.json({
+          ok: false,
+          reason: 'no_workspace',
+          taskFolder: { path: '/w/teams/T/tasks/t1', onDisk: true, holdsFiles: false },
+        }),
+      ),
+      ...detailHandlers(),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    await screen.findByText('Ship it')
+    expect(screen.queryByRole('button', { name: 'Files' })).toBeNull()
+  })
+
+  it('draws no Files section before the task folder exists', async () => {
+    server.use(
+      http.get('/api/board/t1/workspace/detail', () =>
+        HttpResponse.json({
+          ok: false,
+          reason: 'no_workspace',
+          taskFolder: { path: '/w/teams/T/tasks/t1', onDisk: false, holdsFiles: false },
+        }),
+      ),
+      ...detailHandlers(),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    await screen.findByText('Ship it')
+    expect(screen.queryByRole('button', { name: 'Files' })).toBeNull()
   })
 
   it('says when a task file was cut at the read limit', async () => {
@@ -1129,7 +1221,7 @@ describe('TaskDetailDrawer: reading and stepping', () => {
     await screen.findByRole('heading', { name: 'Ship it' })
     expect(screen.getByRole('button', { name: 'Properties' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Activity' })).toBeInTheDocument()
-    for (const empty of [/^Verification/, /^Workspace/, /^Run history/, /^Brief/])
+    for (const empty of [/^Verification/, /^Files/, /^Run history/, /^Brief/])
       expect(screen.queryByRole('button', { name: empty })).toBeNull()
     // Comments is always there: it holds the reply box.
     expect(screen.getByRole('button', { name: 'Comments' })).toBeInTheDocument()

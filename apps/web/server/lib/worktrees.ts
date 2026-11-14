@@ -993,7 +993,7 @@ export async function readWorktreeDetail(taskId: string): Promise<WorktreeDetail
   const sorFilesTruncated: string[] = []
   for (const name of Object.values(SOR_FILES)) {
     // The agent writes these files, so it can also replace one with a link to
-    // any file the server can read. Read through the Workspace tab's confined
+    // any file the server can read. Read through the Computer tab's confined
     // reader, which refuses links and anything outside the worktree.
     try {
       const file = await readFileAt(wtPath, name)

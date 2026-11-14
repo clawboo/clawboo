@@ -3,7 +3,7 @@
 // with the gateway source reporting degraded-as-data; routine writes land in
 // the ledger; the typed error mapping covers 400 / 404 / 409 / 422 / 503.
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -62,6 +62,7 @@ const CREATE_BODY = {
 describe('schedules REST (gateway disconnected)', () => {
   let home: string
   let prevHome: string | undefined
+  let prevStateDir: string | undefined
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-schedules-rest-'))
@@ -69,6 +70,9 @@ describe('schedules REST (gateway disconnected)', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    // No OpenClaw set up here, whatever the machine running the tests has.
+    prevStateDir = process.env['OPENCLAW_STATE_DIR']
+    process.env['OPENCLAW_STATE_DIR'] = path.join(home, '.openclaw')
     resetScheduleMultiplexer()
     const db = getDb()
     expect(getDbPath().startsWith(home)).toBe(true)
@@ -115,6 +119,8 @@ describe('schedules REST (gateway disconnected)', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevStateDir === undefined) delete process.env['OPENCLAW_STATE_DIR']
+    else process.env['OPENCLAW_STATE_DIR'] = prevStateDir
     delete process.env['CLAWBOO_HOME']
     resetScheduleMultiplexer()
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -132,6 +138,11 @@ describe('schedules REST (gateway disconnected)', () => {
       manageability: 'managed',
     })
 
+    // A Gateway is set up, but this test never connects to it.
+    await writeFile(
+      path.join(home, '.clawboo', 'settings.json'),
+      JSON.stringify({ gateway: { url: 'ws://127.0.0.1:1', token: 'not-a-real-token' } }),
+    )
     const list = mockRes()
     await schedulesListGET(req(), list.res)
     expect(list.status()).toBe(200)
@@ -145,6 +156,16 @@ describe('schedules REST (gateway disconnected)', () => {
     expect(gw).toMatchObject({ ok: false, degraded: true, reason: 'gateway_disconnected' })
     const routine = body.sources.find((s) => s.sourceId === 'clawboo-routine')
     expect(routine).toMatchObject({ ok: true, degraded: false })
+  })
+
+  it('says the Gateway source is not set up, rather than disconnected, when no Gateway is', async () => {
+    const list = mockRes()
+    await schedulesListGET(req(), list.res)
+    const body = list.body() as {
+      sources: Array<{ sourceId: string; ok: boolean; degraded: boolean; reason?: string }>
+    }
+    const gw = body.sources.find((s) => s.sourceId === 'openclaw-gateway-cron')
+    expect(gw).toMatchObject({ ok: false, degraded: true, reason: 'not_configured' })
   })
 
   describe('a routine that files Urgent tasks', () => {

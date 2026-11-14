@@ -1,7 +1,7 @@
-// The Workspace tab's team folder: a Claude Code / Codex / Hermes agent with no
-// task worktree shows the folder its team-chat and read-only runs start in, read
-// from the agent-scoped routes; with a worktree too, the folder is one more pick;
-// a host pinned to one task never offers it.
+// The Computer tab's team folder: a Claude Code / Codex / Hermes agent with no
+// task worktree shows the folder its team-chat turns and its own chat start in,
+// read from the agent-scoped routes; with a worktree too, the folder is one more
+// pick; a host pinned to one task never offers it.
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
@@ -35,7 +35,11 @@ let folderTreeCalls = 0
 
 beforeEach(() => {
   folderTreeCalls = 0
-  list = { workspaces: [], teamFolder: { teamId: 'T', path: FOLDER, onDisk: true } }
+  list = {
+    workspaces: [],
+    taskFolders: [],
+    teamFolder: { teamId: 'T', path: FOLDER, onDisk: true },
+  }
   server.use(
     http.get('/api/agents/cx/workspaces', () => HttpResponse.json({ ok: true, ...list })),
     http.get('/api/agents/cx/team-folder/tree', () => {
@@ -80,10 +84,16 @@ describe('WorkspacePanel team folder', () => {
   })
 
   it('says when the folder has not been created yet', async () => {
-    list = { workspaces: [], teamFolder: { teamId: 'T', path: FOLDER, onDisk: false } }
+    list = {
+      workspaces: [],
+      taskFolders: [],
+      teamFolder: { teamId: 'T', path: FOLDER, onDisk: false },
+    }
     render(<WorkspacePanel agentId="cx" />)
 
-    expect(await screen.findByText(/No files yet/)).toBeTruthy()
+    // The panel's general empty state also says "No files yet" while the
+    // sources load, so wait for the folder's own wording.
+    expect(await screen.findByText(/This folder is created the first time/)).toBeTruthy()
     expect(screen.getByText(FOLDER)).toBeTruthy()
     expect(folderTreeCalls).toBe(0)
   })
@@ -91,12 +101,13 @@ describe('WorkspacePanel team folder', () => {
   it('offers the folder beside a task worktree, task first', async () => {
     list = {
       workspaces: [taskWorkspace],
+      taskFolders: [],
       teamFolder: { teamId: 'T', path: FOLDER, onDisk: true },
     }
     render(<WorkspacePanel agentId="cx" />)
 
     const picker = (await screen.findByRole('combobox', {
-      name: 'Workspace task',
+      name: 'Folder',
     })) as HTMLSelectElement
     expect([...picker.options].map((o) => o.text)).toEqual(['Fix the login bug', 'Team folder'])
     expect(picker.value).toBe('task-1')
@@ -108,6 +119,7 @@ describe('WorkspacePanel team folder', () => {
   it('never offers the folder to a host pinned to one task', async () => {
     list = {
       workspaces: [taskWorkspace],
+      taskFolders: [],
       teamFolder: { teamId: 'T', path: FOLDER, onDisk: true },
     }
     render(<WorkspacePanel agentId="cx" pinnedTaskId="task-1" />)

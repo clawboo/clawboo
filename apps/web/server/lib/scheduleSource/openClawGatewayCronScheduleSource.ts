@@ -20,6 +20,7 @@
 
 import {
   InvalidRoutineTargetError,
+  SCHEDULE_SOURCE_NOT_CONFIGURED as NOT_CONFIGURED_REASON,
   ScheduleSourceUnavailableError,
   TeamTaskDomainViolationError,
   UnknownScheduleError,
@@ -71,6 +72,8 @@ export function isUnknownCronJob(err: unknown): boolean {
 /** The operator slice this source needs (the OpenClawAgentSource satisfies it). */
 export interface OperatorCronClientLike {
   isConnected(): boolean
+  /** False when settings name no Gateway at all. Absent = assume one is configured. */
+  isConfigured?(): boolean
   operatorCall<T>(method: string, params?: unknown): Promise<T>
   onGatewayBroadcast(cb: (frame: { event: string; payload?: unknown }) => void): () => void
 }
@@ -165,13 +168,22 @@ export class OpenClawGatewayCronScheduleSource implements ScheduleSource {
     if (!this.client.isConnected()) {
       // Degradation is DATA — never throw the merged view down. A warm cache
       // is served stale; otherwise the rows are simply hidden until reconnect.
+      // With no Gateway set up at all there is nothing to reconnect to, and the
+      // reason says so: a reader deciding when to wake this engine counts this
+      // source as not in use rather than unreadable.
+      const notConfigured = this.client.isConfigured?.() === false
       return {
-        records: this.cache ?? [],
+        // A list from a Gateway that is no longer set up is no one's jobs.
+        records: notConfigured ? [] : (this.cache ?? []),
         status: {
           sourceId: this.id,
           ok: false,
           degraded: true,
-          reason: this.cache ? 'stale_cache' : 'gateway_disconnected',
+          reason: notConfigured
+            ? NOT_CONFIGURED_REASON
+            : this.cache
+              ? 'stale_cache'
+              : 'gateway_disconnected',
           at,
         },
       }

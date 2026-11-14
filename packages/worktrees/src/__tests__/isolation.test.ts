@@ -8,9 +8,9 @@ describe('isolation policy', () => {
     expect(needsWorktree('code')).toBe(true)
   })
 
-  it('does not pay worktree cost for read-only research or review', () => {
-    expect(isolationForTask('research')).toBe('none')
-    expect(isolationForTask('review')).toBe('none')
+  it('gives read-only research or review a task folder, not a worktree', () => {
+    expect(isolationForTask('research')).toBe('folder')
+    expect(isolationForTask('review')).toBe('folder')
     expect(needsWorktree('research')).toBe(false)
     expect(needsWorktree('review')).toBe(false)
   })

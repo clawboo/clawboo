@@ -1,6 +1,6 @@
 // The team folder (`<work folder>/teams/<teamId>`, where Claude Code /
 // Codex / Hermes runs start with no worktree) at the API: deleting a team
-// removes it, and an agent's Workspace tab can list and read it read-only. The
+// removes it, and an agent's Computer tab can list and read it read-only. The
 // folder is always resolved from the agent's or team's row, never the request.
 
 import { existsSync, realpathSync } from 'node:fs'

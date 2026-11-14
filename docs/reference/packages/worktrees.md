@@ -31,8 +31,10 @@ but it is not a sandbox: see [What agents can do](/concepts/permissions).
 
 ## When a task gets a worktree
 
-`isolationForTask(kind)` returns `none` for `research` and `review` tasks and `worktree` for `code` and any unknown
-kind; it never returns `container`. Worktrees are made by the task runner (a run of
+`isolationForTask(kind)` returns `folder` for `research` and `review` tasks and `worktree` for `code` and any
+unknown kind; it never returns `container`. The `IsolationLevel` type is `'folder' | 'worktree' | 'container'`.
+`folder` means no worktree: the server runs the task in its own plain folder, `<team folder>/tasks/<task id>`,
+which this package does not make. Worktrees are made by the task runner (a run of
 `POST /api/runtimes/<id>/run`, or an agent routine that names a repository) and by
 `POST /api/board/<taskId>/workspace`; team chat never makes one. The task runner refuses a file-changing task with
 no repository path (`workspace_unavailable`) rather than run it without isolation; see
@@ -101,15 +103,15 @@ These functions remove folders recursively and run commands, so every path they 
 - **Task ids are one path segment.** `assertSafeTaskId` accepts only `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` and throws
   for anything else rather than rewriting it. `branchNameForTask`, `worktreePathFor` and the lifecycle functions
   all go through it.
-- **Task folders stay under the root.** `worktreePathFor(repo, taskId, rootDir)` resolves the task's folder and
-  throws if it would land anywhere but one segment below the root.
+- **Worktree folders stay under the root.** `worktreePathFor(repo, taskId, rootDir)` resolves the task's worktree
+  folder and throws if it would land anywhere but one segment below the root.
 - **Removal rebuilds the path.** Before their recursive remove, `pauseWorktree` and `completeWorktree` rebuild the
   folder from the root and the task id, and throw if the stored record points somewhere else. `rootDir` may be a
-  list of roots, and then the record has to be the task's folder under one of them; an empty list refuses every
+  list of roots, and then the record has to be the task's worktree folder under one of them; an empty list refuses every
   record. The server passes the work folder's root, the state folder's, and any root the work folder move kept a
   checkout under.
-- **A replace never loses work.** Resume and a provision's clean-up of leftovers delete a task folder only when it
-  is missing, empty, or a checkout of the task's repository at a commit a branch holds, with nothing in
+- **A replace never loses work.** Resume and a provision's clean-up of leftovers delete a task's worktree folder only
+  when it is missing, empty, or a checkout of the task's repository at a commit a branch holds, with nothing in
   `git status --ignored`. Anything else throws `UnsafeWorktreeError` and the folder is left exactly as it was:
   uncommitted changes, files git ignores (an `.env`, build output), a detached commit no branch holds, a separate
   repository (its own `.git`, whose commits would go with it), or a folder git cannot read.
@@ -138,7 +140,7 @@ These functions remove folders recursively and run commands, so every path they 
   locks each agent's persistent home (the wait is `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`), and the OpenClaw routine
   dispatcher locks per agent.
 - **`execGit(cwd, args)`.** Runs `git` with a timeout and an output cap and throws `GitError` with the command's
-  `stderr` and `args`. The Workspace tab's git status and file diffs use it.
+  `stderr` and `args`. The Computer tab's git status and file diffs use it.
 - **Diffs.** `diffStat` and `worktreeDiff` compare a worktree with its baseline, and `isDetached` confirms a review
   checkout has no branch.
 - **Registration.** `worktreeRegistration(repo, path)` answers `registered`, `unregistered`, or `unknown` when
@@ -148,7 +150,7 @@ These functions remove folders recursively and run commands, so every path they 
 ## Who uses it
 
 Only the server: the task runner, the board's workspace routes, the verification gate and critic, the Routines
-dispatchers, and the Workspace tab's file view. Agent chat and team chat import only `MutexAcquireTimeoutError`, to
+dispatchers, and the Computer tab's file view. Agent chat and team chat import only `MutexAcquireTimeoutError`, to
 recognise a busy agent home.
 
 ## Test it

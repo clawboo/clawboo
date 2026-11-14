@@ -4,6 +4,7 @@ import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
 import { RunStatusBridge } from '@/features/obs/RunStatusBridge'
 import { NeedsYouAlerts } from '@/features/alerts/NeedsYouAlerts'
 import { InboxBridge } from '@/features/inbox/InboxBridge'
+import { PresenceBeat } from '@/features/presence/PresenceBeat'
 import { AppSidebar } from '@/features/layout/AppSidebar'
 import { ContentArea } from '@/features/layout/ContentArea'
 import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
@@ -49,6 +50,9 @@ export function App() {
       <NeedsYouAlerts />
       {/* The person's inbox and its badge, woken by the same event tail. */}
       <InboxBridge />
+      {/* Tells the engine a person is at this tab, so a host that stops an idle
+          engine counts people rather than this tab's polling. */}
+      <PresenceBeat />
       {/* `--clawboo-titlebar-inset` (unset = 0) lets an embedder reserve a strip
           for its own title bar, such as an inset macOS one, so it never sits on
           the sidebar. The fallback lives here rather than on :root, so a value

@@ -19,7 +19,7 @@ vi.mock('../../lib/workspaceFs', async (importActual) => {
   const actual = await importActual<typeof import('../../lib/workspaceFs')>()
   return {
     ...actual,
-    resolveWorkspaceRoot: vi.fn(async () => ({ ok: true as const, root, workspace: {} as never })),
+    resolveTaskFilesRoot: vi.fn(async () => ({ ok: true as const, root, exactRoot: false })),
   }
 })
 
