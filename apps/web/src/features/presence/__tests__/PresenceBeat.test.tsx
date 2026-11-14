@@ -5,9 +5,12 @@
 import { render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const apiFetch = vi.fn((_path: string, _init?: RequestInit) =>
-  Promise.resolve(new Response('{}', { status: 200 })),
-)
+const responses: Response[] = []
+const apiFetch = vi.fn((_path: string, _init?: RequestInit) => {
+  const res = new Response('{}', { status: 200 })
+  responses.push(res)
+  return Promise.resolve(res)
+})
 vi.mock('@clawboo/control-client', () => ({
   apiFetch: (path: string, init?: RequestInit) => apiFetch(path, init),
 }))
@@ -74,6 +77,14 @@ describe('PresenceBeat', () => {
     window.dispatchEvent(new Event('pointerdown'))
     vi.advanceTimersByTime(PRESENCE_BEAT_MS)
     expect(beats().at(-1)).toMatchObject({ focused: true, acted: true })
+    unmount()
+  })
+
+  it('reads each answer to the end, so no beat is left open', async () => {
+    vi.useRealTimers()
+    responses.length = 0
+    const { unmount } = render(<PresenceBeat />)
+    await vi.waitFor(() => expect(responses.at(-1)?.bodyUsed).toBe(true))
     unmount()
   })
 

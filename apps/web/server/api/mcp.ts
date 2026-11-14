@@ -370,8 +370,9 @@ function withUrl(req: IncomingMessage, url: string): IncomingMessage {
  * is served unbound, as an unsigned URL is.
  *
  * - A call is bound to the run the agent has in progress (`mcpLiveBindings`).
- *   With none (between runs, or a job the runtime runs on its own), it is
- *   served unbound, as an unsigned URL is: nothing grants a run's scope then.
+ *   With none (between runs, or a job the runtime runs on its own), it is the
+ *   agent's own, scoped as its one-to-one chat is: its identity and its own
+ *   team, no task, none of a run's writes.
  * - Discovery (the tool list the runtime caches for the life of its connection)
  *   is answered for the widest run the agent could have: no team-run or
  *   chat-run limits, `team_delegate` listed, and a task of its own, so a
@@ -422,8 +423,28 @@ function liveRequest(server: McpServerName, req: IncomingMessage, body: unknown)
     return withUrl(req, `${url.pathname}${url.search}`)
   }
   // No run in progress (between runs, or a job the runtime runs on its own):
-  // nothing grants a run's scope, so the call is served unbound.
-  if (!run) return bare
+  // the call is the agent's own, as in its one-to-one chat. The signature named
+  // the agent, so it is that agent on its own team, with no task and none of a
+  // run's writes (`chatRun`: reads and comments, which wake no one). An agent
+  // Clawboo no longer has is no one: served unbound.
+  if (!run) {
+    const row = getDb()
+      .select({ teamId: agents.teamId })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get()
+    if (!row) return bare
+    const own = new URL(
+      mcpHttpUrl('http://127.0.0.1', server, {
+        teamId: null,
+        agentId,
+        chatRun: true,
+        chatRunTeamId: row.teamId ?? null,
+        attachSecret: secret,
+      }),
+    )
+    return withUrl(req, `${own.pathname}${own.search}`)
+  }
   const scope = { ...run, agentId, attachSecret: secret }
   const url = new URL(mcpHttpUrl('http://127.0.0.1', server, scope))
   return withUrl(req, `${url.pathname}${url.search}`)

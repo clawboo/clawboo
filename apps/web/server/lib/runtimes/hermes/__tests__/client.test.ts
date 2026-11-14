@@ -53,3 +53,83 @@ describe('createHermesClient', () => {
     expect(seen[0]!.url + seen[0]!.body).not.toContain('secret-key')
   })
 })
+
+describe('a run event stream that goes quiet', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  /** A stream that sends `first`, then a keepalive comment every `keepaliveMs`
+   *  for `keepaliveFor` ms, then `last` (if any) and closes; with no `last` it
+   *  stays open. It errors when the request's signal aborts, as fetch does. */
+  const streaming =
+    (opts: { first: string; keepaliveMs?: number; keepaliveFor?: number; last?: string }) =>
+    async (_input: unknown, init?: RequestInit): Promise<Response> => {
+      const enc = new TextEncoder()
+      let timer: ReturnType<typeof setInterval> | undefined
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(enc.encode(opts.first))
+          init?.signal?.addEventListener('abort', () => {
+            clearInterval(timer)
+            c.error(init.signal!.reason)
+          })
+          if (opts.keepaliveMs) {
+            const until = Date.now() + (opts.keepaliveFor ?? 0)
+            timer = setInterval(() => {
+              if (Date.now() < until) return c.enqueue(enc.encode(': keepalive\n\n'))
+              clearInterval(timer)
+              if (opts.last !== undefined) {
+                c.enqueue(enc.encode(opts.last))
+                c.close()
+              }
+            }, opts.keepaliveMs)
+          }
+        },
+      })
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+    }
+
+  const clientWith = (f: ReturnType<typeof streaming>) =>
+    createHermesClient(
+      { baseUrl: 'http://127.0.0.1:1', profile: 'cb-a', key: 'k'.repeat(64) },
+      { fetch: f as unknown as typeof fetch },
+    )
+
+  it('gives up on a stream that sends nothing for its idle time, so the run can be read again', async () => {
+    const client = clientWith(
+      streaming({ first: 'id: 1\ndata: {"event":"message.delta","delta":"a"}\n\n' }),
+    )
+    const got: HermesRunEvent[] = []
+    const ended = client
+      .streamEvents('run_1', (ev) => got.push(ev), { idleMs: 60 })
+      .then(
+        () => 'ended',
+        () => 'ended',
+      )
+    await expect(Promise.race([ended, sleep(2_000).then(() => 'still open')])).resolves.toBe(
+      'ended',
+    )
+    expect(got.map((e) => e.seq)).toEqual([1])
+  })
+
+  it('keeps a stream whose run is quiet but whose keepalives keep coming', async () => {
+    const client = clientWith(
+      streaming({
+        first: ': open\n\n',
+        keepaliveMs: 20,
+        keepaliveFor: 300,
+        last: 'id: 2\ndata: {"event":"run.completed","output":"ok"}\n\n',
+      }),
+    )
+    const got: HermesRunEvent[] = []
+    await client.streamEvents('run_1', (ev) => got.push(ev), { idleMs: 100 })
+    expect(got.map((e) => e.event)).toEqual(['run.completed'])
+  })
+
+  it("still ends at once when the caller's own signal aborts", async () => {
+    const client = clientWith(streaming({ first: ': open\n\n' }))
+    const stop = new AbortController()
+    const p = client.streamEvents('run_1', () => undefined, { signal: stop.signal, idleMs: 5_000 })
+    setTimeout(() => stop.abort(), 20)
+    await expect(Promise.race([p, sleep(1_000).then(() => 'still open')])).rejects.toBeTruthy()
+  })
+})

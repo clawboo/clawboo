@@ -59,11 +59,14 @@ import {
 } from './client'
 import { hermesFailure } from './failure'
 import type { HermesGatewaySupervisor } from './gateway'
+import { ensureTeamWorkdir } from '../teamWorkdir'
 import {
   derivedHermesKey,
+  hermesJobsFolder,
   hermesProfileDir,
   hermesProfileName,
   provisionProfile,
+  setProfileTerminalCwd,
   throwawayProfileName,
 } from './profiles'
 import { hermesAgentMcpServers, hermesRunMcpServers, resolveHermesRunSettings } from './runSettings'
@@ -170,6 +173,9 @@ export interface HermesGatewayDriverDeps {
   profileReadyMs?: number
   pollMs?: number
   lingerMaxMs?: number
+  /** How long a run's event stream may send nothing before it is read again
+   *  (default `STREAM_IDLE_MS`). */
+  streamIdleMs?: number
 }
 
 type ResultFields = Omit<Extract<HermesNativeEvent, { type: 'result' }>, 'type'>
@@ -248,6 +254,9 @@ export function createHermesGatewayDriver(
   let sessionId: string | null = null
   let runModel: string | undefined
   let throwaway: string | null = null
+  /** The agent's own profile, once written, and where its jobs run commands. */
+  let profileDir: string | null = null
+  let jobsCwd: string | null = null
   let lastSeq: number | undefined
   /** Hermes said the run ended (an end event, or an ended status). */
   let runEnded = false
@@ -284,6 +293,29 @@ export function createHermesGatewayDriver(
     heartbeat = null
   }
 
+  /**
+   * Let go of the profile once Hermes is done with the run (at once, or when
+   * `holdUntilEnded` sees it end): a throwaway one is removed then, not while
+   * the run may still be in it; an agent's own points its commands back at the
+   * agent's jobs folder, where the jobs Hermes runs on its own work until the
+   * next run, never the last task's folder.
+   */
+  const letGo = async (unlock: () => void): Promise<void> => {
+    const tmp = throwaway
+    throwaway = null
+    try {
+      if (tmp) await agentRemove(tmp)
+      else if (profileDir && jobsCwd) await setProfileTerminalCwd(profileDir, jobsCwd)
+    } catch (err) {
+      log.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'could not tidy the Hermes profile after a run',
+      )
+    } finally {
+      unlock()
+    }
+  }
+
   const finish = (result: ResultFields): void => {
     if (finished) return
     finished = true
@@ -308,9 +340,6 @@ export function createHermesGatewayDriver(
       ...(sessionId ? { sessionId } : {}),
       ...(runModel ? { model: runModel } : {}),
     })
-    const tmp = throwaway
-    throwaway = null
-    if (tmp) void agentRemove(tmp).catch(() => undefined)
   }
 
   const fail = (message: string): void => {
@@ -516,7 +545,11 @@ export function createHermesGatewayDriver(
             progressed = true
             ended = onEvent(ev)
           },
-          { signal: stream.signal, ...(lastSeq !== undefined ? { lastSeq } : {}) },
+          {
+            signal: stream.signal,
+            ...(lastSeq !== undefined ? { lastSeq } : {}),
+            ...(deps.streamIdleMs !== undefined ? { idleMs: deps.streamIdleMs } : {}),
+          },
         )
       } catch (err) {
         if (finished) return
@@ -543,7 +576,7 @@ export function createHermesGatewayDriver(
         const persistent = Boolean(ctx.homeDir)
         const profile = persistent ? hermesProfileName(ctx.homeDir!) : throwawayProfileName()
         const lock = lockProfile(profile)
-        releaseProfile = lock.release
+        releaseProfile = () => void letGo(lock.release)
         // A stop while queued behind the agent's previous run ends this one now.
         await Promise.race([lock.acquired, abortWait])
         if (finished) {
@@ -558,6 +591,14 @@ export function createHermesGatewayDriver(
         // removes what it made.
         if (!persistent) throwaway = hermesProfileDir(conn.home, profile)
         const agentId = ctx.memoryScope?.agentId ?? opts.agentId ?? null
+        // Commands always have a folder of their own: the run's, else the agent's
+        // jobs folder (a throwaway run's own profile, when it has no agent).
+        // Hermes would otherwise fall back to the gateway's home.
+        if (persistent && agentId) {
+          jobsCwd = hermesJobsFolder(agentId)
+          await ensureTeamWorkdir(jobsCwd)
+        }
+        const runCwd = ctx.cwd ?? jobsCwd ?? throwaway
         const mcpServers = !ctx.mcpBaseUrl
           ? null
           : persistent && agentId
@@ -568,11 +609,12 @@ export function createHermesGatewayDriver(
           profile,
           legacyHome: persistent ? ctx.homeDir! : null,
           key: derivedHermesKey(conn.masterKey, profile),
-          cwd: ctx.cwd ?? null,
+          cwd: runCwd,
           providerEnv: ctx.apiKeyEnv ?? {},
           mcpServers,
           providerHint: ctx.providerHint ?? null,
         })
+        if (persistent) profileDir = prov.dir
         if (prov.migrated) log.info({ profile }, 'moved the agent’s Hermes home into its profile')
         if (ctx.mcpBaseUrl && !prov.mcpAttached) {
           log.warn(

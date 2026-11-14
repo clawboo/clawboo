@@ -12,7 +12,7 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createTask, teams, agents } from '@clawboo/db'
+import { createTask, teams, agents, taskComments } from '@clawboo/db'
 import { mcpHttpUrl } from '@clawboo/mcp'
 import express from 'express'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -184,7 +184,7 @@ describe('live MCP URLs', () => {
     release()
   })
 
-  it('with no run in progress, a call gets no run scope: it is served unbound', async () => {
+  it("with no run in progress, a call gets none of a run's writes", async () => {
     // Listed, because the runtime keeps the list across runs...
     expect(await toolNames(liveUrl())).toContain('claim_task')
     // ...but refused when called with nothing in progress.
@@ -193,6 +193,35 @@ describe('live MCP URLs', () => {
       arguments: { taskId: 'x' },
     })) as { result?: { isError?: boolean }; error?: unknown }
     expect(out.error ?? out.result?.isError).toBeTruthy()
+  })
+
+  it("with no run in progress, a call is the agent's own: its team's board, as itself", async () => {
+    const db = getDb()
+    const now = Date.now()
+    db.insert(teams)
+      .values({ id: 'team-B', name: 'B', icon: 'x', color: '#000', createdAt: now, updatedAt: now })
+      .onConflictDoNothing()
+      .run()
+    const mine = createTask(db, { title: 'Own team work', teamId: 'team-A', status: 'todo' })
+    createTask(db, { title: 'Another team secret', teamId: 'team-B', status: 'todo' })
+    // A job Hermes runs on its own, between Clawboo's runs.
+    const listed = (await rpc(liveUrl(), 'tools/call', { name: 'list_tasks', arguments: {} })) as {
+      result: { content: { text: string }[]; isError?: boolean }
+    }
+    expect(listed.result.isError).not.toBe(true)
+    expect(listed.result.content[0]!.text).toContain('Own team work')
+    expect(listed.result.content[0]!.text).not.toContain('Another team secret')
+    const commented = (await rpc(liveUrl(), 'tools/call', {
+      name: 'add_comment',
+      arguments: { taskId: mine.id, body: 'noted by a job' },
+    })) as { result: { isError?: boolean } }
+    expect(commented.result.isError).not.toBe(true)
+    const row = db
+      .select()
+      .from(taskComments)
+      .all()
+      .find((c) => c.body === 'noted by a job')
+    expect(row?.authorAgentId).toBe('hermes-1')
   })
 
   it('serves a URL whose live signature does not cover it as unbound', async () => {

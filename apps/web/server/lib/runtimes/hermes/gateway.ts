@@ -25,12 +25,13 @@ import path from 'node:path'
 
 import { createLogger } from '@clawboo/logger'
 
-import { isPortFree } from '../../portUtils'
-import { getRuntimeSecret, setRuntimeSecret } from '../../secretsVault'
+import { isLoopbackPortFree } from '../../portUtils'
+import { getRuntimeSecret, runtimeVaultReadable, setRuntimeSecret } from '../../secretsVault'
 import { killProcessTree } from '../killTree'
 import { isAgentUserMode, spawnAgentProcess } from '../spawner'
 import { isSubprocessShutdown, registerRuntimeChild, unregisterRuntimeChild } from '../subprocess'
 import { createHermesClient, type HermesClient } from './client'
+import { gatewayPortOwner, type PortOwner } from './portOwner'
 import { derivedHermesKey, hermesGatewayHome, provisionGatewayHome } from './profiles'
 
 const log = createLogger('hermes-gateway')
@@ -98,15 +99,18 @@ export interface HermesGatewayDeps {
   /** Called with the pid of each gateway started, so an update does not remove
    *  the install folder under it. */
   onStarted?: (pid: number) => void
-  /** Run before each start, after the gateway home is written (the profiles'
-   *  provider keys are brought up to date here). */
-  beforeStart?: (home: string) => Promise<void>
+  /** Run before each start, after the gateway home is written, with the key it
+   *  starts with (the profiles' provider keys and own keys are brought up to
+   *  date here). */
+  beforeStart?: (home: string, masterKey: string) => Promise<void>
   home?: () => string
   /** The port to prefer (default `CLAWBOO_HERMES_GATEWAY_PORT`, else 8642). */
   preferredPort?: () => number
   spawn?: (opts: Parameters<typeof spawnAgentProcess>[0]) => ChildProcess
   fetch?: typeof fetch
   isPortFree?: (port: number) => Promise<boolean>
+  /** Who answers on the gateway's port (default `gatewayPortOwner`). */
+  portOwner?: (port: number, pid: number) => Promise<PortOwner>
   masterKey?: () => string
   now?: () => number
   startTimeoutMs?: number
@@ -194,6 +198,13 @@ export function gatewayEnv(opts: {
 function vaultMasterKey(): string {
   const existing = getRuntimeSecret(HERMES_MASTER_KEY_SLOT)
   if (existing && existing.length >= 32) return existing
+  // Minting writes the vault. One that is there but cannot be read would be
+  // replaced by the Hermes key alone, and every other saved key lost with it.
+  if (!runtimeVaultReadable()) {
+    throw new Error(
+      "Clawboo's key vault cannot be read, so the Hermes gateway key was not made and the vault was left as it is. Check secrets/runtime-keys.json in Clawboo's data folder.",
+    )
+  }
   const minted = randomBytes(32).toString('hex')
   setRuntimeSecret(HERMES_MASTER_KEY_SLOT, minted)
   const stored = getRuntimeSecret(HERMES_MASTER_KEY_SLOT)
@@ -225,6 +236,8 @@ export class HermesGatewaySupervisor {
   private masterKey: string | null = null
   /** How the last gateway process exited, for a restart that fails to start. */
   private lastExitCode: number | null = null
+  /** Said once: the owner of the gateway's port could not be read. */
+  private ownerUnknownWarned = false
 
   constructor(private readonly deps: HermesGatewayDeps) {}
 
@@ -264,12 +277,18 @@ export class HermesGatewaySupervisor {
     if (this.state === 'running' && this.proc && this.port !== null && this.masterKey) {
       // A process that is alive but no longer answers is replaced, not trusted.
       const proc = this.proc
-      if (await this.answers()) return this.connection()
+      const answered = await this.answers()
+      // A stop, an exit or another start while the check was out: the answer
+      // was about a gateway that is no longer the one to hand out.
       if (this.stopInFlight || this.starting || this.proc !== proc || this.state !== 'running') {
         return this.ensureRunning()
       }
+      if (answered) return this.connection()
       log.warn({ pid: proc.pid }, 'hermes gateway stopped answering; restarting it')
       await this.stop()
+      // Another caller may have started its replacement while this one waited:
+      // join that start rather than begin a second.
+      return this.ensureRunning()
     }
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
@@ -379,7 +398,7 @@ export class HermesGatewaySupervisor {
 
   private async pickPort(): Promise<number> {
     const preferred = (this.deps.preferredPort ?? preferredPortFromEnv)()
-    const free = this.deps.isPortFree ?? isPortFree
+    const free = this.deps.isPortFree ?? isLoopbackPortFree
     // The port this gateway used last is its own to take again.
     const candidates = [
       ...(this.port !== null ? [this.port] : []),
@@ -410,7 +429,7 @@ export class HermesGatewaySupervisor {
       const port = await this.pickPort()
       const home = this.home()
       await provisionGatewayHome({ home, port, key: derivedHermesKey(this.masterKey, '_root') })
-      await this.deps.beforeStart?.(home)
+      await this.deps.beforeStart?.(home, this.masterKey)
       this.port = port
       this.spawnGateway(command, home)
       await this.waitReady()
@@ -482,22 +501,51 @@ export class HermesGatewaySupervisor {
       },
       { fetch: this.deps.fetch },
     )
+    const alive = (proc: ChildProcess | null): proc is ChildProcess =>
+      proc !== null && this.proc === proc && proc.exitCode === null && proc.signalCode === null
     for (;;) {
       const proc = this.proc
-      if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+      if (!alive(proc)) {
         throw new Error(this.failureReason('Hermes stopped while starting'))
       }
+      let health: { status: string; version?: string } | null = null
       try {
-        const health = await root.health()
-        if (health.status === 'ok') {
-          // The listener is up; one keyed call proves it is ours and takes our key.
-          await root.listJobs()
-          this.version = typeof health.version === 'string' ? health.version : null
-          return
-        }
+        health = await root.health()
       } catch {
         // Not listening yet.
       }
+      // Something answers, and the process is still the one Clawboo started (if
+      // not, the loop's first check says so).
+      if (health?.status === 'ok' && alive(proc)) {
+        // The key goes only to that process: another program that took the
+        // port first would get every key.
+        const owner = await (this.deps.portOwner ?? gatewayPortOwner)(this.port!, proc.pid!)
+        if (owner === 'other') {
+          throw new Error(
+            `Another program answers on port ${this.port}, so the Hermes gateway's key was not sent to it. Set CLAWBOO_HERMES_GATEWAY_PORT to a free port, or stop that program, and try again.`,
+          )
+        }
+        if (owner === 'unknown' && !this.ownerUnknownWarned) {
+          this.ownerUnknownWarned = true
+          log.warn(
+            { port: this.port },
+            'could not tell which process answers on the Hermes gateway port',
+          )
+        }
+        try {
+          // One keyed call proves it takes our key.
+          await root.listJobs()
+          // It may have exited while that call was out (its exit, during a
+          // start, schedules no restart): then this start failed, below.
+          if (alive(proc)) {
+            this.version = typeof health.version === 'string' ? health.version : null
+            return
+          }
+        } catch {
+          // Not ready yet.
+        }
+      }
+      if (!alive(proc)) continue
       if ((this.deps.now ?? Date.now)() >= deadline) {
         throw new Error(this.failureReason('Hermes did not answer on its port'))
       }

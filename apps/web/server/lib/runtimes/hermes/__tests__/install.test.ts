@@ -72,6 +72,9 @@ describe('installHermesRelease', () => {
       CLAWBOO_HOME: path.join(root, 'data'),
       CLAWBOO_RUNTIMES_DIR: path.join(root, 'runtimes'),
     }
+    // A proxy the shell exports would send every download through curl; only the
+    // proxy test below sets one.
+    for (const name of ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy']) delete env[name]
     tarball = Buffer.from('the v0.23.1 tag tarball')
     commands = []
     reportedVersion = 'Hermes Agent v0.23.1 (2026.9.24) · upstream 3b421578'
