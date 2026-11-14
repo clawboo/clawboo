@@ -135,7 +135,7 @@ The second command offers to restart the older server; `clawboo -y` restarts it 
 1. Optional: in **Settings → Providers**, click **Disconnect** on each key you added there. Keys saved in that panel are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's key file, and **Disconnect** removes every copy.
 2. Stop the server and remove the package with the two commands below.
 3. To delete your data as well, remove the data folder: `~/.clawboo`, or the folder `CLAWBOO_HOME` names. Then remove the work folder, with your agents' files: the folder `CLAWBOO_WORK_DIR` names, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`. Remove the work folder only when no other Clawboo install uses it; for a shared one, see [Reset everything](/operating/data-and-state#reset-everything).
-4. To remove the runtimes Clawboo installed for you (OpenClaw, Claude Code's Agent SDK and Codex), remove the runtimes folder with the server stopped: the folder `CLAWBOO_RUNTIMES_DIR` names, else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes`. Stop an OpenClaw Gateway that Clawboo started first; see [Move or remove it](/operating/data-and-state#move-or-remove-it).
+4. To remove the runtimes Clawboo installed for you (OpenClaw, Claude Code's Agent SDK, Codex and Hermes), remove the runtimes folder with the server stopped: the folder `CLAWBOO_RUNTIMES_DIR` names, else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes`. Stop an OpenClaw Gateway that Clawboo started first; see [Move or remove it](/operating/data-and-state#move-or-remove-it).
 
 ```bash
 clawboo stop
@@ -152,7 +152,7 @@ If you only used npx, there is no global package: run `npx clawboo@latest stop`,
 
 ## Where your data lives
 
-Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder (with a folder for each task inside it) and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK and Codex) go in a third folder, `~/clawboo-runtimes` (set `CLAWBOO_RUNTIMES_DIR` to use another), never in npm's global folder. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
+Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder (with a folder for each task inside it) and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK, Codex and Hermes) go in a third folder, `~/clawboo-runtimes` (set `CLAWBOO_RUNTIMES_DIR` to use another), never in npm's global folder. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
 
 ## Troubleshooting
 

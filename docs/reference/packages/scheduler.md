@@ -20,7 +20,7 @@ keywords:
 
 `@clawboo/scheduler` holds the pure scheduling rules behind Routines: how a schedule is written, when it fires
 next, how its runs land on the board calendar, what a fire creates, and the schedule-source layer that merges
-Clawboo's routines with an OpenClaw Gateway's own cron jobs. It is browser-safe, and it is the only place `croner`
+Clawboo's routines with an OpenClaw Gateway's own cron jobs and the Hermes agents' own jobs. It is browser-safe, and it is the only place `croner`
 is imported, so the Routines view does next-run math in the browser with the same code the server fires on.
 
 Use this page when you change how routines are scheduled or listed. The engine that fires them is on
@@ -32,7 +32,7 @@ how-to on [Run work on a schedule with routines](/using/routines).
 | Where                              | Form                                                                                                                                          | Read with                                                        |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | A Clawboo routine                  | a cron expression (five or six fields) or a one-shot `once@<ISO-8601>`                                                                        | `parseCronSpec`, `probeCronSpec`, `nextOccurrence`, `isOnceSpec` |
-| A `ScheduleRecord` from any source | the routine forms, plus the Gateway's `every:<ms>` (optionally `@anchor:<ms>`), `at:<iso>`, and a cron expression with an `@tz:<zone>` suffix | `encodeCronSpec`, `decodeCronSpec`                               |
+| A `ScheduleRecord` from any source | the routine forms, plus the runtimes' `every:<ms>` (optionally `@anchor:<ms>`), `at:<iso>`, and a cron expression with an `@tz:<zone>` suffix | `encodeCronSpec`, `decodeCronSpec`                               |
 
 `nextOccurrence(spec, fromMs, timeZone?)` returns the next run strictly after `fromMs`, or `null` when the spec will
 never fire again (a spent one-shot). A cron expression is wall-clock time read in `timeZone`, an IANA name; without
@@ -66,19 +66,20 @@ invalid one) is what each fire materializes:
 
 ## Schedule sources
 
-The Routines view lists two kinds of schedule through one interface, `ScheduleSource`, each normalized to a
+The Routines view lists three kinds of schedule through one interface, `ScheduleSource`, each normalized to a
 `ScheduleRecord`:
 
-| Source id               | What it lists                                              | Manageability                                                             |
-| ----------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `clawboo-routine`       | Clawboo's own routines, which put work on the team's board | `managed`: Clawboo creates, edits, pauses and runs them                   |
-| `openclaw-gateway-cron` | the OpenClaw Gateway's own cron jobs for its agents        | `external-write`: Clawboo edits them through the Gateway, which owns them |
+| Source id               | What it lists                                                                      | Manageability                                                                             |
+| ----------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `clawboo-routine`       | Clawboo's own routines, which put work on the team's board                         | `managed`: Clawboo creates, edits, pauses and runs them                                   |
+| `openclaw-gateway-cron` | the OpenClaw Gateway's own cron jobs for its agents                                | `external-write`: Clawboo edits them through the Gateway, which owns them                 |
+| `hermes-gateway-jobs`   | the jobs each Hermes agent keeps in its profile in the Hermes gateway Clawboo runs | `external-write`: Clawboo changes them through the Hermes gateway's API; Hermes owns them |
 
 `ScheduleMultiplexer` merges every source's `read()`. A source that fails reports a degraded status instead of
 failing the whole list. Writes go to the source that owns the id (ids are `<source>:<raw id>`, built by
 `makeScheduleId` and split by `parseScheduleId`), after three checks in order: an unknown source throws
 `UnknownScheduleError`, an `observe-only` source throws `UnsupportedScheduleWriteError`, and creating a
-`team-task` schedule on a `runtime-own-life` source (the Gateway's) throws `TeamTaskDomainViolationError`. The
+`team-task` schedule on a `runtime-own-life` source (the OpenClaw Gateway's or Hermes's) throws `TeamTaskDomainViolationError`. The
 pattern it shares with the capability sources is described on [Capability and schedule sources](/internals/seams).
 
 Every error class carries a `code` for callers to branch on. The REST layer maps them to statuses and sends each
@@ -87,7 +88,7 @@ class's own `code`, so a malformed spec comes back as a `400` with `invalid_cron
 
 ## Who uses it
 
-Only `apps/web`. On the server: the routines ticker and wake bridge, the OpenClaw routine dispatcher, the two
+Only `apps/web`. On the server: the routines ticker and wake bridge, the OpenClaw routine dispatcher, the three
 schedule sources, and the `/api/schedules` routes. In the SPA: the Routines view, which imports the spec helpers
 as well as the types, and the board calendar. `@clawboo/db` does not depend on this package; its routines ledger
 stores precomputed times.

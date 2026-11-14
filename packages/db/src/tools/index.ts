@@ -64,6 +64,7 @@ export {
 export {
   MIN_KNOWN_SECRET_LENGTH,
   registerKnownSecretSource,
+  scrubSafeKeys,
   scrubArgsSummary,
   scrubResultSummary,
   scrubSecrets,

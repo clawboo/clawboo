@@ -19,14 +19,7 @@ import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { fetchOpenRouterModels } from '../lib/openrouterModels'
 import { providerBaseUrl, providerBaseUrlOverride } from '../lib/providerBaseUrls'
-import {
-  findExecutable,
-  isWindows,
-  resolvePython,
-  resolveRuntimeBin,
-  type PythonCandidate,
-  type PythonRange,
-} from '../lib/platform'
+import { isWindows, resolveRuntimeBin } from '../lib/platform'
 import { invalidateCodexAuthCache, isCodexLoggedIn } from '../lib/runtimes/codexAuth'
 import {
   getCodexModels,
@@ -40,12 +33,14 @@ import {
 } from '../lib/runtimes/hermesAuth'
 import { agentSdkBinaryInInstall } from '../lib/runtimes/agentSdkBinary'
 import { resolveRuntimeInstall, resolveSdkBinary } from '../lib/runtimes/installProbe'
+import { hermesGateway, syncHermesProfileKeys } from '../lib/runtimes/hermes'
 import { runNpmRuntimeInstall } from '../lib/runtimes/npmRuntimeInstall'
 import {
-  checkHermesAcp,
-  peekHermesAcp,
-  resetHermesTransport,
-} from '../lib/runtimes/hermesTransport'
+  managedHermesCommand,
+  managedHermesCurrent,
+  managedHermesVersion,
+} from '../lib/runtimes/hermes/install'
+import { installHermes } from '../lib/runtimes/hermesInstall'
 import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
@@ -118,7 +113,16 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   const d = getDescriptor(id)
   // Built-in runtimes ship inside the server: always installed, no binary.
   // Claude Code is installed by its CLI or by the Agent SDK's own binary.
-  const bin = d.builtIn ? null : resolveRuntimeInstall(d)
+  // Hermes runs only from Clawboo's own install of the pinned release: a
+  // `hermes` elsewhere on PATH is not what Clawboo starts.
+  const hermesManaged = id === 'hermes' ? managedHermesCommand() : null
+  const bin = d.builtIn
+    ? null
+    : id === 'hermes'
+      ? hermesManaged
+        ? { path: hermesManaged, source: 'cli' as const }
+        : null
+      : resolveRuntimeInstall(d)
   const binPath = bin?.path ?? null
   const installed = d.builtIn ? true : Boolean(bin)
   // Presence only — resolveRuntimeKey returns the value but we never expose it.
@@ -207,9 +211,8 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
         // run. Read from the cached model probe, never awaited: the first request
         // starts it and a later one reports it.
         const codexModels = id === 'codex' && oauthLoggedIn ? peekCodexModels() : null
-        // A Hermes installed without its ACP mode runs, but on the quiet path.
-        // Asked of Hermes and cached, never awaited, like the Codex read above.
-        const hermesAcp = id === 'hermes' && resolveRuntimeBin('hermes') ? peekHermesAcp() : null
+        // Hermes: its supervised gateway, and whether Clawboo's install is the
+        // pinned release (an older one, or one only on PATH, needs an update).
         return {
           id,
           participantKind: adapter.participantKind,
@@ -219,7 +222,7 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
           ...(codexModels
             ? { updateRequired: codexModels.updateRequired, cliVersion: codexModels.cliVersion }
             : {}),
-          ...(hermesAcp !== null ? { acpMissing: !hermesAcp } : {}),
+          ...(id === 'hermes' ? hermesStatusFields() : {}),
         }
       }),
     )
@@ -227,6 +230,19 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
     res.json({ runtimes, available })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+/** The Hermes fields of the runtimes list: the gateway's state for its card,
+ *  and an update when Clawboo's install is missing or not the pinned release but
+ *  a `hermes` is on PATH (one installed before Clawboo installed its own). */
+function hermesStatusFields(): Record<string, unknown> {
+  const version = managedHermesVersion()
+  const onPath = !version && Boolean(resolveRuntimeBin('hermes'))
+  return {
+    hermesGateway: hermesGateway().status(),
+    hermesVersion: version,
+    ...(onPath || (version && !managedHermesCurrent()) ? { updateRequired: true } : {}),
   }
 }
 
@@ -246,8 +262,8 @@ function installRunning(
 
 // ─── POST /api/runtimes/:id/install (SSE) ────────────────────────────────────
 // Installs the runtime. npm runtimes → a folder of their own under Clawboo's
-// runtimes folder (`npmRuntimeInstall.ts`, never `npm install -g`); the pip
-// runtime → pipx-preferred with a PEP-668 `--break-system-packages` fallback.
+// runtimes folder (`npmRuntimeInstall.ts`, never `npm install -g`); Hermes → its
+// pinned release into that folder (lib/runtimes/hermesInstall.ts).
 // Mirrors system.ts `installOpenclawPOST`: text/event-stream, progress/output/
 // complete/error events, child.kill() on connection close, synchronous-throw
 // guard.
@@ -298,11 +314,10 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
   sendEvent(res, { type: 'progress', step: 'installing', message: `Installing ${d.name}…` })
 
   // An install over one that is already there is an update. Stopped part way it
-  // can leave the runtime half replaced (`pipx install --force` reinstalls into
-  // the same environment), so it runs to the end when its client goes away (a
-  // closed panel, a reloaded tab). A first install has nothing to break, so it
-  // still stops with its client. The handler covers whichever child is active
-  // (the pip path may spawn a second one for the PEP-668 retry).
+  // can leave the runtime half replaced, so it runs to the end when its client
+  // goes away (a closed panel, a reloaded tab). A first install has nothing to
+  // break, so it still stops with its client. Hermes's install always runs to its
+  // end: it switches to the new folder only when it is done.
   const updating = Boolean(d.healthBin && resolveRuntimeBin(d.healthBin))
   const ctl: { child: ChildProcess | null } = { child: null }
   installs.set(id, ctl)
@@ -311,7 +326,7 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
   })
 
   if (d.packageManager === 'npm') installViaNpm(res, d, ctl)
-  else installViaPip(res, d, ctl)
+  else installHermes(res, d, ctl)
 }
 
 /** On a successful install: flip the flag on (live; runtime flags need no
@@ -319,14 +334,7 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
 async function finishInstall(res: Response, d: RuntimeDescriptor): Promise<void> {
   // A new Codex CLI can read models the old one could not.
   if (d.id === 'codex') invalidateCodexModelsCache()
-  // A reinstalled Hermes may have gained its ACP mode. Ask it again before
-  // reporting done, so the status read that follows already has the answer.
-  if (d.id === 'hermes') {
-    resetHermesTransport()
-    await checkHermesAcp()
-  }
-  // No cache to bust — resolveRuntimeBin probes PATH + user-install dirs live
-  // (it's what finds Hermes in the Python user-site bin off PATH).
+  // No cache to bust: the install probes run live.
   if (resolveRuntimeInstall(d)) {
     sendEvent(res, { type: 'complete', success: true })
   } else {
@@ -339,40 +347,6 @@ async function finishInstall(res: Response, d: RuntimeDescriptor): Promise<void>
     })
   }
   res.end()
-}
-
-/** Stream a child's stdout/stderr as SSE; finish via finishInstall / error. */
-function streamInstallChild(res: Response, child: ChildProcess, d: RuntimeDescriptor): void {
-  child.stdout?.on('data', (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n').filter(Boolean))
-      sendEvent(res, { type: 'output', line })
-  })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    const text = chunk.toString()
-    if (text.includes('EACCES') || text.toLowerCase().includes('permission denied')) {
-      sendEvent(res, {
-        type: 'error',
-        code: 'EACCES',
-        message: `Permission denied while installing ${d.name}. Check that this user can write where it installs, then try again.`,
-      })
-    }
-    for (const line of text.split('\n').filter(Boolean)) sendEvent(res, { type: 'output', line })
-  })
-  child.on('error', (err) => {
-    sendEvent(res, { type: 'error', code: 'SPAWN_ERROR', message: String(err) })
-    res.end()
-  })
-  child.on('close', (code) => {
-    if (code === 0) void finishInstall(res, d)
-    else {
-      sendEvent(res, {
-        type: 'error',
-        code: `EXIT_${code}`,
-        message: `Installation failed with exit code ${code}`,
-      })
-      res.end()
-    }
-  })
 }
 
 /** An npm runtime goes into a folder of its own under Clawboo's runtimes folder,
@@ -408,195 +382,6 @@ function installViaNpm(
       return
     }
     sendEvent(res, { type: 'error', code: result.code, message: result.message })
-    res.end()
-  })
-}
-
-/** "3.11 to 3.13", "3.11 or newer", or "3" for a package with no range. */
-function pythonRangeLabel(range: PythonRange): string {
-  const hasMax = Number.isFinite(range.maxMinor)
-  if (range.minMinor > 0 && hasMax) {
-    return range.minMinor === range.maxMinor
-      ? `3.${range.minMinor}`
-      : `3.${range.minMinor} to 3.${range.maxMinor}`
-  }
-  if (range.minMinor > 0) return `3.${range.minMinor} or newer`
-  if (hasMax) return `3.${range.maxMinor} or older`
-  return '3'
-}
-
-/** The install error when no Python inside the package's range was found. It
- *  names the range and every Python that WAS found, so a 3.14 reads as outside
- *  the range instead of as missing or too old. */
-function pythonUnavailableEvent(
-  d: RuntimeDescriptor,
-  range: PythonRange,
-  found: PythonCandidate[],
-): Record<string, unknown> {
-  const label = pythonRangeLabel(range)
-  // The install hint names the top of the range (the bottom when it has no top).
-  const top = Number.isFinite(range.maxMinor)
-    ? range.maxMinor
-    : range.minMinor > 0
-      ? range.minMinor
-      : null
-  const hint =
-    top !== null
-      ? `Install Python 3.${top} (for example \`brew install python@3.${top}\`), then Retry.`
-      : 'Install Python 3, then Retry.'
-  if (found.length === 0) {
-    return {
-      type: 'error',
-      code: 'PYTHON_MISSING',
-      message: `Python ${label} (with pip or pipx) not found. ${hint}`,
-    }
-  }
-  const versions = [
-    ...new Set(
-      found.map(
-        (c) =>
-          `${c.version}${/Xcode\.app|CommandLineTools/i.test(c.bin) ? ' (Xcode Command Line Tools)' : ''}`,
-      ),
-    ),
-  ]
-  const list =
-    versions.length > 1
-      ? `${versions.slice(0, -1).join(', ')} and ${versions[versions.length - 1]}`
-      : versions[0]
-  return {
-    type: 'error',
-    code: found.every((c) => c.minor < range.minMinor) ? 'PYTHON_TOO_OLD' : 'PYTHON_UNSUPPORTED',
-    message: `${d.name} needs Python ${label}, but Clawboo found only Python ${list}. ${hint}`,
-  }
-}
-
-function installViaPip(
-  res: Response,
-  d: RuntimeDescriptor,
-  ctl: { child: ChildProcess | null },
-): void {
-  // Resolve the newest interpreter INSIDE the package's range (Hermes: 3.11 to
-  // 3.13). The newest overall is not enough: a 3.14 would beat an installed 3.12
-  // and pip would then find no release for it.
-  const range: PythonRange = {
-    minMinor: d.pythonMinMinor ?? 0,
-    maxMinor: d.pythonMaxMinor ?? Number.POSITIVE_INFINITY,
-  }
-  const { compatible, found } = resolvePython(range)
-
-  // Prefer pipx (sidesteps PEP-668 entirely); pin its interpreter to the
-  // in-range one so it never builds the venv with an out-of-range default Python.
-  // With no in-range interpreter found, pipx runs on its own default Python,
-  // which may be one this probe could not see.
-  const pipx = resolveRuntimeBin('pipx') ?? findExecutable('pipx')
-  if (pipx) {
-    sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing via pipx…' })
-    // `--force` reinstalls over an existing install, which is how Update adds a
-    // missing extra; without it pipx leaves an installed package as it is.
-    const args = [
-      'install',
-      '--force',
-      ...(compatible ? ['--python', compatible.bin] : []),
-      d.pkg ?? '',
-    ]
-    try {
-      ctl.child = spawn(pipx, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: isWindows,
-        windowsHide: isWindows,
-      })
-    } catch (err) {
-      sendEvent(res, {
-        type: 'error',
-        code: 'SPAWN_THROW',
-        message: err instanceof Error ? err.message : String(err),
-      })
-      res.end()
-      return
-    }
-    streamInstallChild(res, ctl.child, d)
-    return
-  }
-
-  // No pipx → `python -m pip install --user` with an in-range interpreter,
-  // retrying once with --break-system-packages for PEP-668 environments.
-  if (!compatible) {
-    sendEvent(res, pythonUnavailableEvent(d, range, found))
-    res.end()
-    return
-  }
-  runPipUser(res, d, ctl, compatible.bin, false)
-}
-
-function runPipUser(
-  res: Response,
-  d: RuntimeDescriptor,
-  ctl: { child: ChildProcess | null },
-  python: string,
-  breakSystem: boolean,
-): void {
-  if (breakSystem) {
-    sendEvent(res, {
-      type: 'progress',
-      step: 'retrying',
-      message: 'Externally-managed environment detected; retrying with --break-system-packages…',
-    })
-  }
-  // `--upgrade` moves an existing install to the newest release in range, which is
-  // how Update reaches one that has the extras asked for.
-  const args = [
-    '-m',
-    'pip',
-    'install',
-    '--upgrade',
-    '--user',
-    ...(breakSystem ? ['--break-system-packages'] : []),
-    d.pkg ?? '',
-  ]
-  try {
-    ctl.child = spawn(python, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: isWindows,
-      windowsHide: isWindows,
-    })
-  } catch (err) {
-    sendEvent(res, {
-      type: 'error',
-      code: 'SPAWN_THROW',
-      message: err instanceof Error ? err.message : String(err),
-    })
-    res.end()
-    return
-  }
-  const child = ctl.child
-  let sawPep668 = false
-  child.stdout?.on('data', (chunk: Buffer) => {
-    for (const line of chunk.toString().split('\n').filter(Boolean))
-      sendEvent(res, { type: 'output', line })
-  })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    const text = chunk.toString()
-    if (text.includes('externally-managed-environment')) sawPep668 = true
-    for (const line of text.split('\n').filter(Boolean)) sendEvent(res, { type: 'output', line })
-  })
-  child.on('error', (err) => {
-    sendEvent(res, { type: 'error', code: 'SPAWN_ERROR', message: String(err) })
-    res.end()
-  })
-  child.on('close', (code) => {
-    if (code === 0) {
-      void finishInstall(res, d)
-      return
-    }
-    if (sawPep668 && !breakSystem) {
-      runPipUser(res, d, ctl, python, true)
-      return
-    }
-    sendEvent(res, {
-      type: 'error',
-      code: `EXIT_${code}`,
-      message: `Installation failed with exit code ${code}`,
-    })
     res.end()
   })
 }
@@ -673,6 +458,8 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
       runtimeKeySlots(d).some((v) => resolveRuntimeKey(v))
     ) {
       setRuntimeDisconnected(id, false)
+      // A Disconnect took the kept key out of Hermes's profiles: it goes back now.
+      void syncHermesProfileKeys()
       res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
       return
     }
@@ -689,6 +476,10 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
   // A reconnect lifts the explicit-disconnect override — ambient key reuse
   // (process env / OpenClaw's .env) applies again for this runtime.
   setRuntimeDisconnected(id, false)
+  // Hermes's profiles keep keys for the jobs it runs on its own: a replaced
+  // key reaches them now, not at their next run. After the reconnect, so a
+  // reconnected Hermes is synced as connected, not as the runtime it was.
+  void syncHermesProfileKeys()
   // Re-derive (never echo the key). With the key now in the vault and the CLI
   // installed, connectionState becomes 'ready'.
   res.json({
@@ -905,6 +696,9 @@ export function runtimesDisconnectPOST(req: Request, res: Response): void {
   setRuntimeDisconnected(id, true)
   // Stop embedding memory with a key the user just removed.
   onEmbeddingKeysChanged({ removed: deletes })
+  // Hermes's profiles keep keys for the jobs it runs on its own: take out any
+  // this removed, whichever runtime it was read for.
+  void syncHermesProfileKeys()
   res.json({
     ok: true,
     connectionState: runtimeStatus(id)['connectionState'],

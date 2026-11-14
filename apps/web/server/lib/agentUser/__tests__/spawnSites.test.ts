@@ -23,12 +23,16 @@ const ALLOWED: Record<string, string> = {
   'lib/agentUser/plan.ts': 'reads the used user and group ids (dscl) to print the setup commands',
   'lib/runtimes/killTree.ts': "ps and taskkill for the server's own children",
   'lib/processIdentity.ts': 'ps for process start times (the boot reap of its own children)',
+  'lib/runtimes/hermes/portOwner.ts':
+    "netstat and ps, to see who listens on the Hermes gateway's port before its key is sent",
   'lib/platform.ts': 'which / where lookups to resolve runtime binaries',
   'lib/selfRestart.ts': 'restarts the server itself',
   'api/systemUpdate.ts': 'updates the installed clawboo package (the server, not agent work)',
   'api/runtimes.ts': "installs runtimes, and signs out the operator's own Codex login",
   'lib/runtimes/npmRuntimeInstall.ts':
-    'npm installs runtimes into the runtimes folder, which the server user owns and agents may only run',
+    'npm installs a runtime into the runtimes folder, which is kept apart from agent space',
+  'lib/runtimes/hermes/install.ts':
+    'downloads, unpacks and version-checks Hermes in the runtimes folder, kept apart from agent space',
   'lib/runtimes/codexAuth.ts': "codex login status of the operator's own login",
   'api/cliLogin.ts':
     "OpenClaw's login, whose Gateway runs as the server user (Codex and Hermes logins go through the seam)",

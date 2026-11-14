@@ -748,8 +748,9 @@ function RoutineDetails({
           ) : null}
           {!routine ? (
             <p className="mt-0.5 text-[11.5px] text-foreground/50">
-              This job belongs to the OpenClaw Gateway and runs in the agent&apos;s own sessions
-              there, not in a team chat.
+              {record.source === 'hermes-gateway-jobs'
+                ? 'This job belongs to Hermes and runs in the agent’s own Hermes sessions, not in a team chat. Its output stays in Hermes.'
+                : 'This job belongs to the OpenClaw Gateway and runs in the agent’s own sessions there, not in a team chat.'}
             </p>
           ) : null}
         </DetailRow>
@@ -873,10 +874,16 @@ async function act(
 export function confirmDeleteSchedule(record: ScheduleRecord): Promise<boolean> {
   const routine = isClawbooRoutine(record)
   return confirm({
-    title: routine ? 'Delete this routine?' : 'Delete this Gateway cron job?',
+    title: routine
+      ? 'Delete this routine?'
+      : record.source === 'hermes-gateway-jobs'
+        ? 'Delete this Hermes job?'
+        : 'Delete this Gateway cron job?',
     message: routine
       ? 'It stops running and is removed. Tasks and messages it already produced stay.'
-      : "It removes the agent's own scheduled job from the OpenClaw Gateway.",
+      : record.source === 'hermes-gateway-jobs'
+        ? "It removes the agent's own scheduled job from Hermes."
+        : "It removes the agent's own scheduled job from the OpenClaw Gateway.",
     confirmLabel: 'Delete',
     tone: 'danger',
   })

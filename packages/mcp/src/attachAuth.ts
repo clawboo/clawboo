@@ -58,6 +58,10 @@ export interface SignableScope {
    *  Tasks tools record as the run behind a write. Signed so a runtime cannot file
    *  its writes under another run. */
   boundExecutionId?: string | null
+  /** A URL that names only the agent and is bound per call to the agent's run in
+   *  progress (see `AttachScope.live`). Signed so a per-run URL cannot be turned
+   *  into one, or the reverse. */
+  live?: boolean
 }
 
 /** One canonical byte string per semantic scope, independent of which param
@@ -78,6 +82,7 @@ const canonical = (s: SignableScope): string =>
     ...(s.chatRun ? ['chat-run'] : []),
     ...(s.boundTaskId ? [`task:${s.boundTaskId}`] : []),
     ...(s.boundExecutionId ? [`exec:${s.boundExecutionId}`] : []),
+    ...(s.live ? ['live'] : []),
   ].join('\x1f')
 
 /** Sign a scope. Hex HMAC-SHA256; safe to place in a URL. */

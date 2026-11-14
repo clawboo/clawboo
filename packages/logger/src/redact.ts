@@ -25,15 +25,16 @@ const SENSITIVE_KEY_RE =
   /(token|secret|password|passwd|api[_-]?key|apikey|authorization|auth|bearer|credential|private[_-]?key|access[_-]?key|cookie)/i
 
 // Keys that CONTAIN a sensitive substring but are known-safe. Two families:
-// token COUNTS (numeric telemetry, never credentials), and `author` — which is
-// only caught because SENSITIVE_KEY_RE matches the `auth` substring, and which
-// is one of the most common field names in event/audit payloads.
-// Matched case-insensitively against the EXACT key name, so a real credential
-// under e.g. `accessToken` or `authorization` still redacts. That exactness also
-// means near-misses like `authorId` are NOT covered — add them here explicitly
-// if they show up. Kept in sync with @clawboo/db's scrub.ts SAFE_COUNT_KEYS so
-// the storage + display layers agree.
-const SAFE_COUNT_KEYS = new Set([
+// token COUNTS (numeric telemetry, never credentials), and the author fields
+// (`author`, and the board's `authorType` / `authorAgentId` on comment and team
+// chat events), which are only caught because SENSITIVE_KEY_RE matches the
+// `auth` substring. Matched case-insensitively against the EXACT key name, so a
+// real credential under e.g. `accessToken` or `authorization` still redacts.
+// That exactness also means an author-shaped key not listed here is still
+// masked: add a new one explicitly when it becomes a real field. Must hold
+// exactly what @clawboo/db's scrub.ts SAFE_COUNT_KEYS holds, so the storage and
+// display layers agree; a server test compares the two.
+const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
   'tokens',
   'inputtokens',
   'outputtokens',
@@ -45,7 +46,16 @@ const SAFE_COUNT_KEYS = new Set([
   'tokensperminute',
   'author',
   'authors',
+  'authortype',
+  'authoragentid',
 ])
+
+/** The keys the display mask lets through although they contain a secret-looking
+ *  word, as a sorted copy: the set itself stays private, so no caller can widen
+ *  what is let through for the rest of the process. */
+export function redactionSafeKeys(): string[] {
+  return [...SAFE_COUNT_KEYS].sort()
+}
 
 // A PEM private key block is masked by its own scan (below) rather than by a
 // pattern in the list, so the multi-line block still wins before any of the

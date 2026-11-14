@@ -93,7 +93,7 @@ The refusal happens after the claim, so a refused task shows one failed executio
 
 <Warning>
 
-The refusal exists because of how the drivers run. Claude Code runs with `permissionMode: 'bypassPermissions'`, Codex with `--dangerously-bypass-approvals-and-sandbox` (app-server: approval policy `never`, sandbox `danger-full-access`), and Hermes with `--yolo` and `--accept-hooks`. A run with no working directory would start in the server's own working directory, which for an npm install is the Clawboo state directory holding the database and the secrets vault. The worktree keeps a task's file changes on its own branch, and the task's own folder only sets where a read-only run starts; neither is a sandbox, and the process still has every permission of the user who started Clawboo. Team-engine runs start in the task's own folder or the team's folder too. See [What agents can do](/concepts/permissions).
+The refusal exists because of how the drivers run. Claude Code runs with `permissionMode: 'bypassPermissions'`, Codex with `--dangerously-bypass-approvals-and-sandbox` (app-server: approval policy `never`, sandbox `danger-full-access`), and Hermes with its own approval policy, which asks only before the commands it flags. A run with no working directory would start in the server's own working directory, which for an npm install is the Clawboo state directory holding the database and the secrets vault. The worktree keeps a task's file changes on its own branch, and the task's own folder only sets where a read-only run starts; neither is a sandbox, and the process still has every permission of the user who started Clawboo. Team-engine runs start in the task's own folder or the team's folder too. See [What agents can do](/concepts/permissions).
 
 </Warning>
 
@@ -202,9 +202,9 @@ After the loop exactly one terminal branch runs. Every branch closes the executi
 | ------------------------------ | -------------------- | ---------------------------------------------------------------------------- |
 | `resumeViaHandoff`             | `!caps.resume`       | A note, and the execution's run reason becomes `resume-via-handoff`.         |
 | `routeApprovalsThroughClawboo` | `!caps.toolApproval` | A note (`approvals-via-clawboo (no native tool approval)`) and nothing else. |
-| `coarseStreaming`              | `!caps.streaming`    | A note that progress arrives in blocks, not tokens (Hermes).                 |
+| `coarseStreaming`              | `!caps.streaming`    | A note that progress arrives in blocks, not tokens.                          |
 
-`describeDegradations` renders the notes into the prompt's context tier and the result's `degradations`, so a gap is visible. The flags do not change tool handling: Clawboo adds no approval gate for a runtime that lacks one. Every real adapter declares `resume` and `toolApproval`, so in practice only Hermes gets a note.
+`describeDegradations` renders the notes into the prompt's context tier and the result's `degradations`, so a gap is visible. The flags do not change tool handling: Clawboo adds no approval gate for a runtime that lacks one. Every real adapter declares `resume`, `toolApproval` and `streaming`, so in practice no run gets a note.
 
 ## Tracing
 

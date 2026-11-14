@@ -40,15 +40,14 @@ None of these is your bill. Your provider's own billing page shows what you were
 
 Some runtimes report what a run cost. For the others, Clawboo estimates it. Estimates count toward budgets the same way as reported figures, and the Board marks them **est.**
 
-| Runtime                            | What it reports to Clawboo       | What Clawboo records                                                                                                | Marked est. |
-| ---------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------- |
-| Claude Code                        | The dollar cost of each run      | That figure                                                                                                         | No          |
-| Clawboo Native, on a priced model  | Token counts for each model turn | The cost at Clawboo's list price for that model                                                                     | No          |
-| Clawboo Native, on any other model | Token counts for each model turn | The tokens priced from Clawboo's rate table, or at the default rate when the model is not in it                     | Yes         |
-| Codex                              | Token counts, no dollar figure   | The tokens priced at the default rate, because Clawboo has no prices for Codex models                               | Yes         |
-| Hermes, over ACP                   | Token counts, no dollar figure   | The tokens priced from Clawboo's rate table, or at the default rate when the model is not in it                     | Yes         |
-| Hermes, without ACP                | Nothing                          | An estimate from the length of the prompt and the reply, in team chat, one-to-one chat, routines and API runs alike | Yes         |
-| OpenClaw                           | No cost with its runs            | An estimate from the length of the prompt and the reply, for every team-chat run and every routine run              | Yes         |
+| Runtime                            | What it reports to Clawboo       | What Clawboo records                                                                                   | Marked est. |
+| ---------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------- |
+| Claude Code                        | The dollar cost of each run      | That figure                                                                                            | No          |
+| Clawboo Native, on a priced model  | Token counts for each model turn | The cost at Clawboo's list price for that model                                                        | No          |
+| Clawboo Native, on any other model | Token counts for each model turn | The tokens priced from Clawboo's rate table, or at the default rate when the model is not in it        | Yes         |
+| Codex                              | Token counts, no dollar figure   | The tokens priced at the default rate, because Clawboo has no prices for Codex models                  | Yes         |
+| Hermes                             | Token counts, no dollar figure   | The tokens priced from Clawboo's rate table, or at the default rate when the model is not in it        | Yes         |
+| OpenClaw                           | No cost with its runs            | An estimate from the length of the prompt and the reply, for every team-chat run and every routine run | Yes         |
 
 - **The priced models** are claude-haiku-4-5, claude-sonnet-4-6, gpt-4o and gpt-4o-mini, plus the OpenRouter ids anthropic/claude-haiku-4.5 and openai/gpt-4o-mini. The default leader models, claude-sonnet-5 and gpt-5.4, are not among them.
 - **The rate table** lists Anthropic's Claude models plus gpt-4o and gpt-4o-mini. **The default rate** is $3 per million input tokens and $15 per million output tokens.

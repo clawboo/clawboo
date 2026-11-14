@@ -7,7 +7,7 @@ import { classifyError, isAccountError } from '@clawboo/obs'
 import { describe, expect, it } from 'vitest'
 
 import { runFailureText } from '../../runFailureText'
-import { hermesErrorCode, withoutRecoveredOverflow } from '../hermesDriver'
+import { hermesErrorCode, withoutRecoveredOverflow } from '../hermes/failure'
 
 describe('hermesErrorCode', () => {
   it('takes the code an OpenAI-style body names over its broader type', () => {

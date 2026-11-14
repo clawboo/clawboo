@@ -66,6 +66,47 @@ describe('scrubSecrets — SAFE_COUNT_KEYS carve-outs', () => {
       accessToken: '[REDACTED]',
     })
   })
+
+  it('keeps the board\'s author fields, which also only match on "auth"', () => {
+    // Stored masked, they stay masked for good: `comment_added` events carry
+    // `authorType`, `team_chat_post` events carry `authorAgentId`. A system
+    // comment has no author agent, so a null must stay null too.
+    expect(scrubSecrets({ authorType: 'user', authorAgentId: 'agent-1' })).toEqual({
+      authorType: 'user',
+      authorAgentId: 'agent-1',
+    })
+    expect(scrubSecrets({ authorType: 'system', authorAgentId: null })).toEqual({
+      authorType: 'system',
+      authorAgentId: null,
+    })
+  })
+
+  it("keeps them in a tool call's argument summary", () => {
+    // `add_comment` takes both; the team chat tools take `authorAgentId`.
+    const summary = scrubArgsSummary({ taskId: 't1', authorType: 'agent', authorAgentId: 'a1' })
+    expect(JSON.parse(summary)).toEqual({ taskId: 't1', authorType: 'agent', authorAgentId: 'a1' })
+  })
+
+  it('still redacts a credential under any other auth-shaped key', () => {
+    expect(
+      scrubSecrets({
+        auth: 'abc',
+        Authorization: 'Basic abc',
+        authorization: 'Basic abc',
+        authToken: 'abc',
+        // Author-shaped, but not one of the listed fields: still a credential.
+        authorToken: 'abc',
+        authorAgentIdSecret: 'abc',
+      }),
+    ).toEqual({
+      auth: '[REDACTED]',
+      Authorization: '[REDACTED]',
+      authorization: '[REDACTED]',
+      authToken: '[REDACTED]',
+      authorToken: '[REDACTED]',
+      authorAgentIdSecret: '[REDACTED]',
+    })
+  })
 })
 
 describe('saved secret values', () => {

@@ -44,7 +44,7 @@ A provider supplies the AI model and bills you for it: Anthropic, OpenAI, OpenRo
 | OpenClaw       | OpenClaw and its Gateway; **Set up OpenClaw** installs both | A provider key, a ChatGPT sign-in or a local Ollama, and a one-time device approval |
 | Claude Code    | The Claude Agent SDK, which brings its own `claude` program | An Anthropic API key                                                                |
 | Codex          | The `codex` program                                         | **Sign in with ChatGPT**                                                            |
-| Hermes         | Hermes, which needs Python 3.11 to 3.13                     | An OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in                        |
+| Hermes         | Hermes, which Clawboo installs with its own Python          | An OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in                        |
 
 **Settings > Runtimes** installs and connects each one. OpenClaw, the Agent SDK and Codex go into Clawboo's own runtimes folder, never npm's global folder. One team can mix runtimes. See [Providers and runtimes](/using/providers-and-runtimes).
 
@@ -101,7 +101,8 @@ Clawboo also writes to OpenClaw's `~/.openclaw` folder in a few cases:
 
 It depends on the runtime:
 
-- **Claude Code, Codex and Hermes** run with their own approval prompts and sandboxes turned off. They can read and change any file your user account can, and run commands, without asking you.
+- **Claude Code and Codex** run with their own approval prompts and sandboxes turned off. They can read and change any file your user account can, and run commands, without asking you.
+- **Hermes** has no sandbox either, and can read and change any file your user account can. It asks you only before the commands its own policy flags, such as a recursive delete, on an approval card.
 - **Clawboo Native** agents write files only inside the folder their run works in: the task's own folder on a task with no worktree (in team chat, from the Board, or a research or review task), their team's folder on other team-chat turns and in one-to-one chat, or the task's own git worktree. On a task with no worktree they can also read the rest of the team's folder. Commands stay off until you switch on **Let this Boo ask to run commands** on the agent's page, under **Details > Permissions**, and then every command asks you first.
 - **OpenClaw** agents work in their own OpenClaw workspace, under OpenClaw's own sandbox settings. Their commands follow the **Command Execution** setting under **Details > Permissions** on their page: **Run Freely**, **Ask for Unknown** (where agents you create in Clawboo start) or **Always Ask**.
 

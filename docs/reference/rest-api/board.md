@@ -570,8 +570,8 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
     runningSince // shape as in GET /api/board
     jobStopped // shape as in GET /api/board
     // How the run working on the task takes a comment now: the run's own way,
-    // which can differ from its runtime's (a Hermes run that fell back to
-    // `hermes chat` stops and resumes). null when no run is registered here.
+    // which an adapter may set apart from its runtime's declared one. null when
+    // no run is registered here.
     runSteering: 'live' | 'interrupt-resume' | 'none' | null
     // A saved wake still waiting to reach the task's agent, and why it waits.
     // skipReason is null until a pump pass has seen it. held: a person's Stop holds

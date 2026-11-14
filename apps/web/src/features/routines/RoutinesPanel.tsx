@@ -296,12 +296,13 @@ export function RoutinesPanel() {
 
   useVisiblePolling(() => void refresh(), 8000)
 
-  const { teamRows, agentRows, gatewayRows } = useMemo(() => {
+  const { teamRows, agentRows, gatewayRows, hermesRows } = useMemo(() => {
     const routines = schedules.filter(isClawbooRoutine)
     return {
       teamRows: routines.filter((s) => routineKindOf(s) === 'team').sort(byName),
       agentRows: routines.filter((s) => routineKindOf(s) === 'agent').sort(byName),
-      gatewayRows: schedules.filter((s) => !isClawbooRoutine(s)).sort(byName),
+      gatewayRows: schedules.filter((s) => s.source === 'openclaw-gateway-cron').sort(byName),
+      hermesRows: schedules.filter((s) => s.source === 'hermes-gateway-jobs').sort(byName),
     }
   }, [schedules])
 
@@ -311,7 +312,14 @@ export function RoutinesPanel() {
   // The Gateway being down is only news to someone who uses OpenClaw.
   const showGatewayNotice =
     !!gatewayStatus?.degraded && (gatewayRows.length > 0 || hasOpenClawAgents)
-  const otherDegraded = sources.filter((s) => s.degraded && s.sourceId !== 'openclaw-gateway-cron')
+  const hermesStatus = sources.find((s) => s.sourceId === 'hermes-gateway-jobs')
+  const hasHermesAgents = directory.agents.some((a) => a.runtime === 'hermes')
+  // A stopped Hermes gateway is only news to someone with Hermes agents.
+  const showHermesNotice = !!hermesStatus?.degraded && (hermesRows.length > 0 || hasHermesAgents)
+  const otherDegraded = sources.filter(
+    (s) =>
+      s.degraded && s.sourceId !== 'openclaw-gateway-cron' && s.sourceId !== 'hermes-gateway-jobs',
+  )
 
   const viewed =
     dialog?.mode === 'view' ? (schedules.find((s) => s.id === dialog.id) ?? null) : null
@@ -359,7 +367,7 @@ export function RoutinesPanel() {
             </FormattedAlert>
           ))}
 
-          {loaded && routineCount === 0 && gatewayRows.length === 0 ? (
+          {loaded && routineCount === 0 && gatewayRows.length === 0 && hermesRows.length === 0 ? (
             <EmptyState
               icon={Repeat}
               title="No routines yet"
@@ -400,6 +408,27 @@ export function RoutinesPanel() {
               title="OpenClaw's own cron jobs"
               hint="Scheduled on the OpenClaw Gateway for its agents."
               rows={gatewayRows}
+              onOpen={(id) => setDialog({ mode: 'view', id })}
+              onChanged={() => void refresh()}
+            />
+          ) : null}
+
+          {showHermesNotice ? (
+            <FormattedAlert tone="warning" icon={AlertTriangle}>
+              {hermesStatus?.reason === 'profile_unreadable'
+                ? 'Some Hermes agents’ own jobs could not be read just now, so they are missing below.'
+                : hermesStatus?.reason === 'stale_cache'
+                  ? 'The Hermes gateway is not running, so its agents’ own jobs below are the last list it sent, and they do not fire until it runs again.'
+                  : 'The Hermes gateway is not running, so its agents’ own jobs are hidden and do not fire. It starts with the next Hermes run, or from Settings > Runtimes.'}
+            </FormattedAlert>
+          ) : null}
+
+          {hermesRows.length > 0 ? (
+            <Section
+              testId="routines-hermes"
+              title="Hermes's own jobs"
+              hint="Scheduled in Hermes by its agents. Their output stays in Hermes."
+              rows={hermesRows}
               onOpen={(id) => setDialog({ mode: 'view', id })}
               onChanged={() => void refresh()}
             />

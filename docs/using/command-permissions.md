@@ -21,11 +21,12 @@ keywords:
 
 Two runtimes let you decide, from Clawboo, whether an agent may run shell commands on your computer: Clawboo Native and OpenClaw. Use this page to turn commands on or off for an agent, choose when it asks you first, and take back a permission you gave with **Always**.
 
-| Runtime                    | Out of the box                                        | What you control here                                                   |
-| -------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| Clawboo Native             | Runs no commands                                      | A switch that lets the agent ask before each command                    |
-| OpenClaw                   | **Ask for Unknown**, for agents you create in Clawboo | When the agent asks, and the list of commands it may run without asking |
-| Claude Code, Codex, Hermes | Runs any command without asking                       | Nothing: Clawboo runs them with their own approval prompts turned off   |
+| Runtime            | Out of the box                                        | What you control here                                                                                                                                                                                 |
+| ------------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clawboo Native     | Runs no commands                                      | A switch that lets the agent ask before each command                                                                                                                                                  |
+| OpenClaw           | **Ask for Unknown**, for agents you create in Clawboo | When the agent asks, and the list of commands it may run without asking                                                                                                                               |
+| Claude Code, Codex | Runs any command without asking                       | Nothing: Clawboo runs them with their own approval prompts turned off                                                                                                                                 |
+| Hermes             | Asks before the commands its own policy flags         | Nothing here: Hermes's policy is `approvals.mode` from your own `~/.hermes/config.yaml` (`manual` when it sets none, and always with agents as their own user), and each question is an approval card |
 
 [What agents can do](/concepts/permissions) explains what each runtime can reach. When an agent asks, the request appears as an approval card; [Approvals](/using/approvals) covers the cards.
 

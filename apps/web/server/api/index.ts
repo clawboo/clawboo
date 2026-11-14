@@ -190,6 +190,7 @@ import {
   runtimesHealthcheckPOST,
   runtimesRunPOST,
 } from './runtimes'
+import { hermesGatewayGET, hermesGatewayPOST } from './hermesGateway'
 import { cliLoginPOST } from './cliLogin'
 import {
   providersListGET,
@@ -588,6 +589,8 @@ router.delete('/api/mcp/teamchat', mcpTeamchatSession)
 router.get('/api/runtimes', runtimesListGET)
 router.get('/api/runtimes/openrouter/models', runtimesOpenRouterModelsGET)
 router.get('/api/runtimes/codex/models', runtimesCodexModelsGET)
+router.get('/api/runtimes/hermes/gateway', hermesGatewayGET)
+router.post('/api/runtimes/hermes/gateway', sensitiveLimiter, hermesGatewayPOST)
 
 // Provider keys (Settings → Providers hub) — writes both the encrypted vault + OpenClaw .env.
 router.get('/api/providers', providersListGET)

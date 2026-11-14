@@ -4,7 +4,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const launches: Record<string, { launcher: string; command: string } | null> = {}
+const launches: Record<
+  string,
+  { launcher: string; command: string; record: { interpreter?: { path: string } } } | null
+> = {}
 const apart: { label: string; dir: () => string | null }[] = []
 
 vi.mock('../../runtimeFolder', () => ({
@@ -33,8 +36,17 @@ afterEach(() => {
 
 describe('runtimes folder and the agent user', () => {
   it('names each launcher Clawboo installed and the command it runs, once each', async () => {
-    launches['openclaw'] = { launcher: '/rt/bin/openclaw', command: '/opt/node24/bin/node' }
-    launches['codex'] = { launcher: '/rt/bin/codex', command: '/opt/node24/bin/node' }
+    launches['openclaw'] = {
+      launcher: '/rt/bin/openclaw',
+      command: '/opt/node24/bin/node',
+      record: {},
+    }
+    launches['codex'] = { launcher: '/rt/bin/codex', command: '/opt/node24/bin/node', record: {} }
+    launches['hermes'] = {
+      launcher: '/rt/bin/hermes',
+      command: '/rt/hermes/current/hermes-script',
+      record: { interpreter: { path: '/rt/hermes/python/bin/python3.14' } },
+    }
     const { gatherCheckInputs } = await import('../serverBoot')
     const bins = gatherCheckInputs().runtimeBinaries
     expect(bins).toContainEqual({ runtime: 'openclaw', path: '/rt/bin/openclaw' })
@@ -42,7 +54,10 @@ describe('runtimes folder and the agent user', () => {
     expect(bins).toContainEqual({ runtime: 'codex', path: '/opt/node24/bin/node' })
     // codex's launcher is also what PATH lookup found: listed once.
     expect(bins.filter((b) => b.runtime === 'codex' && b.path === '/rt/bin/codex')).toHaveLength(1)
-    expect(bins.some((b) => b.runtime === 'hermes')).toBe(false)
+    // Hermes's launcher runs a script on its own Python: all three are listed.
+    expect(bins).toContainEqual({ runtime: 'hermes', path: '/rt/bin/hermes' })
+    expect(bins).toContainEqual({ runtime: 'hermes', path: '/rt/hermes/current/hermes-script' })
+    expect(bins).toContainEqual({ runtime: 'hermes', path: '/rt/hermes/python/bin/python3.14' })
   })
 
   it("keeps the runtimes folder apart from the agent user's home, registered once", async () => {

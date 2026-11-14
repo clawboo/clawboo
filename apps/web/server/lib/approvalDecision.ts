@@ -1,9 +1,11 @@
 // One answer to a pending approval, whichever route it arrives on.
 //
-// Two kinds of approval, released two different ways. A `tool` approval is held
-// by THIS process: a promise blocked inside `waitForApproval`, which
-// `resolveApproval` releases. An `exec` approval is held by the GATEWAY, and the
-// only thing that releases it is `exec.approval.resolve`.
+// Three kinds of approval, released three different ways. A `tool` approval is
+// held by THIS process: a promise blocked inside `waitForApproval`, which
+// `resolveApproval` releases. An `exec` approval is held by the OpenClaw
+// GATEWAY, and the only thing that releases it is `exec.approval.resolve`. A
+// `hermes` approval is held by Hermes's gateway and released by an answer to its
+// run's approval route.
 //
 // Routing both down the local path would mark the card answered while the
 // Gateway went on holding the command, with nothing on screen to reveal it.
@@ -16,6 +18,7 @@ import { eq } from 'drizzle-orm'
 
 import { getRegistry } from './agentSource'
 import { resolveExecApproval } from './agentSource/execApprovalSurface'
+import { HERMES_APPROVAL_KIND, resolveHermesApproval } from './runtimes/hermes/approvals'
 
 export type ApprovalDecision = 'allow_once' | 'allow_always' | 'deny'
 
@@ -74,6 +77,11 @@ export async function decideApproval(
       status: 200,
       body: { ok: true, kind: 'exec', alreadyResolved: out.alreadyResolved ?? false },
     }
+  }
+
+  if (row.kind === HERMES_APPROVAL_KIND) {
+    // Held by Hermes's gateway, answered there first (see runtimes/hermes/approvals).
+    return resolveHermesApproval(db, id, decision, opts)
   }
 
   const updated = resolveApproval(db, id, decision, opts)

@@ -1,9 +1,7 @@
-// The rewritten Hermes driver: stable per-identity home (provision + seeding +
-// provider detection), the preserved-runtime argv (`chat -q … -Q`, NO
-// --ignore-user-config, NO hard-pinned provider), --resume threading, and the
-// tolerant quiet-mode parser. All assertions run against the exported pure
-// pieces (buildHermesSpawnPlan / parseHermesLine / provisionHermesHome /
-// detectProvider) — no child process is ever spawned.
+// A Hermes agent's home (now its gateway profile): provisioning, seeding from
+// the person's own config, the clawboo MCP block, provider detection, the
+// ChatGPT sign-in seed, and the provider and model a run asks the gateway for
+// (`resolveHermesRunSettings`). No child process is ever spawned.
 
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
@@ -16,13 +14,7 @@ import type { StartOpts } from '@clawboo/executor'
 
 import { parse as parseYaml } from 'yaml'
 
-import {
-  HERMES_SESSION_LINE,
-  buildHermesSpawnPlan,
-  hermesMcpServers,
-  parseHermesLine,
-  type HermesRunState,
-} from '../hermesDriver'
+import { hermesRunMcpServers, resolveHermesRunSettings } from '../hermes/runSettings'
 import {
   CLAWBOO_MCP_BEGIN,
   detectProvider,
@@ -40,10 +32,6 @@ const OPTS: StartOpts = {
   agentId: 'hermes-1',
   sessionKey: 'runtime:hermes:task:t1',
   message: 'do the task',
-}
-
-function freshState(): HermesRunState {
-  return { lastText: '', sawResult: false }
 }
 
 describe('hermes driver (preserved runtime)', () => {
@@ -150,7 +138,7 @@ describe('hermes driver (preserved runtime)', () => {
 
   it('attaches the clawboo servers through config.yaml mcp_servers, the only place Hermes reads them', async () => {
     const withMcp = await provisionHermesHome(identityHome(), {
-      mcpServers: hermesMcpServers('http://localhost:18790'),
+      mcpServers: hermesRunMcpServers('http://localhost:18790'),
     })
     expect(withMcp.mcpAttached).toBe(true)
     const configPath = path.join(withMcp.home, 'config.yaml')
@@ -167,7 +155,7 @@ describe('hermes driver (preserved runtime)', () => {
 
     // Port change: the block is rewritten in place, never duplicated.
     await provisionHermesHome(identityHome(), {
-      mcpServers: hermesMcpServers('http://localhost:19000'),
+      mcpServers: hermesRunMcpServers('http://localhost:19000'),
     })
     const body = await readFile(configPath, 'utf8')
     expect(body.split(CLAWBOO_MCP_BEGIN)).toHaveLength(2)
@@ -196,7 +184,7 @@ describe('hermes driver (preserved runtime)', () => {
       'utf8',
     )
     const first = await provisionHermesHome(identityHome(), {
-      mcpServers: hermesMcpServers('http://localhost:18790', { teamId: 'team-A' }),
+      mcpServers: hermesRunMcpServers('http://localhost:18790', { teamId: 'team-A' }),
     })
     expect(first.seededConfig).toBe(true)
     const configPath = path.join(first.home, 'config.yaml')
@@ -221,7 +209,7 @@ describe('hermes driver (preserved runtime)', () => {
     ].join('\n')
     await writeFile(configPath, resaved, 'utf8')
     await provisionHermesHome(identityHome(), {
-      mcpServers: hermesMcpServers('http://localhost:18790'),
+      mcpServers: hermesRunMcpServers('http://localhost:18790'),
     })
     const after = hermesMcpView(await readFile(configPath, 'utf8'))
     expect(after['github']?.command).toBe('npx')
@@ -234,7 +222,7 @@ describe('hermes driver (preserved runtime)', () => {
     // A directory where config.yaml belongs makes the final rename fail.
     await mkdir(path.join(home, 'config.yaml', 'blocker'), { recursive: true })
     await expect(
-      provisionHermesHome(home, { mcpServers: hermesMcpServers('http://localhost:18790') }),
+      provisionHermesHome(home, { mcpServers: hermesRunMcpServers('http://localhost:18790') }),
     ).rejects.toThrow()
     const { readdir } = await import('node:fs/promises')
     expect((await readdir(home)).filter((f) => f.endsWith('.tmp'))).toEqual([])
@@ -257,7 +245,7 @@ describe('hermes driver (preserved runtime)', () => {
   })
 
   it('binds the run scope onto the shared Memory and Tasks server URLs (per-run scope)', () => {
-    const mcpServers = hermesMcpServers('http://localhost:18790', {
+    const mcpServers = hermesRunMcpServers('http://localhost:18790', {
       teamId: 'team-A',
       agentId: 'agent-1',
     })
@@ -301,25 +289,28 @@ describe('hermes driver (preserved runtime)', () => {
     expect(await detectProvider(home)).toBeNull()
   })
 
-  // ── spawn plan / argv ───────────────────────────────────────────────────────
+  // ── what a run asks the gateway for ────────────────────────────────────────
 
-  const plan = (
+  /** The provider and model a run asks for, as the flags the old one-shot driver
+   *  passed (`--provider`, `-m`), so each rule reads the same as before. */
+  const plan = async (
     home: ProvisionedHermesHome,
     ctx: Partial<RuntimeRunContext> = {},
     opts: Partial<StartOpts> = {},
-  ) => buildHermesSpawnPlan({ ...OPTS, ...opts }, ctx as RuntimeRunContext, home)
-
-  it('argv is a one-shot `chat -q … -Q` with NO --ignore-user-config and NO hard-pinned provider', async () => {
-    const home = await provisionHermesHome(identityHome())
-    const spawn = await plan(home)
-    expect(spawn.args.slice(0, 3)).toEqual(['chat', '-q', 'do the task'])
-    expect(spawn.args).toContain('-Q')
-    expect(spawn.args).toContain('--yolo')
-    expect(spawn.args).toContain('--accept-hooks')
-    expect(spawn.args).not.toContain('--ignore-user-config')
-    expect(spawn.args).not.toContain('--provider')
-    expect(spawn.args).not.toContain('gateway') // one-shot worker, never the Hermes gateway
-  })
+  ) => {
+    const run = await resolveHermesRunSettings(
+      { ...OPTS, ...opts },
+      ctx as RuntimeRunContext,
+      home.home,
+    )
+    return {
+      run,
+      args: [
+        ...(run.provider ? ['--provider', run.provider] : []),
+        ...(run.model ? ['-m', run.model] : []),
+      ],
+    }
+  }
 
   it('provider precedence: config wins → key-derived --provider (openrouter > anthropic > openai-api) → nothing', async () => {
     const home = await provisionHermesHome(identityHome())
@@ -455,98 +446,16 @@ describe('hermes driver (preserved runtime)', () => {
     expect(degraded.args).not.toContain('claude-haiku-4-5')
   })
 
-  it('injects --resume from ctx.resume only into a PRE-EXISTING home', async () => {
-    const fresh = await provisionHermesHome(identityHome())
-    expect(fresh.created).toBe(true)
-    expect((await plan(fresh, { resume: 'hsess-1' })).args).not.toContain('--resume')
-
-    const existing = await provisionHermesHome(identityHome())
-    expect(existing.created).toBe(false)
-    const resumed = await plan(existing, { resume: 'hsess-1' })
-    const i = resumed.args.indexOf('--resume')
-    expect(i).toBeGreaterThan(-1)
-    expect(resumed.args[i + 1]).toBe('hsess-1')
-
-    expect((await plan(existing, { resume: null })).args).not.toContain('--resume')
-  })
-
-  it('model comes from ctx.model over opts.model; env carries HERMES_HOME + apiKeyEnv', async () => {
+  it('model comes from ctx.model over opts.model; the input is the context, then the message', async () => {
     const home = await provisionHermesHome(identityHome())
     const spawn = await plan(
       home,
       { model: 'anthropic/claude-sonnet-4', apiKeyEnv: { OPENROUTER_API_KEY: 'k' } },
-      { model: 'other' },
+      { model: 'other', context: 'You are on the docs team.' },
     )
     const i = spawn.args.indexOf('-m')
     expect(spawn.args[i + 1]).toBe('anthropic/claude-sonnet-4')
-    expect(spawn.env?.['HERMES_HOME']).toBe(home.home)
-    expect(spawn.env?.['OPENROUTER_API_KEY']).toBe('k')
-  })
-
-  // ── quiet-mode parser ───────────────────────────────────────────────────────
-
-  it('parseHermesLine keeps the startup banner out of the reply', () => {
-    const state: Parameters<typeof parseHermesLine>[1] = { lastText: '', sawResult: false }
-    const banner =
-      '  ⚠ tirith security scanner enabled but not available \u2014 command scanning will use pattern matching only'
-    expect(parseHermesLine(banner, state)).toEqual([])
-    expect(parseHermesLine('\u26A0\uFE0F tirith security scanner enabled', state)).toEqual([])
-    expect(state.lastText).toBe('')
-    expect(parseHermesLine('The parser now handles quotes.', state)).toEqual([
-      { type: 'message', text: 'The parser now handles quotes.\n' },
-    ])
-    // Once the reply has started it is the model's own words, even the same ones.
-    expect(parseHermesLine(banner, state)).toEqual([{ type: 'message', text: `${banner}\n` }])
-    // So is a warning of its own, at the very start of a reply.
-    const own: Parameters<typeof parseHermesLine>[1] = { lastText: '', sawResult: false }
-    expect(parseHermesLine('⚠ This will delete the branch.', own)).toEqual([
-      { type: 'message', text: '⚠ This will delete the branch.\n' },
-    ])
-  })
-
-  it('parseHermesLine captures the plain session-info line in its variants (first wins)', () => {
-    const state = freshState()
-    expect(parseHermesLine('session_id: abc123', state)).toEqual([
-      { type: 'session', sessionId: 'abc123' },
-    ])
-    expect(parseHermesLine('Session ID: zzz999', state)).toEqual([]) // already captured
-    expect(state.sessionId).toBe('abc123')
-
-    const state2 = freshState()
-    expect(parseHermesLine('  Session ID: cafe-42  ', state2)).toEqual([
-      { type: 'session', sessionId: 'cafe-42' },
-    ])
-    const state3 = freshState()
-    expect(parseHermesLine('session-id: dash-1', state3)).toEqual([
-      { type: 'session', sessionId: 'dash-1' },
-    ])
-  })
-
-  it('parseHermesLine captures a JSON frame carrying session_id', () => {
-    const state = freshState()
-    const evs = parseHermesLine('{"session_id":"json-7","model":"m1"}', state)
-    expect(evs).toEqual([{ type: 'session', sessionId: 'json-7', model: 'm1' }])
-    expect(state.sessionId).toBe('json-7')
-  })
-
-  it('plain response lines become message events and accumulate into the summary', () => {
-    const state = freshState()
-    expect(parseHermesLine('The answer is 42.', state)).toEqual([
-      { type: 'message', text: 'The answer is 42.\n' },
-    ])
-    parseHermesLine('Done.', state)
-    expect(state.lastText).toBe('The answer is 42.\nDone.\n')
-  })
-
-  it('a JSON-shaped response line that is not a frame passes through as text', () => {
-    const state = freshState()
-    const evs = parseHermesLine('{"result": [1, 2, 3]}', state)
-    expect(evs).toEqual([{ type: 'message', text: '{"result": [1, 2, 3]}\n' }])
-  })
-
-  it('the session-line regex matches the sanctioned base form exactly', () => {
-    expect(HERMES_SESSION_LINE.exec('session_id: 0f3a-9b')?.[1]).toBe('0f3a-9b')
-    expect(HERMES_SESSION_LINE.test('the session_id: 0f3a was used')).toBe(false) // anchored — never mid-prose
+    expect(spawn.run.input).toBe('You are on the docs team.\n\ndo the task')
   })
 
   // ── ChatGPT subscription (openai-codex) ────────────────────────────────────

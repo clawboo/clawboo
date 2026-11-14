@@ -49,6 +49,28 @@ describe('orchestration event log', () => {
     expect(e!.data).toContain('ok')
   })
 
+  it("stores a comment's and a team chat post's author readable", () => {
+    // The scrub runs before storage, so a masked author could never be read back.
+    appendEvent(db, {
+      kind: 'comment_added',
+      taskId: 't3',
+      data: { authorType: 'user', body: 'looks good' },
+    })
+    appendEvent(db, {
+      kind: 'team_chat_post',
+      taskId: 't3',
+      data: { roomId: 'r1', seq: 1, authorAgentId: 'agent-1', postKind: 'peer' },
+    })
+    const [comment, post] = listEvents(db, { taskId: 't3' })
+    expect(JSON.parse(comment!.data)).toEqual({ authorType: 'user', body: 'looks good' })
+    expect(JSON.parse(post!.data)).toEqual({
+      roomId: 'r1',
+      seq: 1,
+      authorAgentId: 'agent-1',
+      postKind: 'peer',
+    })
+  })
+
   it('preserves token COUNTS (inputTokens/outputTokens are not secrets)', () => {
     appendEvent(db, {
       kind: 'cost',

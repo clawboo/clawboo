@@ -184,7 +184,7 @@ The built-in model for each provider is listed in [Clawboo Native](/runtimes/nat
 
 ## Add Claude Code, Codex or Hermes
 
-Each of these is a separate program. Clawboo installs it for you from **Settings** > **Runtimes**; click **Install** on its row, then **Install** in the panel that opens. Claude Code's Agent SDK and Codex go into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), with no `sudo`. Then connect it:
+Each of these is a separate program. Clawboo installs it for you from **Settings** > **Runtimes**; click **Install** on its row, then **Install** in the panel that opens. Claude Code's Agent SDK, Codex and Hermes go into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), with no `sudo`. Then connect it:
 
 <Tabs>
 
@@ -202,7 +202,7 @@ Needs a ChatGPT plan. Click **Sign in** on the row, then **Sign in with ChatGPT*
 
 <Tab title="Hermes">
 
-Needs Python 3.11 to 3.13 and one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. A Hermes installed without its live mode reads **Update available**; click **Update**, then **Update Hermes**. See [Hermes](/runtimes/hermes).
+Click **Install** on the row: Clawboo installs the current Hermes release with its own Python, so you need no Python of your own. Hermes then needs one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. A Hermes that is not Clawboo's own install of the current release, such as one installed earlier with pip or pipx, reads **Update needed**; click **Update**, then **Update Hermes**. **Manage** on a connected Hermes row shows its gateway, the one Hermes process all Hermes agents run in, with **Restart**. See [Hermes](/runtimes/hermes).
 
 </Tab>
 
@@ -251,9 +251,10 @@ After a runtime's **Disconnect**:
 
 - **Clawboo's encrypted vault.** Every key you connect is saved in `~/.clawboo/secrets/runtime-keys.json` (in the folder `CLAWBOO_HOME` names, if you set it), encrypted with AES-256-GCM. The master key sits next to it in `secrets/master.key`, readable only by your user. The encryption protects the key file when it is copied on its own, in a backup or a sync folder. It does not protect against a program running as your user, which can read the master key too.
 - **Plain-text copies for OpenClaw.** A key you save on the **Providers** page is also written, unencrypted, to `~/.openclaw/.env` and to every existing OpenClaw agent's `auth-profiles.json`, because the OpenClaw Gateway reads keys from there. Clawboo writes those files readable only by your user account, and creates `~/.openclaw` for this even if you never installed OpenClaw. **Set up OpenClaw** copies the key it reuses there too. **Disconnect** on the **Providers** page removes these copies.
-- **Vault only.** A key you paste on a runtime's row under **Runtimes**, or during onboarding, stays only in the vault until **Set up OpenClaw** reuses it.
+- **Plain-text copies for Hermes.** Every OpenRouter, Anthropic or OpenAI key Hermes reads, wherever it came from (a runtime's row, the **Providers** page or Clawboo's environment), is written to each Hermes agent's profile `.env`, because Hermes's gateway reads keys only from there. Clawboo writes it before each of that agent's runs and at every gateway start, readable only by your user, and leaves it there between runs for the jobs Hermes runs on its own. A key you remove or replace anywhere in Clawboo, on any row or under **Providers**, leaves or changes every agent's profile right away. See [Keys and secrets on disk](/operating/security#keys-and-secrets-on-disk).
+- **Otherwise vault only.** A key you paste on a runtime's row under **Runtimes**, or during onboarding, stays only in the vault until **Set up OpenClaw** reuses it or Hermes reads it.
 - **ChatGPT sign-ins stay with each tool.** Codex keeps its sign-in in `~/.codex/auth.json`, Hermes in `~/.hermes/auth.json`, and OpenClaw in its own files. Clawboo copies the Codex and Hermes sign-ins into each agent's own folder for its runs.
-- **Keys from your environment.** Clawboo also uses a key exported in the shell you start Clawboo from, such as `ANTHROPIC_API_KEY`. Such a key makes runtimes read **Connected**, and its row on the **Providers** page reads **Connected** too, with "From `ANTHROPIC_API_KEY` in Clawboo's environment" and no **Update** or **Disconnect**: change it where Clawboo is started. When you also saved a key for that provider, the row says the one in the environment is used first, and **Disconnect** removes only the saved one. Setting up OpenClaw reuses a saved key, never one only the environment holds, so it does not write that key to disk.
+- **Keys from your environment.** Clawboo also uses a key exported in the shell you start Clawboo from, such as `ANTHROPIC_API_KEY`. Such a key makes runtimes read **Connected**, and its row on the **Providers** page reads **Connected** too, with "From `ANTHROPIC_API_KEY` in Clawboo's environment" and no **Update** or **Disconnect**: change it where Clawboo is started. When you also saved a key for that provider, the row says the one in the environment is used first, and **Disconnect** removes only the saved one. Setting up OpenClaw reuses a saved key, never one only the environment holds, so it does not write that key to disk. Hermes does: its profiles get the key too.
 
 Deleting `~/.clawboo` removes the vault but not the plain-text copies, and Clawboo still reads keys from `~/.openclaw/.env` afterwards. To remove keys for good, disconnect them on the **Providers** page first. See [Data and state](/operating/data-and-state) for every file Clawboo writes.
 

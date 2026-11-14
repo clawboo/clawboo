@@ -40,7 +40,8 @@ or as a connected client in OpenClaw's case.
 - Know how the runtime runs without a person at the keyboard (an SDK call, a CLI with machine-readable output, a
   long-lived connection) and what it reports: text deltas, tool calls, token usage, cost.
 - Read [Runtime adapters](/reference/packages/adapters) to see how the six existing adapters differ, and pick the
-  closest one to copy. For a CLI or an SDK that runs once per task, that is Claude Code, Codex or Hermes.
+  closest one to copy. For a CLI or an SDK that runs once per task, that is Claude Code or Codex; for a
+  long-lived server the host supervises and drives over HTTP, Hermes.
 
 ## Write the adapter
 
@@ -69,7 +70,8 @@ means `none`, and no `runtimeClass` means a one-shot run.
 <Warning>
 
 `toolApproval: true` says the runtime can ask before it uses a tool. It does not mean Clawboo's runs are gated:
-Clawboo drives Claude Code, Codex and Hermes with their own approval prompts and sandboxes turned off. See
+Clawboo drives Claude Code and Codex with their own approval prompts and sandboxes turned off, and Hermes asks
+only before the commands its own policy flags. See
 [What agents can do](/concepts/permissions) before you describe a runtime's safety anywhere.
 
 </Warning>

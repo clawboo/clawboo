@@ -353,7 +353,9 @@ export async function schedulesCreatePOST(req: Request, res: Response): Promise<
   if (
     typeof body.cronSpec !== 'string' ||
     !body.cronSpec ||
-    (body.source !== 'clawboo-routine' && body.source !== 'openclaw-gateway-cron') ||
+    (body.source !== 'clawboo-routine' &&
+      body.source !== 'openclaw-gateway-cron' &&
+      body.source !== 'hermes-gateway-jobs') ||
     (body.domain !== 'team-task' && body.domain !== 'runtime-own-life') ||
     (body.target !== undefined && body.target !== 'team' && body.target !== 'agent') ||
     (teamRoutine

@@ -34,35 +34,36 @@ new one are on [Write a runtime adapter](/reference/packages/executor).
 
 ## At a glance
 
-|                                  | Claude Code                | Codex                                 | Hermes                                                   | Clawboo Native                                 | OpenClaw                        | Mock           |
-| -------------------------------- | -------------------------- | ------------------------------------- | -------------------------------------------------------- | ---------------------------------------------- | ------------------------------- | -------------- |
-| Package                          | `adapter-claude-code`      | `adapter-codex`                       | `adapter-hermes`                                         | `adapter-native`                               | `adapter-openclaw`              | `adapter-mock` |
-| Runtime id                       | `claude-code`              | `codex`                               | `hermes`                                                 | `clawboo-native`                               | `openclaw`                      | `clawboo-mock` |
-| What runs                        | Claude Agent SDK `query()` | `codex app-server`, else `codex exec` | `hermes acp`, else `hermes chat -q`, one process per run | Clawboo's own loop over the provider API       | the server's Gateway connection | nothing        |
-| Healthy when                     | `claude` is found          | `codex` is found                      | `hermes` is found                                        | a provider key or a set-up Ollama is connected | `agents.list()` answers in 2 s  | always         |
-| Steering                         | live                       | live (not on `codex exec`)            | live (stop and resume on `hermes chat`)                  | live                                           | live                            | none           |
-| Model change mid-run             | no                         | no                                    | no                                                       | yes, for later turns                           | yes                             | no             |
-| Cost the adapter reports         | provider USD               | tokens, no price                      | tokens, no price (nothing on `hermes chat`)              | Clawboo's list price, or tokens                | nothing                         | nothing        |
-| Agent state                      | your own home folder       | a managed `CODEX_HOME` per agent      | a managed `HERMES_HOME` per agent                        | a managed folder per agent                     | the Gateway's own folders       | none           |
-| Clawboo MCP servers              | HTTP, in the SDK options   | the home's `config.toml`              | the home's `config.yaml` `mcp_servers`                   | in-process                                     | the Gateway's `mcp.servers`     | none           |
-| Approval prompts in Clawboo runs | off                        | off                                   | off                                                      | asked per shell command                        | Gateway exec approvals          | none           |
+|                                  | Claude Code                | Codex                                 | Hermes                                                                  | Clawboo Native                                 | OpenClaw                        | Mock           |
+| -------------------------------- | -------------------------- | ------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------- | ------------------------------- | -------------- |
+| Package                          | `adapter-claude-code`      | `adapter-codex`                       | `adapter-hermes`                                                        | `adapter-native`                               | `adapter-openclaw`              | `adapter-mock` |
+| Runtime id                       | `claude-code`              | `codex`                               | `hermes`                                                                | `clawboo-native`                               | `openclaw`                      | `clawboo-mock` |
+| What runs                        | Claude Agent SDK `query()` | `codex app-server`, else `codex exec` | one Hermes gateway Clawboo supervises; a run is a `POST /v1/runs` on it | Clawboo's own loop over the provider API       | the server's Gateway connection | nothing        |
+| Healthy when                     | `claude` is found          | `codex` is found                      | Clawboo's own install is there and its gateway has not failed           | a provider key or a set-up Ollama is connected | `agents.list()` answers in 2 s  | always         |
+| Steering                         | live                       | live (not on `codex exec`)            | live                                                                    | live                                           | live                            | none           |
+| Model change mid-run             | no                         | no                                    | no                                                                      | yes, for later turns                           | yes                             | no             |
+| Cost the adapter reports         | provider USD               | tokens, no price                      | tokens, no price                                                        | Clawboo's list price, or tokens                | nothing                         | nothing        |
+| Agent state                      | your own home folder       | a managed `CODEX_HOME` per agent      | a Hermes profile per agent in the gateway's home                        | a managed folder per agent                     | the Gateway's own folders       | none           |
+| Clawboo MCP servers              | HTTP, in the SDK options   | the home's `config.toml`              | the profile's `config.yaml` `mcp_servers`, one live URL each            | in-process                                     | the Gateway's `mcp.servers`     | none           |
+| Approval prompts in Clawboo runs | off                        | off                                   | Hermes's own policy, asked on a Clawboo card                            | asked per shell command                        | Gateway exec approvals          | none           |
 
-"Found" means the binary is on `PATH` or in a per-user install folder (for Hermes, the pip and pipx user
-folders). A managed home lives at `<clawboo home>/runtimes/<runtime id>/<agent id>`. A Codex or Hermes run with no
-agent identity gets a throwaway temporary home instead.
+"Found" means the binary is on `PATH` or in a per-user install folder. Hermes counts only Clawboo's own install in
+its runtimes folder. A managed home lives at `<clawboo home>/runtimes/<runtime id>/<agent id>`; a Hermes agent's
+state lives in its profile, `<clawboo home>/runtimes/hermes/_gateway/profiles/cb-<agent id>`. A Codex run with no
+agent identity gets a throwaway temporary home instead, and a Hermes run a throwaway profile.
 
 ## What every adapter shares
 
 - **Construction.** The Claude Code, Codex, Hermes and Native adapters take `(driverFactory, healthCheck?)` and
-  create one driver per run; Hermes also takes `{ transport }`, read on every `capabilities()` call (see
-  [Hermes](#hermes)). The OpenClaw adapter takes the Gateway client. The mock takes nothing.
+  create one driver per run. The OpenClaw adapter takes the Gateway client. The mock takes nothing.
 - **Health.** `health()` races the check against two seconds. A timeout or a throw reads as unhealthy.
 - **Runs.** `start()` returns `runId: null` (the mock returns `mock-<session key>`). `events()` subscribes when
   called, binds the run id from the first frame that carries one (falling back to the session key), and buffers
   through `createAsyncQueue`.
 - **Control.** `abort()`, `setModel()` and `writeContext()` go to the run's driver. The Claude Code, Codex and
-  Hermes drivers ignore `setModel()`, because the model is fixed when the run starts, and their `writeContext()`
-  writes a file into the run's working folder (nothing when the run has none).
+  Hermes drivers ignore `setModel()`, because the model is fixed when the run starts. The Claude Code and Codex
+  drivers' `writeContext()` writes a file into the run's working folder (nothing when the run has none); the
+  Hermes driver's does nothing, since a run's context rides its input.
 - **Steering.** The per-run adapters steer through `steerThroughDriver`. Their `sessionCodec` serializes the
   session key and the last native session id.
 - **Server wiring.** `adapterFactoryFor(id)` in `apps/web/server/lib/runtimes/index.ts` builds the non-OpenClaw
@@ -76,8 +77,10 @@ All five real adapters declare `toolApproval: true`, which describes the runtime
 - Claude Code runs with `permissionMode: 'bypassPermissions'`.
 - Codex runs with approval policy `never` and sandbox `danger-full-access`; its `codex exec` fallback passes
   `--dangerously-bypass-approvals-and-sandbox`.
-- Hermes runs with `--yolo` and `--accept-hooks`; over ACP, with `HERMES_YOLO_MODE=1`, the `dont_ask` edit
-  mode, and every permission request answered with allow-once.
+- Hermes follows its own approval policy (`approvals.mode` and, for its own jobs, `approvals.cron_mode`, which
+  Clawboo sets before every run to the person's own choice, else `manual` and `deny`; always those with agents as
+  their own user). Each command it flags waits on a Clawboo approval card, and the answer goes back to Hermes as
+  `once` or `deny`. The card is a check, not a lock: the agent can reach its own profile's key and settings.
 - Clawboo Native asks a person before every shell command, and its shell tool is off unless an agent's config
   turns it on.
 - OpenClaw decides which commands ask first through its own exec policy; Clawboo shows those requests and relays
@@ -91,16 +94,15 @@ permissions. See [What agents can do](/concepts/permissions).
 The adapter reports what the runtime gives it; the host fills the gaps with estimates. The task runner serves
 `POST /api/runtimes/<id>/run` and agent routines, and team chat covers team turns and delegations.
 
-| Runtime                      | The adapter emits                              | Task runner records                         | Team chat records           |
-| ---------------------------- | ---------------------------------------------- | ------------------------------------------- | --------------------------- |
-| Claude Code                  | a `cost` event with the SDK's `total_cost_usd` | the reported USD                            | the reported USD            |
-| Codex                        | token usage with `costUsd: null`               | an estimate from the tokens                 | an estimate from the tokens |
-| Hermes, over ACP             | token usage with `costUsd: null`               | an estimate from the tokens                 | an estimate from the tokens |
-| Hermes, on `hermes chat`     | nothing                                        | an estimate from characters, plus a warning | an estimate from characters |
-| Clawboo Native, priced model | per-turn USD from Clawboo's price list         | the reported USD                            | the reported USD            |
-| Clawboo Native, other model  | token usage with `costUsd: null`               | an estimate from the tokens                 | an estimate from the tokens |
-| Clawboo Native, local Ollama | per-turn `costUsd: 0` with `local: true`       | $0, recorded as `local`                     | $0, recorded as `local`     |
-| OpenClaw                     | nothing                                        | not run (the task runner refuses OpenClaw)  | an estimate from characters |
+| Runtime                      | The adapter emits                              | Task runner records                        | Team chat records           |
+| ---------------------------- | ---------------------------------------------- | ------------------------------------------ | --------------------------- |
+| Claude Code                  | a `cost` event with the SDK's `total_cost_usd` | the reported USD                           | the reported USD            |
+| Codex                        | token usage with `costUsd: null`               | an estimate from the tokens                | an estimate from the tokens |
+| Hermes                       | token usage with `costUsd: null`               | an estimate from the tokens                | an estimate from the tokens |
+| Clawboo Native, priced model | per-turn USD from Clawboo's price list         | the reported USD                           | the reported USD            |
+| Clawboo Native, other model  | token usage with `costUsd: null`               | an estimate from the tokens                | an estimate from the tokens |
+| Clawboo Native, local Ollama | per-turn `costUsd: 0` with `local: true`       | $0, recorded as `local`                    | $0, recorded as `local`     |
+| OpenClaw                     | nothing                                        | not run (the task runner refuses OpenClaw) | an estimate from characters |
 
 On both paths, a run that ends without a cost report (a Claude Code run that fails first, say) is estimated from
 characters; on the task runner it also logs a `spend_unreported` warning unless it was aborted. An OpenClaw
@@ -143,32 +145,51 @@ refused model on a run that named none adds that the Codex CLI is too old for th
 
 ## Hermes
 
-Two drivers share one run setup (`resolveHermesRun`: the prompt, the pinned provider and model, the session to
-resume, the environment), and `createHermesRunDriver` in `hermesTransport.ts` picks one per run. The adapter's
-`capabilities()` follows the same choice: `streaming: true` and `steering: 'live'` over ACP, `streaming: false`
-and `steering: 'interrupt-resume'` otherwise.
+The driver lives in `apps/web/server/lib/runtimes/hermes/`. It runs every Hermes agent through one long-lived
+Hermes gateway that the server supervises, the way OpenClaw agents live in OpenClaw's Gateway. The adapter
+declares `streaming: true`, `steering: 'live'`, `toolApproval: true`, `nativeChannels: 'none'` and
+`nativeScheduler: true`.
 
-- **Over ACP** (`hermesAcpDriver.ts`, the default), the driver runs `hermes acp` and speaks the Agent Client
-  Protocol on stdio through the agent-neutral client in `runtimes/acp/` (`connection.ts` for JSON-RPC,
-  `updates.ts` for session updates and the prompt result). Session updates become message, reasoning, tool-call
-  and tool-result frames as they arrive, and the prompt result's token usage becomes the `cost` event. A steer is
-  `/steer <text>` sent as a second prompt to the running session; Hermes's acknowledgement is kept out of the
-  output, and a steer that came while Hermes wrote its final answer is sent as one more turn. Hermes answers a
-  failed turn as `end_turn` without usage, so a turn with no usage fails with the error lines Hermes logged.
-  A Hermes whose ACP handshake fails falls back to the quiet driver for that run, and the next ten minutes of runs
-  skip the attempt (`CLAWBOO_HERMES_TRANSPORT` overrides the choice).
-- **On `hermes chat`** (`hermesDriver.ts`), the driver runs `hermes chat -q <prompt> -Q` once per run. Response
-  lines become message frames, the `session_id:` line on stderr becomes the resume handle, and the final result
-  is built from the exit code. Hermes reports no tool calls and no token usage there, so the run shows no tool
-  activity and emits no `cost` event. Steering is stop and resume: the driver stops the process and resumes the
-  same session with the message as the next input, and the host still sees one run. A passive steer is
-  refused, because it must never stop a run. Each agent gets a managed `HERMES_HOME` where its skills and memory persist, and the driver writes all
-  four Clawboo MCP servers into a marked `mcp_servers` block of that home's `config.yaml`, the only place `hermes chat` reads them from. When that file cannot carry them, the ACP driver declares them in `session/new` instead. Hermes ships its own scheduler, but Clawboo never
-  runs it for teammates.
+- **Install** (`release.ts`, `install.ts`). `release.ts` pins the release: its tag, commit, tarball sha256 and
+  extras. `install.ts` installs it into Clawboo's runtimes folder at `hermes/<tag>`, with the uv and CPython builds
+  the release's own `pm/lock.json` pins, each checked against its sha256, and runs `uv sync --frozen` from the
+  release's lock file. Clawboo runs only this install; a `hermes` on `PATH` is not used.
+- **Gateway** (`gateway.ts`). One `hermes gateway run --external-supervisor -v` with only its API server on, on
+  `127.0.0.1` (port 8642, the next free one when it is taken, or `CLAWBOO_HERMES_GATEWAY_PORT`). It starts with a
+  short allow-listed environment, never the server's own. The supervisor starts it on demand and at boot when
+  there are Hermes agents, restarts it with backoff after an exit it did not ask for, and stops it with the
+  server. Health is a keyed call to its API answering, not the process being alive.
+- **Profiles** (`profiles.ts`). Each agent is a Hermes profile, `profiles/cb-<agent id>` in the gateway's home,
+  reached at `/p/<profile>/` with its own key, derived from one master key in the vault. Before each run the
+  driver writes the profile's `.env` (its key, the provider keys, and the run's folder as `TERMINAL_CWD`) and
+  keeps three things in its `config.yaml`: a marked `mcp_servers` block, the pinned `terminal:` keys, and
+  `approvals.mode` and `approvals.cron_mode`, pinned before each run to the person's own choice, else `manual`
+  and `deny` (always those with agents as their own user). When the run lets go of the profile, `TERMINAL_CWD`
+  points at the agent's jobs folder, `<work folder>/agents/<agent id>/hermes-jobs`. An agent's old per-agent home moves into its profile on
+  its first run, with its memory, skills and sessions.
+- **Runs** (`gatewayDriver.ts`, `client.ts`, `sse.ts`, `runSettings.ts`). A run is `POST /p/<profile>/v1/runs`
+  with the input (the context block, then the message), a session id, and the provider and model
+  `runSettings.ts` picks. Its server-sent events become frames as they arrive: `message.delta` is streamed text,
+  `tool.started` and `tool.completed` are a tool call and its result (a preview of the arguments, and whether it
+  failed, but no output), and `run.completed` carries the token usage. A steer is `POST .../steer`, which
+  reaches the turn after its current tool calls or before its next model call; one that arrives while Hermes
+  writes its final answer runs as a follow-up turn in the same run. A passive steer goes in only while a tool
+  call is open, so it never buys a turn of its own. Stop is `POST .../stop`. `failure.ts` reads a provider's
+  error code out of a failed run's reason.
+- **Approvals** (`approvals.ts`). Each `approval.request` on a run's stream becomes a `run_command` approval card
+  of kind `hermes`, and the answer goes back to Hermes as `once` or `deny`. "Always" is never sent: Hermes would
+  keep it in its own allow list, out of Clawboo's sight.
+- **Clawboo's MCP servers.** The gateway connects to them once per profile and keeps the connection, so a
+  profile's `mcp_servers` block lists one live URL per server that names only the agent (`live=1`, signed). The
+  server binds each call to the agent's run in progress. A run with no identity home (the reviewer's) gets a
+  throwaway profile with its own per-run URLs, removed when it ends.
 
-Hermes works one task at a time from Clawboo's board: its own task board is not synced, and Clawboo never starts
-`hermes gateway`, so Hermes's chat channels stay off. The home is seeded once from your `~/.hermes/config.yaml`;
-with no config, the driver picks `--provider` from whichever key is connected (OpenRouter, Anthropic or OpenAI).
+Hermes works one task at a time from Clawboo's board: its own task board is not synced. Its chat channels stay
+off, because the gateway runs only its API server. Its own scheduled jobs are listed and changed through the
+`hermes-gateway-jobs` schedule source (see [Capability and schedule sources](/internals/seams)). A profile's
+`config.yaml` is copied once from your `~/.hermes/config.yaml`; when it names no provider, a run asks for the one
+whose key is connected (OpenRouter, Anthropic or OpenAI), or for the ChatGPT sign-in. See
+[Hermes](/runtimes/hermes).
 
 ## Clawboo Native
 

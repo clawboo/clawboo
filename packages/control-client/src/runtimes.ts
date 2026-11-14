@@ -53,15 +53,25 @@ export interface RuntimeStatus {
    *  manager, or configured with OLLAMA_BASE_URL). It readies the runtime without
    *  a key, so `hasCredential` can be false while `connectionState` is 'ready'. */
   ollamaConnected?: boolean
-  /** Codex-only: the installed CLI cannot read the ChatGPT plan's current models,
-   *  so its runs fail until it is updated (reinstalling updates it). */
+  /** Codex: the installed CLI cannot read the ChatGPT plan's current models, so
+   *  its runs fail until it is updated (reinstalling updates it). Hermes: Clawboo's
+   *  own install of the pinned release is missing or older, so runs need it. */
   updateRequired?: boolean
   /** Codex-only: the installed CLI's version, when known. */
   cliVersion?: string | null
-  /** Hermes-only: this Hermes was installed without its ACP mode (the `acp`
-   *  extra), so its runs report only at the end and a comment mid-run stops and
-   *  resumes them. Reinstalling adds it. Absent until Hermes has been asked. */
-  acpMissing?: boolean
+  /** Hermes-only: the gateway Clawboo supervises (state, port, uptime, version,
+   *  why it stopped). Never a key. */
+  hermesGateway?: {
+    state: 'stopped' | 'starting' | 'running' | 'restarting' | 'failed' | 'not-installed'
+    port: number | null
+    pid: number | null
+    startedAt: number | null
+    restarts: number
+    lastError: string | null
+    version: string | null
+  }
+  /** Hermes-only: the version of Clawboo's own install, or null. */
+  hermesVersion?: string | null
   installCommand?: string | null
   builtIn?: boolean
   docsUrl?: string
@@ -74,7 +84,7 @@ export interface RuntimeStatus {
     toolApproval?: boolean
     /** How a comment reaches a running task: `live` joins the turn,
      *  `interrupt-resume` stops and resumes the run, `none` (or absent) waits for
-     *  the next run. Hermes's follows the way its runs go now. */
+     *  the next run. */
     steering?: 'live' | 'interrupt-resume' | 'none'
     models?: string[]
     // Integration-depth seam (executor Capabilities). `runtimeClass` drives the

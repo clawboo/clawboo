@@ -21,13 +21,14 @@ function runtimeBinaries(): { runtime: string; path: string }[] {
     const bin = resolveRuntimeBin(name)
     if (bin) out.push({ runtime: name, path: bin })
   }
-  // A runtime Clawboo installed into its runtimes folder starts through a
-  // launcher that runs a fixed command (the Node.js that installed it, or
-  // Hermes's own Python). The agent user must be able to run both.
+  // The runtimes Clawboo installed: each launcher and what it runs. Hermes's
+  // launcher runs a script on the Python it was installed with. The agent user
+  // must be able to run each.
   for (const name of ['openclaw', 'codex', 'hermes']) {
     const launch = ownedRuntimeLaunch(name)
     if (!launch) continue
-    for (const p of [launch.launcher, launch.command]) {
+    const interpreter = launch.record.interpreter?.path
+    for (const p of [launch.launcher, launch.command, ...(interpreter ? [interpreter] : [])]) {
       if (!out.some((b) => b.runtime === name && b.path === p)) out.push({ runtime: name, path: p })
     }
   }

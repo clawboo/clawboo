@@ -27,9 +27,9 @@ import {
   type HostTransport,
 } from './client'
 import { resolveAgentUserConfig, type AgentUserConfig } from './config'
+import { keepRuntimesDirApartFrom } from '../runtimeFolder'
 import { setUnavailableAgentBinaries } from '../runtimes/spawner'
 import type { HelloFrame } from './protocol'
-import { keepRuntimesDirApartFrom } from '../runtimeFolder'
 import { peekAgentHost, setActiveAgentHost } from './state'
 import { currentUserName, killAllAgentProcesses, lookupUser, socketProblem } from './system'
 import { installAgentWorktreeIo } from './worktreeIo'
@@ -223,6 +223,7 @@ export async function startAgentUser(opts: StartAgentUserOptions): Promise<Check
   if (!report.ok || !report.client || !report.hello || !report.workDir) return report
 
   setActiveAgentHost({ client: report.client, hello: report.hello, config })
+  // The runtimes folder is never in the agent user's home, which agents can write.
   keepRuntimesApartFromAgentHome()
   // Task checkouts and the agent user's copies of repositories: their git and
   // file access go through the host from here on.

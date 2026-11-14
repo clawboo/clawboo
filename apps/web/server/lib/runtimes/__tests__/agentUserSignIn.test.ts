@@ -28,9 +28,23 @@ const { CODEX_AGENT_SIGN_IN_MESSAGE, createCodexDriver, prepareCodexHome, seedCo
 const { invalidateCodexAuthCache, isCodexLoggedIn } = await import('../codexAuth')
 const { getCodexModels, invalidateCodexModelsCache } = await import('../codexModels')
 const { isHermesCodexAuthPresent } = await import('../hermesAuth')
-const { HERMES_AGENT_SIGN_IN_MESSAGE, createHermesDriver, resolveHermesRun } =
-  await import('../hermesDriver')
+const { HERMES_AGENT_SIGN_IN_MESSAGE, resolveHermesRunSettings } =
+  await import('../hermes/runSettings')
+const { createHermesGatewayDriver } = await import('../hermes/gatewayDriver')
+const { provisionProfile, readAsHermes } = await import('../hermes/profiles')
 const { provisionHermesHome, seedHermesAuth } = await import('../hermesHome')
+type Supervisor = import('../hermes/gateway').HermesGatewaySupervisor
+
+/** A Hermes profile in the gateway's home in agent space, as a run provisions it. */
+const profileOpts = (over: { providerEnv?: Record<string, string> } = {}) => ({
+  gatewayHome: path.join(agentHome, 'runtimes', 'hermes', '_gateway'),
+  profile: 'cb-a1',
+  legacyHome: null,
+  key: 'p'.repeat(64),
+  cwd: null,
+  providerEnv: over.providerEnv ?? {},
+  mcpServers: { 'clawboo-tasks': { url: 'http://127.0.0.1:9/api/mcp/tasks?live=1' } },
+})
 
 const posix = process.platform !== 'win32'
 
@@ -143,6 +157,21 @@ describe.runIf(posix)('seeding a run home with agents on their own OS user', () 
     expect(fs.readFileSync(path.join(home, 'config.yaml'), 'utf8')).not.toContain(
       'sk-person-secret',
     )
+    // Nor into a profile in the Hermes gateway's home.
+    const profile = await provisionProfile(profileOpts())
+    expect(fs.readFileSync(path.join(profile.dir, 'config.yaml'), 'utf8')).not.toContain(
+      'sk-person-secret',
+    )
+  })
+
+  it("never takes the person's own approval settings: a profile asks before flagged commands", async () => {
+    put(
+      path.join(operatorHome, '.hermes', 'config.yaml'),
+      'approvals:\n  mode: "off"\n  cron_mode: approve\n',
+    )
+    const profile = await provisionProfile(profileOpts())
+    const body = fs.readFileSync(path.join(profile.dir, 'config.yaml'), 'utf8')
+    expect(readAsHermes(body)).toMatchObject({ approvalMode: 'manual', cronMode: 'deny' })
   })
 
   it('copies no login at all into a run that has an API key', async () => {
@@ -154,6 +183,21 @@ describe.runIf(posix)('seeding a run home with agents on their own OS user', () 
     const out = await provisionHermesHome(home, { hasApiKey: true })
     expect(out.seededAuth).toBe(false)
     expect(fs.existsSync(path.join(home, 'auth.json'))).toBe(false)
+    const profile = await provisionProfile(
+      profileOpts({ providerEnv: { OPENROUTER_API_KEY: 'k' } }),
+    )
+    expect(fs.existsSync(path.join(profile.dir, 'auth.json'))).toBe(false)
+  })
+
+  it("seeds a gateway profile from the agent user's own login only", async () => {
+    put(path.join(operatorHome, '.hermes', 'auth.json'), hermesLogin('person'))
+    const without = await provisionProfile(profileOpts())
+    expect(fs.existsSync(path.join(without.dir, 'auth.json'))).toBe(false)
+    put(path.join(agentHome, '.hermes', 'auth.json'), hermesLogin('agents'))
+    const withLogin = await provisionProfile(profileOpts())
+    expect(fs.readFileSync(path.join(withLogin.dir, 'auth.json'), 'utf8')).toBe(
+      hermesLogin('agents'),
+    )
   })
 })
 
@@ -169,14 +213,13 @@ describe.runIf(posix)('a run with neither the agents login nor an API key', () =
 
   it('fails a Hermes subscription run saying why, even with the person signed in', async () => {
     put(path.join(operatorHome, '.hermes', 'auth.json'), hermesLogin('person'))
-    const home = path.join(agentHome, 'runtimes', 'hermes', 'a1')
-    const provisioned = await provisionHermesHome(home)
+    const profile = await provisionProfile(profileOpts())
     for (const providerHint of ['openai-codex', null]) {
       await expect(
-        resolveHermesRun(
+        resolveHermesRunSettings(
           { agentId: 'a1', sessionKey: 'agent:a1:team:t1', message: 'go' },
           { providerHint },
-          provisioned,
+          profile.dir,
         ),
       ).rejects.toThrow(HERMES_AGENT_SIGN_IN_MESSAGE)
     }
@@ -188,11 +231,27 @@ describe.runIf(posix)('a run with neither the agents login nor an API key', () =
     const codex = createCodexDriver(opts, { homeDir: runHome })
     codex.onEvent((ev) => results.push(ev as { type: string; errorMessage?: string }))
     await codex.start()
-    const hermes = createHermesDriver(opts, {
-      homeDir: path.join(agentHome, 'runtimes', 'hermes', 'a1'),
-    })
+    // The gateway is already up; the run stops before asking it for anything.
+    const asked: string[] = []
+    const supervisor = {
+      ensureRunning: async () => ({
+        baseUrl: 'http://127.0.0.1:9',
+        home: path.join(agentHome, 'runtimes', 'hermes', '_gateway'),
+        masterKey: 'm'.repeat(64),
+        port: 9,
+      }),
+      status: () => ({ pid: 1 }),
+      profileClient: () =>
+        new Proxy({}, { get: (_t, name) => () => asked.push(String(name)) }) as never,
+    } as unknown as Supervisor
+    const hermes = createHermesGatewayDriver(
+      opts,
+      { homeDir: path.join(agentHome, 'runtimes', 'hermes', 'a1') },
+      { supervisor },
+    )
     hermes.onEvent((ev) => results.push(ev as { type: string; errorMessage?: string }))
     await hermes.start()
+    expect(asked).toEqual([])
     const errors = results.filter((e) => e.type === 'result').map((e) => e.errorMessage)
     expect(errors).toEqual([CODEX_AGENT_SIGN_IN_MESSAGE, HERMES_AGENT_SIGN_IN_MESSAGE])
     expect(spawns).toHaveLength(0)
@@ -206,29 +265,29 @@ describe.runIf(posix)('a run with neither the agents login nor an API key', () =
       }
       vi.stubEnv('GEMINI_API_KEY', undefined)
       vi.stubEnv('GOOGLE_API_KEY', undefined)
-      const home = path.join(agentHome, 'runtimes', 'hermes', 'a1')
-      const provisioned = await provisionHermesHome(home)
+      const profile = await provisionProfile(profileOpts())
       const opts = { agentId: 'a1', sessionKey: 'agent:a1:team:t1', message: 'go' }
       await expect(
-        resolveHermesRun(opts, { providerHint: 'openai-codex' }, provisioned),
+        resolveHermesRunSettings(opts, { providerHint: 'openai-codex' }, profile.dir),
       ).rejects.toThrow(HERMES_AGENT_SIGN_IN_MESSAGE)
 
       vi.stubEnv(name, 'g-test-key')
       // Hermes's `auto` picks Gemini from it.
-      const run = await resolveHermesRun(opts, {}, provisioned)
-      expect(run.providerFlag).toBeNull()
+      const run = await resolveHermesRunSettings(opts, {}, profile.dir)
+      expect(run.provider).toBeNull()
     },
   )
 
   it('lets a Hermes run with a provider key go on', async () => {
-    const home = path.join(agentHome, 'runtimes', 'hermes', 'a1')
-    const provisioned = await provisionHermesHome(home, { hasApiKey: true })
-    const run = await resolveHermesRun(
+    const profile = await provisionProfile(
+      profileOpts({ providerEnv: { OPENROUTER_API_KEY: 'sk-or-test' } }),
+    )
+    const run = await resolveHermesRunSettings(
       { agentId: 'a1', sessionKey: 'agent:a1:team:t1', message: 'go' },
       { apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or-test' } },
-      provisioned,
+      profile.dir,
     )
-    expect(run.providerFlag).toBe('openrouter')
+    expect(run.provider).toBe('openrouter')
   })
 })
 

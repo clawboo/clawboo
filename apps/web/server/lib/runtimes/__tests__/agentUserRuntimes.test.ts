@@ -16,7 +16,6 @@ import path from 'node:path'
 
 import type { CodexNativeEvent } from '@clawboo/adapter-codex'
 import type { ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
-import type { HermesDriver, HermesNativeEvent } from '@clawboo/adapter-hermes'
 import type { StartOpts } from '@clawboo/executor'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -31,9 +30,9 @@ import {
 import { createCodexAppServerDriver } from '../codexAppServerDriver'
 import { prepareCodexHome } from '../codexDriver'
 import { probeCodexAppServer } from '../codexModels'
-import { runHermesAcpCheck } from '../hermesAcpCheck'
-import { createHermesAcpDriver } from '../hermesAcpDriver'
-import { resolveHermesRun } from '../hermesDriver'
+import { HermesGatewaySupervisor } from '../hermes/gateway'
+import { listClawbooProfiles, provisionProfile } from '../hermes/profiles'
+import { resolveHermesRunSettings } from '../hermes/runSettings'
 import { detectProvider, provisionHermesHome } from '../hermesHome'
 import { listNativeSkills } from '../hermesSkills'
 import { createNativeDriver } from '../native/nativeDriver'
@@ -417,17 +416,58 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
       providerHint: 'openai-codex',
     })
     expect(out.seededAuth).toBe(true)
-    const run = await resolveHermesRun(
-      OPTS,
-      { providerHint: 'openai-codex', model: 'gpt-x', apiKeyEnv: keyed },
-      out,
-    )
-    expect(run.pickedProvider).toBe('openai-codex')
 
     // A run on its key gets no login copied in.
     const onKey = path.join(agentHome, 'runtimes', 'hermes', 'on-key')
     expect((await provisionHermesHome(onKey, { hasApiKey: true })).seededAuth).toBe(false)
     expect(fs.existsSync(path.join(onKey, 'auth.json'))).toBe(false)
+
+    // The same in a gateway profile.
+    const gatewayHome = path.join(agentHome, 'runtimes', 'hermes', 'gateway')
+    const profile = (name: string, providerHint: string | null) =>
+      provisionProfile({
+        gatewayHome,
+        profile: name,
+        legacyHome: null,
+        key: 'p'.repeat(64),
+        cwd: null,
+        providerEnv: keyed,
+        mcpServers: null,
+        providerHint,
+      })
+    const pickedProfile = await profile('cb-picked', 'openai-codex')
+    expect(fs.readFileSync(path.join(pickedProfile.dir, 'auth.json'), 'utf8')).toBe(agentsAuth)
+    const keyProfile = await profile('cb-on-key', null)
+    expect(fs.existsSync(path.join(keyProfile.dir, 'auth.json'))).toBe(false)
+  })
+
+  it("lists the gateway's profiles, and an agent's old home, through the host", async () => {
+    const { ops } = await agentModeOn()
+    const gatewayHome = path.join(agentHome, 'runtimes', 'hermes', 'gateway')
+    const legacy = path.join(agentHome, 'runtimes', 'hermes', 'agent-1')
+    fs.mkdirSync(path.join(legacy, 'memories'), { recursive: true })
+    fs.writeFileSync(path.join(legacy, 'memories', 'MEMORY.md'), 'remember me')
+    const provision = (name: string, legacyHome: string | null) =>
+      provisionProfile({
+        gatewayHome,
+        profile: name,
+        legacyHome,
+        key: 'p'.repeat(64),
+        cwd: null,
+        providerEnv: {},
+        mcpServers: null,
+      })
+
+    ops.length = 0
+    const moved = await provision('cb-agent-1', legacy)
+    // The old home is the agent's: the server cannot read it, the host can.
+    expect(ops).toContain('fs.list')
+    expect(moved.migrated).toBe(true)
+    await provision('cb-agent-2', null)
+
+    ops.length = 0
+    expect(await listClawbooProfiles(gatewayHome)).toEqual(['cb-agent-1', 'cb-agent-2'])
+    expect(ops).toContain('fs.list')
   })
 
   it("reads the managed home's subscription login through the host", async () => {
@@ -438,12 +478,12 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
       path.join(home, 'auth.json'),
       JSON.stringify({ credential_pool: { 'openai-codex': [{ access_token: 'a' }] } }),
     )
-    const run = await resolveHermesRun(
+    const run = await resolveHermesRunSettings(
       OPTS,
       { providerHint: 'openai-codex', model: 'gpt-x' },
-      { home, created: false, seededConfig: false, seededAuth: false },
+      home,
     )
-    expect(run.pickedProvider).toBe('openai-codex')
+    expect(run.provider).toBe('openai-codex')
     expect(ops).toContain('fs.read')
   })
 
@@ -456,59 +496,38 @@ describe.runIf(posix)('hermes with agents on their own OS user', () => {
     expect(ops).toEqual(['fs.list'])
   })
 
-  it('starts hermes acp through the host, in a throwaway home in agent space', async () => {
-    const { spawns } = await agentModeOn()
-    const quietHandlers: Array<(ev: HermesNativeEvent) => void> = []
-    const quiet: HermesDriver = {
-      async start() {
-        for (const h of quietHandlers) h({ type: 'result', ok: true, summary: 'quiet ran' })
-      },
-      onEvent(h) {
-        quietHandlers.push(h)
-        return () => undefined
-      },
-      async abort() {},
-      async setModel() {},
-      async writeContext() {},
-    }
-    const driver = createHermesAcpDriver(
-      OPTS,
-      { cwd: tmp, apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or-test' } },
-      {
-        fallback: () => quiet,
-        // No ACP here: the handshake fails and the run falls back.
-        command: '/bin/sh',
-        args: ['-c', 'exit 3'],
-        handshakeTimeoutMs: 5_000,
-      },
-    )
-    const seen: HermesNativeEvent[] = []
-    driver.onEvent((ev) => seen.push(ev))
-    await driver.start()
-    await until(() => seen.some((e) => e.type === 'result'))
-
-    expect(spawns).toHaveLength(1)
-    expect(spawns[0]).toMatchObject({ command: '/bin/sh', cwd: tmp, group: true })
-    const home = spawns[0]?.env['HERMES_HOME'] ?? ''
-    expect(home.startsWith(path.join(agentHome, 'runtimes', '.throwaway', ''))).toBe(true)
-    // The throwaway home (it holds a copy of the sign-in) goes with the ACP attempt.
-    await until(() => !fs.existsSync(home))
-  })
-
-  it('runs the ACP check through the host, in a throwaway home it removes', async () => {
+  it('starts the Hermes gateway through the host, in its home in agent space', async () => {
     const { spawns, ops } = await agentModeOn()
-    const answer = await runHermesAcpCheck({
-      command: '/bin/sh',
-      args: ['-c', 'echo "Hermes ACP check OK"'],
-      timeoutMs: 5_000,
+    // A stand-in for Clawboo's own `hermes`: it starts and never answers, so
+    // the start gives up and stops it.
+    const fake = path.join(tmp, 'fake-hermes')
+    fs.writeFileSync(fake, '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 })
+    const gw = new HermesGatewaySupervisor({
+      resolveCommand: () => fake,
+      masterKey: () => 'k'.repeat(64),
+      preferredPort: () => 18999,
+      isPortFree: async () => true,
+      fetch: (async () => {
+        throw new TypeError('fetch failed')
+      }) as typeof fetch,
+      startTimeoutMs: 300,
+      stopGraceMs: 200,
     })
-    expect(answer).toBe(true)
+    await expect(gw.ensureRunning()).rejects.toThrow(/did not answer/)
+    const home = path.join(agentHome, 'runtimes', 'hermes', '_gateway')
     expect(spawns).toHaveLength(1)
-    expect(spawns[0]).toMatchObject({ command: '/bin/sh', group: true })
-    const home = spawns[0]?.env['HERMES_HOME'] ?? ''
-    expect(home.startsWith(path.join(agentHome, 'runtimes', '.throwaway', ''))).toBe(true)
-    expect(fs.existsSync(home)).toBe(false)
-    expect(ops).toEqual(expect.arrayContaining(['fs.mkdir', 'fs.rm']))
+    expect(spawns[0]).toMatchObject({
+      command: fake,
+      args: ['gateway', 'run', '--external-supervisor', '-v'],
+      cwd: home,
+      group: true,
+    })
+    expect(spawns[0]?.env['HERMES_HOME']).toBe(home)
+    // The server's own identity is left to the host, which sets the agent user's.
+    expect(spawns[0]?.env['HOME']).toBeUndefined()
+    // Its files were written through the host, in agent space.
+    expect(fs.existsSync(path.join(home, 'config.yaml'))).toBe(true)
+    expect(ops).toContain('fs.write')
   })
 })
 

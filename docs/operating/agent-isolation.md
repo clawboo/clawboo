@@ -60,7 +60,7 @@ When Clawboo starts with `CLAWBOO_AGENT_USER` set, it starts one long-lived proc
 
 | What                                                                          | Runs as                              |
 | ----------------------------------------------------------------------------- | ------------------------------------ |
-| Claude Code, Codex and Hermes runs                                            | the agent user                       |
+| Claude Code and Codex runs, and the Hermes gateway every Hermes agent runs in | the agent user                       |
 | Clawboo Native's approved commands and its file tools                         | the agent user                       |
 | The verify command a task's check runs                                        | the agent user                       |
 | git in a task's checkout, and in the agent user's copy of each repository     | the agent user                       |
@@ -88,7 +88,7 @@ Agents keep every tool. They reach Clawboo's MCP servers over HTTP on `127.0.0.1
 
 `<agent home>` is the agent user's home folder: `/var/lib/clawboo-agent` on Linux and `/var/clawboo-agent` on macOS with the setup commands below.
 
-The first time Clawboo starts with the setting, it copies what agents already had into the agent user's space: each runtime home (Hermes memory and skills, Codex sessions) and each team folder. It never copies a link, a file with more than one hard link, a sign-in or key file (`auth.json`, `.env`: before, those were copies of your own logins and keys), or Clawboo Native's history, and names what it skipped in the log. The originals stay where they were, so turning the setting off again is the way back.
+The first time Clawboo starts with the setting, it copies what agents already had into the agent user's space: each runtime home (Hermes memory and skills, Codex sessions) and each team folder. A Hermes agent's copied home then moves into its profile in the Hermes gateway's home on its first run. It never copies a link, a file with more than one hard link, a sign-in or key file (`auth.json`, `.env`: before, those were copies of your own logins and keys), or Clawboo Native's history, and names what it skipped in the log. The originals stay where they were, so turning the setting off again is the way back.
 
 ### Task checkouts
 
@@ -107,7 +107,7 @@ Clawboo stops every process the agent user runs when it starts (that also reaps 
 ## Before you start
 
 - **An access token.** Clawboo refuses to start without one, because without it any program on the computer, agents included, can use Clawboo's API. The per-install token every install has is enough; only setting `STUDIO_ACCESS_TOKEN` to an empty value turns it off.
-- **Runtimes the agent user can run.** Node, Clawboo itself and each runtime (Claude Code, Codex, Hermes) must be where every user can run them. Clawboo installs runtimes into its runtimes folder, `~/clawboo-runtimes` by default (`<CLAWBOO_HOME>-runtimes` when you set `CLAWBOO_HOME`), which is inside your home: once you close your home (below), the agent user cannot reach it. Before you turn the setting on, set `CLAWBOO_RUNTIMES_DIR` to a folder outside your home and the agent user's, such as `/opt/clawboo-runtimes`, owned by you with mode `0755` (the setup commands below make it), run Clawboo on a Node every user can run (Homebrew, `/usr/local`, or the desktop app's own), and install the runtimes again from the Runtimes page. A runtime the agent user cannot run is listed by the startup check, and its runs fail with the path that is out of reach.
+- **Runtimes the agent user can run.** Node, Clawboo itself and each runtime (Claude Code, Codex, Hermes) must be where every user can run them. Clawboo installs runtimes, Hermes among them, into its [runtimes folder](/operating/data-and-state#the-runtimes-folder), `~/clawboo-runtimes` by default (`<CLAWBOO_HOME>-runtimes` when you set `CLAWBOO_HOME`), which is inside your home: once you close your home (below), the agent user cannot reach it. Before you turn the setting on, set `CLAWBOO_RUNTIMES_DIR` to a folder outside your home and the agent user's, such as `/opt/clawboo-runtimes`, owned by you with mode `0755` (the setup commands below make it), run Clawboo on a Node every user can run (Homebrew, `/usr/local`, or the desktop app's own), and install the runtimes again from the Runtimes page. A runtime the agent user cannot run is listed by the startup check, and its runs fail with the path that is out of reach.
 - **Your home folder closed to other users.** On macOS your home is readable by the `staff` group; run `chmod 750 ~`. On Linux, `chmod 750 ~` too. Clawboo warns at every start while the agent user can list your home.
 - **Sign-ins for the agent user.** API keys you save in Clawboo reach each run in its environment, as before. Your own Codex and Hermes sign-ins are not shared with the agents: they are yours, and the agent user cannot read them. Sign in for the agents from the Runtimes page (that sign-in runs as the agent user and is kept in its home), or give the runtime an API key; until you do, a subscription run says so instead of starting. Claude Code uses the agent user's own `~/.claude`: give it an API key, or a long-lived token from `claude setup-token` set as `CLAUDE_CODE_OAUTH_TOKEN` in Clawboo's environment.
 

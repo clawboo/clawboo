@@ -111,7 +111,8 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `browser-profiles/`                     | Each agent's browser profile, including sites it is signed in to                                                                                     | Yes                                     |
 | `team-folder-history/<team id>.git`     | The work check's git history of each team's folder                                                                                                   | Holds copies of what agents saved there |
 | `workspaces/`, `worktrees/`, `reviews/` | Left by an older version: a link at each old path to a folder that moved to the work folder, any folder the move kept here, and old review checkouts | Holds what agents saved there           |
-| `runtimes/<runtime>/<agent>/`           | Each Clawboo Native, Codex or Hermes agent's own runtime home                                                                                        | May hold runtime sign-in copies         |
+| `runtimes/<runtime>/<agent>/`           | Each Clawboo Native or Codex agent's own runtime home, and a Hermes agent's home from before it first ran through the Hermes gateway                 | May hold runtime sign-in copies         |
+| `runtimes/hermes/_gateway/`             | The Hermes gateway's home: its config, logs and one profile per Hermes agent under `profiles/` (memory, skills, sessions, its own jobs)              | Holds Hermes keys and sign-in copies    |
 
 The database files, `settings.json` and secrets are owner-only (mode 0600) in an owner-only folder (0700).
 
@@ -147,10 +148,12 @@ Folders Clawboo creates here are `0755`, and each finished install is readable b
 
 Provider keys, connector secrets and sign-in tokens are encrypted with AES-256-GCM in `secrets/runtime-keys.json`, under the key in `secrets/master.key`. This protects a copied or synced vault file; a program running as your user can still read both files. To keep the key apart from the vault, set `CLAWBOO_SECRETS_MASTER_KEY`. If the key changes, saved keys read as missing and **System Health** reports that the master key changed.
 
-A runtime looks for its key in this order: the server's environment, the vault, then OpenClaw's `~/.openclaw/.env`. After you disconnect a runtime on its card in **Settings > Runtimes**, that runtime uses only the vault until you connect it again. That disconnect deletes every vault key the runtime reads, including keys other runtimes share; [Providers and runtimes](/using/providers-and-runtimes) covers connecting and disconnecting.
+A runtime looks for its key in this order: the server's environment, the vault, then OpenClaw's `~/.openclaw/.env`. After you disconnect a runtime on its card in **Settings > Runtimes**, that runtime uses only the vault until you connect it again. That disconnect deletes the vault keys only that runtime reads and keeps any key another runtime also reads; [Providers and runtimes](/using/providers-and-runtimes) covers connecting and disconnecting.
 
 <Warning>
-Keys you add in **Settings > Providers**, or in OpenClaw's setup inside Clawboo, are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's `auth-profiles.json`, because the OpenClaw Gateway reads them there. Disconnecting the provider removes both copies. A key you enter on a runtime's own card in **Settings > Runtimes** stays only in the encrypted vault.
+Keys you add in **Settings > Providers**, or in OpenClaw's setup inside Clawboo, are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's `auth-profiles.json`, because the OpenClaw Gateway reads them there. Disconnecting the provider removes both copies.
+
+Every OpenRouter, Anthropic or OpenAI key Hermes reads, from any of these places or from the server's environment, is also written in plain text to each Hermes agent's profile `.env` (`runtimes/hermes/_gateway/profiles/<profile>/.env`, mode `0600`), and stays there between runs for the jobs Hermes runs on its own. A key you connect, replace or remove anywhere in Clawboo reaches every profile right away. Otherwise, a key you enter on a runtime's own card in **Settings > Runtimes** stays only in the encrypted vault.
 </Warning>
 
 ## OpenClaw files Clawboo reads and writes

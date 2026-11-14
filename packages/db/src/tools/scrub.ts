@@ -8,13 +8,18 @@ const SECRET_KEY_RE =
   /(token|secret|password|passwd|api[_-]?key|apikey|authorization|auth|bearer|credential|private[_-]?key|access[_-]?key)/i
 
 // Keys that CONTAIN a secret-looking substring but are known-safe. Two families:
-// token COUNTS ("token") and `author` ("auth"). Without the first, `inputTokens`
-// matches /token/ and its count is redacted to "[REDACTED]" (and then summed as a
-// string in the obs metrics); without the second, an `author` field is destroyed
-// on its way into the audit trail. Matched case-insensitively against the exact
-// key name, so a real credential under e.g. `accessToken` or `authorization`
-// still redacts. Kept in sync with the display-layer masker in @clawboo/logger.
-const SAFE_COUNT_KEYS = new Set([
+// token COUNTS ("token") and the author fields ("auth"). Without the first,
+// `inputTokens` matches /token/ and its count is redacted to "[REDACTED]" (and
+// then summed as a string in the obs metrics); without the second, an author
+// field is destroyed for good on its way into an event or the audit trail: the
+// board's `comment_added` event carries `authorType`, `team_chat_post` carries
+// `authorAgentId`, `add_comment` takes both and the team chat tools take
+// `authorAgentId`.
+// Matched case-insensitively against the exact key name, so a real credential
+// under e.g. `accessToken` or `authorization` still redacts, and an author-shaped
+// key not listed here is still masked. Must hold exactly what the display-layer
+// masker in @clawboo/logger holds; a server test compares the two.
+const SAFE_COUNT_KEYS: ReadonlySet<string> = new Set([
   'tokens',
   'inputtokens',
   'outputtokens',
@@ -26,7 +31,16 @@ const SAFE_COUNT_KEYS = new Set([
   'tokensperminute',
   'author',
   'authors',
+  'authortype',
+  'authoragentid',
 ])
+
+/** The keys the storage scrub lets through although they contain a secret-looking
+ *  word, as a sorted copy: the set itself stays private, so no caller can widen
+ *  what is stored readable for the rest of the process. */
+export function scrubSafeKeys(): string[] {
+  return [...SAFE_COUNT_KEYS].sort()
+}
 
 // A PEM private key block is masked by its own scan (below) rather than by a
 // pattern in the list, so the multi-line block still wins before any of the

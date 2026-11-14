@@ -15,9 +15,8 @@ export function hermesNativeId(ev: HermesNativeEvent): string | undefined {
 }
 
 /**
- * Pure native→RuntimeEvent mapper for Hermes. Text arrives as it streams over ACP,
- * and as one block at exit on the quiet path; cost is `estimated` (token usage
- * only, no reliable headless USD).
+ * Pure native→RuntimeEvent mapper for Hermes. Text arrives as it streams from the
+ * gateway; cost is `estimated` (token usage only, Hermes reports no USD).
  */
 export function mapHermesEvent(
   ev: HermesNativeEvent,

@@ -10,7 +10,11 @@ import {
 import type { ScheduleRecord, ScheduleSourceId } from './records'
 import type { ScheduleSource, ScheduleSourceReadStatus, ScheduleWriteAction } from './source'
 
-const SOURCE_IDS: readonly ScheduleSourceId[] = ['clawboo-routine', 'openclaw-gateway-cron']
+const SOURCE_IDS: readonly ScheduleSourceId[] = [
+  'clawboo-routine',
+  'openclaw-gateway-cron',
+  'hermes-gateway-jobs',
+]
 
 export function makeScheduleId(source: ScheduleSourceId, raw: string): string {
   return `${source}:${raw}`

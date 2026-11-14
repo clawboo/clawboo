@@ -86,7 +86,7 @@ The [Board](/using/board) holds every task from every team, by status and by day
 <Step title="Steer, approve or stop">
 
 - **Steer a running task.** Open the task in the **Tasks** card, write in **Comment or steer this task…** and send. The agent working on it reads your comment while it works, and a task that has not started yet gets it when it does. [Choose a runtime](/runtimes/index) shows how each runtime takes a comment.
-- **Approve.** Some actions wait for your OK. They appear in **Needs you** on the Board and in a tray above the message box; see [Approvals](/using/approvals). Claude Code, Codex and Hermes use their own built-in tools without asking.
+- **Approve.** Some actions wait for your OK. They appear in **Needs you** on the Board and in a tray above the message box; see [Approvals](/using/approvals). Claude Code and Codex use their own built-in tools without asking, and Hermes asks only before the commands its own policy flags.
 - **Stop.** While the team works, the send button turns into **Stop**. Stop ends the team's runs in this chat and drops hand-offs that have not started. Tasks that were running wait in **Needs you** as **Stopped** and don't restart on their own; retry them from there when you're ready.
 
 </Step>

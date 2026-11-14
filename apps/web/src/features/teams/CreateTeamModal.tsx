@@ -84,8 +84,8 @@ import { useTheme } from '@/features/theme/useTheme'
 // A per-agent model is supported by native (AgentConfig.primaryModel, applied via
 // execConfig at create), OpenClaw (a per-agent override in openclaw.json's
 // agents.list[], applied via a config PATCH after create), AND Hermes (a
-// `{ provider, model }` execConfig the server threads into `hermes chat -m …
-// --provider …`). Codex / Claude Code run the delegated task on their own
+// `{ provider, model }` execConfig the server sends with each of the agent's
+// runs to Hermes's gateway). Codex / Claude Code run the delegated task on their own
 // account / SDK default — model-inert as team members — so they get no picker.
 function runtimeHasModelPicker(sourceId: SelectableSourceId): boolean {
   return sourceId === 'clawboo-native' || sourceId === 'openclaw' || sourceId === 'hermes'
@@ -822,7 +822,7 @@ export function CreateTeamModal({
             // A coding-runtime member: the record exists so the server engine can
             // run it. Hermes takes a per-agent model (the picker) stored as an
             // execConfig `{ provider, model }` — serverDeliver threads it so the run
-            // is `hermes chat -m <model> --provider <provider>`; without a pick it
+            // asks Hermes's gateway for that provider and model; without a pick it
             // uses the key-derived default. Codex / Claude Code run on their own
             // account / SDK default (no picker) and ignore execConfig.
             const codingExec =

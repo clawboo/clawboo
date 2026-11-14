@@ -19,6 +19,7 @@ import { requestPathReadings } from '@clawboo/gateway-proxy'
 import {
   buildAttachConfig,
   createMemoryServer,
+  createStatelessHttpHandler,
   createStreamableHttpHandlers,
   createTasksServer,
   createTeamChatServer,
@@ -28,6 +29,7 @@ import {
   type McpRuntime,
   type McpServerName,
   type McpTransport,
+  mcpHttpUrl,
   type TeamChatBoundIdentity,
   verifyAttachAccess,
   verifyAttachProvenance,
@@ -47,6 +49,7 @@ import {
 } from '../lib/memoryEmbedding'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getMcpAttachSecret, rotateMcpAttachSecret } from '../lib/mcpAttachSecret'
+import { liveRunScope } from '../lib/mcpLiveBindings'
 import { createLogger, REDACTION_MASK } from '@clawboo/logger'
 
 const log = createLogger('mcp-attach')
@@ -324,11 +327,137 @@ export function parseTeamChatBinding(req?: IncomingMessage): TeamChatBoundIdenti
   return { agentId, teamId, roomId: resolveRoomForTeam(teamId), ...(delegate ? { delegate } : {}) }
 }
 
+type ServerFactory = (req?: IncomingMessage) => ReturnType<typeof createTasksServer>
+
+/** JSON-RPC methods that only discover what a server offers. */
+const DISCOVERY_METHODS = new Set([
+  'initialize',
+  'ping',
+  'tools/list',
+  'resources/list',
+  'resources/templates/list',
+  'prompts/list',
+])
+
+/** Whether a request body only discovers (lists tools and the like) or notifies. */
+function onlyDiscovers(body: unknown): boolean {
+  const messages = Array.isArray(body) ? body : [body]
+  return messages.every((m) => {
+    const method = (m as { method?: unknown } | null)?.method
+    return (
+      typeof method === 'string' &&
+      (DISCOVERY_METHODS.has(method) || method.startsWith('notifications/'))
+    )
+  })
+}
+
+/** Whether the request came on a live URL (`live=1`, see `AttachScope.live`). */
+function isLiveRequest(req: IncomingMessage): boolean {
+  return attachParams(req)?.get('live') === '1'
+}
+
+/** The request as the server factories see it, with another URL. */
+function withUrl(req: IncomingMessage, url: string): IncomingMessage {
+  return Object.create(req, {
+    url: { value: url, enumerable: true, writable: true, configurable: true },
+  }) as IncomingMessage
+}
+
+/**
+ * A live URL's request, rewritten into the per-run URL it stands for, so the
+ * server factories bind it exactly as they bind any run (one verification path,
+ * not two). The live URL's signature must cover its agent; otherwise the request
+ * is served unbound, as an unsigned URL is.
+ *
+ * - A call is bound to the run the agent has in progress (`mcpLiveBindings`).
+ *   With none (between runs, or a job the runtime runs on its own), it is the
+ *   agent's own, scoped as its one-to-one chat is: its identity and its own
+ *   team, no task, none of a run's writes.
+ * - Discovery (the tool list the runtime caches for the life of its connection)
+ *   is answered for the widest run the agent could have: no team-run or
+ *   chat-run limits, `team_delegate` listed, and a task of its own, so a
+ *   one-task tool lists `taskId` as optional (a runtime that checks calls
+ *   against the list, as Hermes does, would otherwise never let one default to
+ *   the run's task, and the run's prompt does not name it). A call to a tool
+ *   the run in progress is not given, or one with no task named and none bound,
+ *   is then refused by that run's own server.
+ */
+/** The task a live URL's tool list is answered for when no run is in progress. */
+const LIVE_DISCOVERY_TASK = 'live-run-task'
+
+function liveRequest(server: McpServerName, req: IncomingMessage, body: unknown): IncomingMessage {
+  const bare = withUrl(req, `/api/mcp/${server}`)
+  const params = attachParams(req)
+  const agentId = params?.get('scopeAgentId') ?? ''
+  const sig = params?.get('scopeSig') ?? ''
+  let secret: string
+  try {
+    secret = getMcpAttachSecret(getDb())
+  } catch (err) {
+    log.warn({ err }, 'live mcp attach could not be checked (db unavailable); serving unbound')
+    return bare
+  }
+  if (!agentId || !sig || !verifyAttachScope(secret, { server, agentId, live: true }, sig)) {
+    log.warn({ server, agentId }, 'live mcp attach signature missing or INVALID; serving unbound')
+    return bare
+  }
+  const run = liveRunScope(agentId)
+  if (onlyDiscovers(body)) {
+    const teamId =
+      run?.teamId ??
+      getDb().select({ teamId: agents.teamId }).from(agents).where(eq(agents.id, agentId)).get()
+        ?.teamId ??
+      null
+    // The team chat's delegate tool is listed; the Tasks writes a team run
+    // withholds are listed too (`delegate` would mark the Tasks URL a team run).
+    // The bound task only shapes the list: no call is served on this URL.
+    const url = new URL(
+      mcpHttpUrl('http://127.0.0.1', server, {
+        agentId,
+        teamId,
+        boundTaskId: run?.boundTaskId ?? LIVE_DISCOVERY_TASK,
+        delegate: server === 'teamchat',
+        attachSecret: secret,
+      }),
+    )
+    return withUrl(req, `${url.pathname}${url.search}`)
+  }
+  // No run in progress (between runs, or a job the runtime runs on its own):
+  // the call is the agent's own, as in its one-to-one chat. The signature named
+  // the agent, so it is that agent on its own team, with no task and none of a
+  // run's writes: on Tasks, reads and comments that wake no one (`chatRun`); on
+  // Tools, the agent's own connector grants, as in its chat. An agent Clawboo no
+  // longer has is no one: served unbound.
+  if (!run) {
+    const row = getDb()
+      .select({ teamId: agents.teamId })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get()
+    if (!row) return bare
+    const own = new URL(
+      mcpHttpUrl('http://127.0.0.1', server, {
+        teamId: null,
+        agentId,
+        chatRun: true,
+        chatRunTeamId: row.teamId ?? null,
+        attachSecret: secret,
+      }),
+    )
+    return withUrl(req, `${own.pathname}${own.search}`)
+  }
+  const scope = { ...run, agentId, attachSecret: secret }
+  const url = new URL(mcpHttpUrl('http://127.0.0.1', server, scope))
+  return withUrl(req, `${url.pathname}${url.search}`)
+}
+
 let handlers: Record<McpServerName, McpHttpHandlers> | null = null
+/** The same servers with no MCP session, for live URLs (see `liveRequest`). */
+let liveHandlers: Record<McpServerName, McpHttpHandlers> | null = null
 function getHandlers(): Record<McpServerName, McpHttpHandlers> {
   if (handlers) return handlers
   warmEmbedProvider()
-  handlers = {
+  const factories: Record<McpServerName, ServerFactory> = {
     // Tasks binds the run's TEAM (same `scopeTeamId` param the Memory server
     // reads) so board READS are team-scoped — an agent is never told its own
     // teamId, so a bare `list_tasks` must mean "my team's board", not "every
@@ -351,7 +480,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     // engine owns that run's claims and statuses, so its agent gets reads,
     // creates, comments and blocking its own task, and nothing that moves
     // another card (see createTasksServer).
-    tasks: createStreamableHttpHandlers((req) => {
+    tasks: (req) => {
       const binding = parseTasksBinding(req)
       const db = getDb()
       return createTasksServer(db, {
@@ -369,8 +498,8 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         ...(binding?.teamRun ? { teamRun: true } : {}),
         ...(binding?.chatRun ? { chatRun: true } : {}),
       })
-    }),
-    memory: createStreamableHttpHandlers((req) => {
+    },
+    memory: (req) => {
       const scope = parseBoundScope(req)
       // A function, not a provider: the session outlives any one provider
       // (an OpenClaw Gateway keeps it for days), so each call asks afresh.
@@ -382,7 +511,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         // no stamps at all rather than self-reported ones; the rest by provSig.
         ...(scope ? { provenance: parseBoundProvenance(req) } : {}),
       })
-    }),
+    },
     // `req` was previously dropped here, alone among the four handlers, so the
     // HMAC-verified scope params the attach URL carries were parsed by nobody.
     // Over HTTP that left ctx.agentId undefined, which makes an agent-scoped
@@ -390,7 +519,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     // against whatever GLOBAL grant happens to exist, or none. Failing open on
     // identity is worse than failing closed, so the scope is threaded here for
     // the same reason tasks and memory thread it.
-    tools: createStreamableHttpHandlers((req) => {
+    tools: (req) => {
       const binding = parseToolsBinding(req)
       const scope = binding?.scope
       return createToolsServer(getDb(), {
@@ -418,8 +547,8 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
           putScreenshot(agentId, { data: first.data, mimeType: first.mimeType, toolName })
         },
       })
-    }),
-    teamchat: createStreamableHttpHandlers((req) => {
+    },
+    teamchat: (req) => {
       const db = getDb()
       const boundIdentity = parseTeamChatBinding(req)
       return createTeamChatServer(db, {
@@ -440,7 +569,21 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
             },
           }),
       })
-    }),
+    },
+  }
+  handlers = {
+    tasks: createStreamableHttpHandlers(factories.tasks),
+    memory: createStreamableHttpHandlers(factories.memory),
+    tools: createStreamableHttpHandlers(factories.tools),
+    teamchat: createStreamableHttpHandlers(factories.teamchat),
+  }
+  const live = (server: McpServerName) =>
+    createStatelessHttpHandler((req, body) => factories[server](liveRequest(server, req, body)))
+  liveHandlers = {
+    tasks: live('tasks'),
+    memory: live('memory'),
+    tools: live('tools'),
+    teamchat: live('teamchat'),
   }
   return handlers
 }
@@ -456,12 +599,19 @@ export function prewarmMcp(): void {
  *  the supervisor's recovery action when a server health-probe fails. */
 export function resetMcpHandlers(): void {
   handlers = null
+  liveHandlers = null
   invalidateEmbedProvider()
+}
+
+/** The handlers for this request: live URLs have no MCP session. */
+function handlersFor(req: IncomingMessage): Record<McpServerName, McpHttpHandlers> {
+  const stateful = getHandlers()
+  return isLiveRequest(req) && liveHandlers ? liveHandlers : stateful
 }
 
 function makePost(server: McpServerName) {
   return (req: Request, res: Response): void => {
-    void getHandlers()
+    void handlersFor(req)
       [server].handlePost(req, res, req.body)
       .catch((err: unknown) => {
         if (!res.headersSent) res.status(500).json({ error: String(err) })
@@ -471,7 +621,7 @@ function makePost(server: McpServerName) {
 
 function makeSession(server: McpServerName) {
   return (req: Request, res: Response): void => {
-    void getHandlers()
+    void handlersFor(req)
       [server].handleSessionRequest(req, res)
       .catch((err: unknown) => {
         if (!res.headersSent) res.status(500).json({ error: String(err) })

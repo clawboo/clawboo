@@ -144,6 +144,15 @@ describe('/api/system/idle', () => {
         timeZone: null,
         reason: 'not_configured',
       },
+      // No Hermes agents and no Clawboo-installed Hermes: off, not unknown.
+      {
+        id: 'hermes-gateway-jobs',
+        state: 'off',
+        at: null,
+        count: 0,
+        timeZone: null,
+        reason: 'not_configured',
+      },
     ])
   })
 })

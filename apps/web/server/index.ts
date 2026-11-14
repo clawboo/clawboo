@@ -88,6 +88,7 @@ import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
+import { startHermesAtBoot } from './lib/runtimes/hermes'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
   resolveApiPort,
@@ -1049,6 +1050,13 @@ async function main() {
     // shared Memory/Tasks MCP servers in the Gateway config after connect.
     .start({ log, mcpBaseUrl: `http://127.0.0.1:${port}` })
     .catch((err: unknown) => log.error({ err }, 'Agent registry: startup failed (non-fatal)'))
+
+  // Hermes's own gateway: started now when Clawboo has Hermes agents, so their
+  // own scheduled jobs keep firing; otherwise on the first Hermes run. Its
+  // leftover approval cards from the last run of the server are expired first.
+  safeStart('hermes-gateway', () => {
+    void startHermesAtBoot()
+  })
 
   // Log what OpenClaw agents do when nobody asked them to: their own cron, an
   // incoming WhatsApp or Telegram message, someone at OpenClaw's own terminal.

@@ -26,11 +26,11 @@ Clawboo keeps every agent's card in its own database. That is why the sidebar an
 
 A runtime is the software that runs an agent's turns. Clawboo supports five, and they work in three ways:
 
-| How it runs     | Runtimes                   | What that means for you                                                                                                  |
-| --------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Built in        | Clawboo Native             | Runs inside the Clawboo server, on the provider key or local Ollama you connect.                                         |
-| Connected       | OpenClaw                   | Runs in your OpenClaw Gateway, a separate program Clawboo connects to. Clawboo keeps its own copy of each agent in sync. |
-| Started per run | Claude Code, Codex, Hermes | Coding tools that Clawboo starts for a turn or a task, and stops when it ends.                                           |
+| How it runs | Runtimes                   | What that means for you                                                                                                                                                                 |
+| ----------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Built in    | Clawboo Native             | Runs inside the Clawboo server, on the provider key or local Ollama you connect.                                                                                                        |
+| Connected   | OpenClaw                   | Runs in your OpenClaw Gateway, a separate program Clawboo connects to. Clawboo keeps its own copy of each agent in sync.                                                                |
+| Run by run  | Claude Code, Codex, Hermes | Coding agents Clawboo drives for a turn or a task. Claude Code and Codex start for each run and stop when it ends; Hermes runs each one in a Hermes gateway Clawboo starts and watches. |
 
 The runtime is set when the agent is created and never changes. No dashboard control or API call moves an existing agent to another runtime. To try the same role on a different runtime, create a new agent there.
 

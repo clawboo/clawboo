@@ -1,6 +1,6 @@
 // Server-side runtime registry wiring. Builds the non-OpenClaw adapters, each
-// wired to its REAL driver factory (Claude Agent SDK / `codex exec` / `hermes`
-// CLI / the in-process native harness) and a health check (CLI presence for
+// wired to its REAL driver factory (Claude Agent SDK / `codex exec` / the
+// supervised Hermes gateway / the in-process native harness) and a health check (CLI presence for
 // the wrapped runtimes; provider-key presence for built-in native). All
 // runtimes are always available; actual usability is determined by install +
 // credential state at run time.
@@ -24,7 +24,8 @@ import {
   type NonOpenClawRuntimeId,
   type RuntimeDescriptor,
 } from './descriptor'
-import { createHermesRunDriver, hermesTransport } from './hermesTransport'
+import { createHermesRunDriver, hermesGateway } from './hermes'
+import { managedHermesCommand } from './hermes/install'
 import { resolveRuntimeInstall } from './installProbe'
 import { createNativeDriver } from './native'
 import { isNativeOllamaConnected } from './native/nativeProviderDefaults'
@@ -46,9 +47,8 @@ export function enabledRuntimeIds(): NonOpenClawRuntimeId[] {
 }
 
 function cliHealth(d: RuntimeDescriptor): () => Promise<HealthResult> {
-  // Resolve via PATH *and* well-known user-install dirs (pip --user / pipx) —
-  // Hermes installs to the Python user-site bin, which is off the server's PATH.
-  // Claude Code is healthy on the Agent SDK and its own binary, never a CLI.
+  // Resolve via PATH *and* well-known user-install dirs. Claude Code is healthy
+  // on the Agent SDK and its own binary, never a CLI; Hermes has a check of its own.
   return async () =>
     resolveRuntimeInstall(d)
       ? { ok: true }
@@ -58,6 +58,23 @@ function cliHealth(d: RuntimeDescriptor): () => Promise<HealthResult> {
             ? 'the Claude Agent SDK is not installed next to Clawboo, or its platform binary is missing'
             : `${String(d.healthBin)} not found on PATH or user-install dirs`,
         }
+}
+
+/** Hermes is healthy when Clawboo's own install is there and its gateway is not
+ *  stuck failing. A stopped gateway is healthy: the next run starts it. */
+function hermesHealth(): Promise<HealthResult> {
+  if (!managedHermesCommand()) {
+    return Promise.resolve({
+      ok: false,
+      message: 'Hermes is not installed by Clawboo; install it from Settings > Runtimes',
+    })
+  }
+  const status = hermesGateway().status()
+  return Promise.resolve(
+    status.state === 'failed'
+      ? { ok: false, message: status.lastError ?? 'the Hermes gateway is not running' }
+      : { ok: true },
+  )
 }
 
 /** Native is in-process — health = "can any routable provider key resolve"
@@ -114,9 +131,10 @@ export function adapterFactoryFor(id: NonOpenClawRuntimeId): RuntimeAdapterFacto
         new CodexAdapter((opts) => createCodexDriver(opts, withAttachSecret(ctx)), health)
     case 'hermes':
       return (ctx) =>
-        new HermesAdapter((opts) => createHermesRunDriver(opts, withAttachSecret(ctx)), health, {
-          transport: () => hermesTransport(),
-        })
+        new HermesAdapter(
+          (opts) => createHermesRunDriver(opts, withAttachSecret(ctx)),
+          hermesHealth,
+        )
     case 'clawboo-native':
       return (ctx) => new NativeAdapter((opts) => createNativeDriver(opts, ctx), nativeKeyHealth)
     case 'clawboo-mock':

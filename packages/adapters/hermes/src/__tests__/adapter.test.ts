@@ -44,9 +44,17 @@ runAdapterContract(makeHermesHarness())
 // ─── Hermes-specific behavior ────────────────────────────────────────────────
 
 describe('HermesAdapter specifics', () => {
-  it('capabilities() reports streaming:false (non-streaming runtime) but mcp+worktrees+resume true', () => {
+  it('capabilities() reports a streaming runtime with mcp+worktrees+resume, live steering and approvals', () => {
     const caps = new HermesAdapter(() => new FakeHermesDriver()).capabilities()
-    expect(caps).toMatchObject({ streaming: false, mcp: true, worktrees: true, resume: true })
+    expect(caps).toMatchObject({
+      streaming: true,
+      mcp: true,
+      worktrees: true,
+      resume: true,
+      steering: 'live',
+      toolApproval: true,
+      nativeChannels: 'none',
+    })
   })
 
   it('capabilities() declares the native-preservation seam: one-shot dispatch is NOT amnesiac', () => {

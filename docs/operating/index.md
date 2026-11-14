@@ -10,7 +10,7 @@ Use this section if you run the Clawboo server: on your own computer, on a share
 
 ## What you are running
 
-Clawboo is one Node.js program. It serves the dashboard and the REST API on one port, hosts Clawboo's [MCP servers](/operating/mcp-servers), and keeps its data in a SQLite file in `~/.clawboo`. Clawboo Native agents run inside that program. Claude Code, Codex and Hermes run as programs it starts on the same machine, and OpenClaw agents run in the OpenClaw Gateway.
+Clawboo is one Node.js program. It serves the dashboard and the REST API on one port, hosts Clawboo's [MCP servers](/operating/mcp-servers), and keeps its data in a SQLite file in `~/.clawboo`. Clawboo Native agents run inside that program. Claude Code and Codex run as programs it starts on the same machine, Hermes agents run in one Hermes gateway it starts and watches there, and OpenClaw agents run in the OpenClaw Gateway.
 
 ## In this section
 
@@ -34,7 +34,7 @@ Clawboo is one Node.js program. It serves the dashboard and the REST API on one 
 
 Prompts go only to the providers and apps you connect. No Clawboo account, and Clawboo itself sends no telemetry. The server also fetches the Marketplace catalog from GitHub, OpenRouter's public model list and the latest version from npm, and the dashboard loads its font from Google Fonts and its GitHub star count; [Production defaults](/operating/production-defaults#what-leaves-the-machine) lists each one.
 
-Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off, so they can read and change any file your user account can. For work you do not trust, run Clawboo under a separate user account or in a virtual machine. See [What agents can do](/concepts/permissions).
+Claude Code and Codex run with their own sandboxes and approval prompts turned off, and Hermes asks only before the commands its own policy flags, so all three can read and change any file your user account can. For work you do not trust, run Clawboo under a separate user account or in a virtual machine. See [What agents can do](/concepts/permissions).
 
 ## Related
 

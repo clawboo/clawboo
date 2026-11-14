@@ -10,8 +10,8 @@
 // Either way, a comment on a task in progress is also steered into the run working
 // on it, through the per-task registry every task-running path registers with (see
 // ../runSteers). How it goes in is the runtime's business: live at its next boundary
-// (native, Claude Code, Codex, OpenClaw, Hermes over ACP), or by stopping and resuming
-// the same session with the comment as the next input (Hermes without ACP). Comments
+// (native, Claude Code, Codex, OpenClaw, Hermes through its gateway), or by stopping
+// and resuming the same session with the comment as the next input. Comments
 // in a burst go in as ONE steer: each steer can be a stop and a resume, and an agent
 // mid-tool has no use for three. A comment that lands whole goes from what is waiting
 // to what that run carries, and it counts as heard only when that run ends well. One

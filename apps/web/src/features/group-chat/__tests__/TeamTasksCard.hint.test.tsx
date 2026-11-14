@@ -148,7 +148,7 @@ describe('the runtime a task’s card names', () => {
 })
 
 describe('the composer hint on a running Hermes task', () => {
-  it('a Hermes on its quiet path says it pauses to read the comment', async () => {
+  it('a Hermes run that steers by stopping and resuming says it pauses to read the comment', async () => {
     serve('interrupt-resume', null)
     seed('in_progress')
     await openTask()
@@ -157,7 +157,7 @@ describe('the composer hint on a running Hermes task', () => {
     expect(screen.queryByText(LIVE)).not.toBeInTheDocument()
   })
 
-  it('a Hermes on ACP says it gets the comment now', async () => {
+  it('a Hermes through its gateway says it gets the comment now', async () => {
     serve('live', null)
     seed('in_progress')
     await openTask()
@@ -165,7 +165,7 @@ describe('the composer hint on a running Hermes task', () => {
     expect(screen.getByText(LIVE)).toBeInTheDocument()
   })
 
-  it("the run's own way beats the runtime's: a run that fell back pauses", async () => {
+  it("the run's own way beats the runtime's: a run that steers by stop and resume pauses", async () => {
     serve('live', 'interrupt-resume')
     seed('in_progress')
     await openTask()

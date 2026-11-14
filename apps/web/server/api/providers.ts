@@ -15,6 +15,7 @@ import { envVarForOpenclawProvider } from '../lib/openclawEnv'
 import { resolveRuntimeKey } from '../lib/secretsVault'
 import { fetchNativeModelsForKey, hasLiveModels } from '../lib/providerModels'
 import { onEmbeddingKeysChanged } from '../lib/memoryEmbedding'
+import { syncHermesProfileKeys } from '../lib/runtimes/hermes'
 import {
   listOllamaModels,
   OLLAMA_FALLBACK_MODEL,
@@ -43,6 +44,9 @@ export function providerConnectPOST(req: Request, res: Response): void {
   connectProviderKey(id, apiKey)
   // A new key may change which provider embeds memory.
   onEmbeddingKeysChanged()
+  // Hermes's profiles keep keys for the jobs it runs on its own: a replaced key
+  // reaches them now, not at their next run.
+  void syncHermesProfileKeys()
   res.json({ ok: true, providers: providerStatus() })
 }
 
@@ -56,6 +60,8 @@ export function providerDisconnectPOST(req: Request, res: Response): void {
   disconnectProviderKey(id)
   // Stop embedding memory with a key the user just removed.
   onEmbeddingKeysChanged({ removed: [envVarForOpenclawProvider(id)] })
+  // And Hermes's profiles stop holding it.
+  void syncHermesProfileKeys()
   res.json({ ok: true, providers: providerStatus() })
 }
 
