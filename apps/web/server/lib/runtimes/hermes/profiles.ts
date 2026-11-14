@@ -51,7 +51,8 @@ import {
 } from '../hermesHome'
 import { isAgentUserMode } from '../../agentUser/config'
 import { MAX_READ_BYTES } from '../../agentUser/protocol'
-import { runtimeIdentityHomePath } from '../identityHome'
+import { runtimeIdentityHomePath, sanitizeAgentId } from '../identityHome'
+import { teamFoldersRoot } from '../teamWorkdir'
 import { HERMES_PROFILE_RE } from './client'
 
 /** The fixed identity of the gateway's own home among the per-agent homes. Its
@@ -66,6 +67,49 @@ export function hermesGatewayHome(env: NodeJS.ProcessEnv = process.env): string 
 export function hermesProfileDir(gatewayHome: string, profile: string): string {
   if (!HERMES_PROFILE_RE.test(profile)) throw new Error(`not a Hermes profile name: ${profile}`)
   return path.join(gatewayHome, 'profiles', profile)
+}
+
+/**
+ * Where an agent's own Hermes jobs run commands: `<work folder>/agents/<agent
+ * id>/hermes-jobs`, beside the team folders. Its own folder: not a task's (a job
+ * could fire hours after that task's run, in a checkout whose work was already
+ * checked), not its team's (a job's files would read as a teammate's work), and
+ * never the gateway's home, which Hermes falls back to and which holds every
+ * profile.
+ */
+export function hermesJobsFolder(agentId: string, env: NodeJS.ProcessEnv = process.env): string {
+  const root = path.join(path.dirname(teamFoldersRoot(env)), 'agents')
+  const prefix = root + path.sep
+  const dir = path.resolve(root, sanitizeAgentId(agentId), 'hermes-jobs')
+  if (!dir.startsWith(prefix)) throw new Error(`jobs folder escapes ${root}: ${dir}`)
+  return dir
+}
+
+/** A profile's `.env` with `TERMINAL_CWD` set to `folder`, every other line
+ *  kept. Pure. */
+export function withTerminalCwd(body: string, folder: string): string {
+  const lines = envLines(body)
+  const line = envLine('TERMINAL_CWD', folder)
+  const at = lines.findIndex((l) => ENV_NAME_RE.exec(l)?.[1] === 'TERMINAL_CWD')
+  if (at !== -1) {
+    lines[at] = line
+  } else {
+    const after = lines.findIndex((l) => ENV_NAME_RE.exec(l)?.[1] === 'TERMINAL_ENV')
+    lines.splice(after === -1 ? (lines[0]?.startsWith(HEADER) ? 1 : 0) : after + 1, 0, line)
+  }
+  return lines.join('\n')
+}
+
+/** Point a profile's commands at `folder` (a run let go of it: its jobs run
+ *  there until the next run). */
+export async function setProfileTerminalCwd(dir: string, folder: string): Promise<void> {
+  const envPath = path.join(dir, '.env')
+  await serializedEnvWrite(dir, async () => {
+    const body = (await agentReadFile(envPath))?.toString('utf8')
+    if (body === undefined) return
+    const next = withTerminalCwd(body, folder)
+    if (next !== body) await agentWriteFile(envPath, next)
+  })
 }
 
 const log = createLogger('hermes-profiles')
@@ -243,20 +287,42 @@ export function pinTerminalBlock(body: string): string {
 /** The approval modes Hermes reads from `approvals.mode`. */
 export type HermesApprovalMode = 'manual' | 'smart' | 'off'
 
+/** What Hermes does with a flagged command in a job, where no one can answer:
+ *  `approvals.cron_mode`. */
+export type HermesCronApprovalMode = 'deny' | 'approve'
+
+/** The approval settings Clawboo sets in every profile before each run. */
+export interface HermesApprovalPins {
+  mode: HermesApprovalMode
+  cronMode: HermesCronApprovalMode
+}
+
+/** The pins when nothing else chooses: every flagged command to a card, and a
+ *  job's flagged command refused (Hermes's own default for jobs). */
+export const DEFAULT_APPROVAL_PINS: HermesApprovalPins = { mode: 'manual', cronMode: 'deny' }
+
 /**
- * The approval mode a profile runs with: the one the person's own
+ * The approval settings a profile runs with: the ones the person's own
  * `~/.hermes/config.yaml` sets, read here by the server (never from the agent's
- * profile, which the agent can write), else `manual`. Hermes's own default is
- * `smart`, which first asks another model whether a flagged command is safe;
- * `manual` sends every flagged command to a Clawboo card, and costs nothing.
+ * profile, which the agent can write), else `manual` and, for jobs, `deny`.
+ * Hermes's own default mode is `smart`, which first asks another model whether a
+ * flagged command is safe; `manual` sends every flagged command to a Clawboo
+ * card, and costs nothing. With agents on their own OS user the person's file is
+ * not read at all: the defaults hold, whatever the person chose for their own
+ * Hermes.
  */
-export async function personsApprovalMode(): Promise<HermesApprovalMode> {
+export async function personsApprovalPins(): Promise<HermesApprovalPins> {
+  if (isAgentUserMode()) return DEFAULT_APPROVAL_PINS
   try {
-    if (!existsSync(userHermesConfigPath())) return 'manual'
+    if (!existsSync(userHermesConfigPath())) return DEFAULT_APPROVAL_PINS
     const read = readAsHermes(await readFile(userHermesConfigPath(), 'utf8'))
-    return read === 'unreadable' ? 'manual' : (read.approvalMode ?? 'manual')
+    if (read === 'unreadable') return DEFAULT_APPROVAL_PINS
+    return {
+      mode: read.approvalMode ?? DEFAULT_APPROVAL_PINS.mode,
+      cronMode: read.cronMode ?? DEFAULT_APPROVAL_PINS.cronMode,
+    }
   } catch {
-    return 'manual'
+    return DEFAULT_APPROVAL_PINS
   }
 }
 
@@ -281,6 +347,8 @@ function strictUtf8(bytes: Buffer): string | null {
 interface PinnedAsRead {
   /** Null when the config sets none. */
   approvalMode: HermesApprovalMode | null
+  /** Null when the config sets none (Hermes then denies). */
+  cronMode: HermesCronApprovalMode | null
   backend: unknown
   cwd: unknown
 }
@@ -300,7 +368,7 @@ export function readAsHermes(body: string): PinnedAsRead | 'unreadable' {
     if (doc.errors.length > 0 || doc.warnings.length > 0) return 'unreadable'
     const js: unknown = doc.toJS({ maxAliasCount: 100 })
     if (js === null || js === undefined)
-      return { approvalMode: null, backend: undefined, cwd: undefined }
+      return { approvalMode: null, cronMode: null, backend: undefined, cwd: undefined }
     if (typeof js !== 'object' || Array.isArray(js)) return 'unreadable'
     const block = (key: string): Record<string, unknown> | null | 'bad' => {
       const v = (js as Record<string, unknown>)[key]
@@ -322,59 +390,85 @@ export function readAsHermes(body: string): PinnedAsRead | 'unreadable' {
           : typeof raw === 'string' && ['manual', 'smart', 'off'].includes(raw.trim().toLowerCase())
             ? (raw.trim().toLowerCase() as HermesApprovalMode)
             : 'manual'
-    return { approvalMode, backend: terminal?.['backend'], cwd: terminal?.['cwd'] }
+    // Hermes's own reading (approval_context._binary_approval_mode): the value
+    // as text, lowercased; four words approve, anything else denies. A YAML
+    // boolean reads as `true` or `false` there, so it denies.
+    const rawCron = approvals?.['cron_mode']
+    const cronMode: HermesCronApprovalMode | null =
+      rawCron === undefined || rawCron === null
+        ? null
+        : ['approve', 'off', 'allow', 'yes'].includes(String(rawCron).toLowerCase().trim())
+          ? 'approve'
+          : 'deny'
+    return { approvalMode, cronMode, backend: terminal?.['backend'], cwd: terminal?.['cwd'] }
   } catch {
     return 'unreadable'
   }
 }
 
 /** Whether a profile config reads, as Hermes reads it, with Clawboo's pins in
- *  force: the approval mode, and commands on this computer in the run's folder. */
-export function holdsPins(body: string, mode: HermesApprovalMode): boolean {
+ *  force: the approval settings, and commands on this computer in the run's
+ *  folder. */
+export function holdsPins(body: string, pins: HermesApprovalPins): boolean {
   const read = readAsHermes(body)
   if (read === 'unreadable') return false
   return (
-    read.approvalMode === mode &&
+    read.approvalMode === pins.mode &&
+    (read.cronMode ?? 'deny') === pins.cronMode &&
     (read.backend === undefined || read.backend === 'local') &&
     (read.cwd === undefined || read.cwd === '.')
   )
 }
 
 /**
- * A profile's `config.yaml` with `approvals.mode` set to `mode`, before every run
- * (line-level, like the terminal pin): an agent that edits its own profile to
- * turn its approvals off has it set back. Other `approvals:` keys (its timeout,
- * say) stay as written; a one-line `approvals:` value becomes a block.
+ * A profile's `config.yaml` with the `approvals:` keys given set, before every
+ * run (line-level, like the terminal pin): `mode`, and `cron_mode`, which
+ * Hermes reads for its own jobs. Other `approvals:` keys (its timeout, say) stay
+ * as written; a one-line `approvals:` value becomes a block.
  */
-export function pinApprovalsMode(body: string, mode: HermesApprovalMode): string {
+export function pinApprovals(body: string, pins: Partial<HermesApprovalPins>): string {
   const eol = body.includes('\r\n') ? '\r\n' : '\n'
+  const wanted: [key: string, value: string][] = []
   // Quoted when it is `off`, which YAML 1.1 readers take for false.
-  const value = mode === 'off' ? '"off"' : mode
+  if (pins.mode) wanted.push(['mode', pins.mode === 'off' ? '"off"' : pins.mode])
+  if (pins.cronMode) wanted.push(['cron_mode', pins.cronMode])
   const lines = body.split(/\r?\n/)
   const at = lines.findIndex((l) => /^approvals\s*:/.test(l))
   if (at === -1) {
     const trimmed = body.replace(/\s+$/, '')
-    return `${trimmed ? `${trimmed}${eol}` : ''}approvals:${eol}  mode: ${value}${eol}`
+    const block = wanted.map(([k, v]) => `  ${k}: ${v}${eol}`).join('')
+    return `${trimmed ? `${trimmed}${eol}` : ''}approvals:${eol}${block}`
   }
   if (!/^approvals\s*:\s*(#.*)?$/.test(lines[at] ?? '')) {
-    lines.splice(at, 1, 'approvals:', `  mode: ${value}`)
+    lines.splice(at, 1, 'approvals:', ...wanted.map(([k, v]) => `  ${k}: ${v}`))
     return lines.join(eol)
   }
   let childIndent: number | null = null
-  let pinned = false
+  const pinned = new Set<string>()
   for (let i = at + 1; i < lines.length; i++) {
     const line = lines[i] ?? ''
     if (/^[^\s#]/.test(line)) break
     if (line.trim() === '' || line.trim().startsWith('#')) continue
     const indent = line.length - line.trimStart().length
     if (childIndent === null) childIndent = indent
-    if (indent === childIndent && /^\s*mode\s*:/.test(line)) {
-      lines[i] = `${' '.repeat(indent)}mode: ${value}`
-      pinned = true
+    if (indent !== childIndent) continue
+    for (const [k, v] of wanted) {
+      if (new RegExp(`^\\s*${k}\\s*:`).test(line)) {
+        lines[i] = `${' '.repeat(indent)}${k}: ${v}`
+        pinned.add(k)
+      }
     }
   }
-  if (!pinned) lines.splice(at + 1, 0, `${' '.repeat(childIndent ?? 2)}mode: ${value}`)
+  const missing = wanted
+    .filter(([k]) => !pinned.has(k))
+    .map(([k, v]) => `${' '.repeat(childIndent ?? 2)}${k}: ${v}`)
+  if (missing.length > 0) lines.splice(at + 1, 0, ...missing)
   return lines.join(eol)
+}
+
+/** `approvals.mode` alone set to `mode` (see `pinApprovals`). */
+export function pinApprovalsMode(body: string, mode: HermesApprovalMode): string {
+  return pinApprovals(body, { mode })
 }
 
 /** Top-level `config.yaml` keys that hold a chat channel's identity or make a
@@ -556,10 +650,12 @@ export async function provisionProfile(opts: {
   // Decoded strictly: a file that is not exactly UTF-8 is not kept (Hermes would
   // read other text than the check below reads), and is rebuilt.
   const onDisk = onDiskBytes ? strictUtf8(onDiskBytes) : null
-  let base = onDisk ?? ''
+  // Never a chat channel, whatever the file came from: an agent's old Hermes
+  // home moved in carries the whole config an earlier Clawboo copied there.
+  let base = onDisk === null ? '' : withoutChannelBlocks(onDisk)
   // With agents on their own OS user the person's own config is never copied
   // into agent space: it can hold a provider's `api_key`, which any agent could
-  // read there. (Its approval mode is still read by the server, below.)
+  // read there. (Nor is its approval mode: see `personsApprovalPins`.)
   const agentMode = isAgentUserMode()
   if (
     !agentMode &&
@@ -574,15 +670,15 @@ export async function provisionProfile(opts: {
       // Seeding is best effort; Hermes falls back to its defaults.
     }
   }
-  const mode = await personsApprovalMode()
+  const pins = await personsApprovalPins()
   const build = (from: string) =>
-    mergeClawbooMcpServers(pinApprovalsMode(pinTerminalBlock(from), mode), opts.mcpServers)
+    mergeClawbooMcpServers(pinApprovals(pinTerminalBlock(from), pins), opts.mcpServers)
   let merged = build(base)
   // The pins are line edits; what counts is what Hermes reads. A config that
   // does not read back with them in force (a second `approvals:` key, a quoted
   // or merged one, anything ambiguous) is not kept: the profile gets the
   // person's own config again, or none.
-  if (!holdsPins(merged.body, mode)) {
+  if (!holdsPins(merged.body, pins)) {
     let fresh = ''
     try {
       if (!agentMode && existsSync(userHermesConfigPath()))
@@ -591,7 +687,7 @@ export async function provisionProfile(opts: {
       fresh = ''
     }
     merged = build(fresh)
-    if (!holdsPins(merged.body, mode)) merged = build('')
+    if (!holdsPins(merged.body, pins)) merged = build('')
     log.warn(
       { profile: opts.profile },
       "the agent's Hermes config.yaml did not keep Clawboo's settings; it was rebuilt",
@@ -632,28 +728,83 @@ export function withProviderKeys(body: string, providerEnv: Record<string, strin
   return lines.join('\n')
 }
 
-/**
- * Bring every Clawboo profile's provider keys in line with the vault. A profile
- * keeps its keys between runs, for the jobs Hermes runs on its own, so a key
- * disconnected in Clawboo must leave the profiles too, and the gateway starts
- * with the keys Clawboo holds now.
- */
-export async function refreshProfileProviderKeys(
-  gatewayHome: string,
-  providerEnv: Record<string, string>,
+/** A profile `.env` with its own `API_SERVER_KEY` set to `key`, every other
+ *  line kept. Pure. */
+export function withApiServerKey(body: string, key: string): string {
+  const lines = envLines(body)
+  const line = envLine('API_SERVER_KEY', key)
+  const at = lines.findIndex((l) => ENV_NAME_RE.exec(l)?.[1] === 'API_SERVER_KEY')
+  if (at !== -1) lines[at] = line
+  else lines.splice(lines[0]?.startsWith(HEADER) ? 1 : 0, 0, line)
+  return lines.join('\n')
+}
+
+/** One profile's `.env` brought in line. A profile that cannot be read or
+ *  written (an agent can replace its own `.env` with a link or a folder) is
+ *  logged and passed over, never a failed refresh for every other profile. */
+async function refreshProfileEnv(
+  dir: string,
+  providerEnv: () => Record<string, string>,
+  apiKey: string | null,
 ): Promise<void> {
-  for (const profile of await listClawbooProfiles(gatewayHome)) {
-    // A throwaway profile gets its keys for its one run, and is gone after it.
-    if (profile.startsWith('cbtmp-')) continue
-    const dir = hermesProfileDir(gatewayHome, profile)
-    if ((await agentStat(dir))?.type !== 'dir') continue
+  try {
+    if ((await agentStat(dir))?.type !== 'dir') return
     const envPath = path.join(dir, '.env')
     await serializedEnvWrite(dir, async () => {
       const body = (await agentReadFile(envPath))?.toString('utf8')
       if (body === undefined) return
-      const next = withProviderKeys(body, providerEnv)
+      let next = withProviderKeys(body, providerEnv())
+      if (apiKey) next = withApiServerKey(next, apiKey)
       if (next !== body) await agentWriteFile(envPath, next)
     })
+  } catch (err) {
+    log.warn(
+      { profile: path.basename(dir), err: err instanceof Error ? err.message : String(err) },
+      "could not bring a Hermes profile's keys up to date",
+    )
+  }
+}
+
+/** The profiles set aside for agents Clawboo no longer has, by name. */
+async function listSetAsideProfiles(gatewayHome: string): Promise<string[]> {
+  try {
+    const { entries } = await agentList(setAsideProfilesDir(gatewayHome))
+    return entries
+      .filter((e) => e.type === 'dir' && isClawbooProfile(e.name))
+      .map((e) => e.name)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Bring every Clawboo profile's provider keys in line with the vault. A profile
+ * keeps its keys between runs, for the jobs Hermes runs on its own, so a key
+ * disconnected in Clawboo must leave the profiles too, and the gateway starts
+ * with the keys Clawboo holds now. A profile set aside for a deleted agent keeps
+ * none. With `keyFor`, each profile's own gateway key is written too (before a
+ * gateway start, so a profile that has not run since the gateway's key changed
+ * still answers to it).
+ */
+export async function refreshProfileProviderKeys(
+  gatewayHome: string,
+  /** Read inside each profile's write, so the keys written are the ones held
+   *  then: a refresh begun before a Disconnect cannot write a removed key back. */
+  providerEnv: () => Record<string, string>,
+  opts: { keyFor?: (profile: string) => string } = {},
+): Promise<void> {
+  for (const profile of await listClawbooProfiles(gatewayHome)) {
+    // A throwaway profile gets its keys for its one run, and is gone after it.
+    if (profile.startsWith('cbtmp-')) continue
+    await refreshProfileEnv(
+      hermesProfileDir(gatewayHome, profile),
+      providerEnv,
+      opts.keyFor?.(profile) ?? null,
+    )
+  }
+  for (const profile of await listSetAsideProfiles(gatewayHome)) {
+    await refreshProfileEnv(path.join(setAsideProfilesDir(gatewayHome), profile), () => ({}), null)
   }
 }
 
@@ -684,6 +835,11 @@ export async function tidyProfiles(
     const target = path.join(asideDir, profile)
     if (await agentStat(target)) await agentRemove(target)
     await agentRename(dir, target)
+    // Set aside without its keys or its copy of the sign-in: nothing runs it,
+    // and every agent can read the gateway home. An agent that comes back gets
+    // both again before its next run.
+    await refreshProfileEnv(target, () => ({}), null)
+    await agentRemove(path.join(target, 'auth.json')).catch(() => undefined)
     setAside.push(profile)
   }
   return { removed, setAside }

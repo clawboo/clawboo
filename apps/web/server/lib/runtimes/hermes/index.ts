@@ -17,6 +17,7 @@ import type { HermesJobsBackend } from '../../scheduleSource/hermesGatewayJobsSc
 import { runtimeIdentityHomePath } from '../identityHome'
 import { runtimeKeyEnv } from '../runKeyEnv'
 import {
+  derivedHermesKey,
   hermesGatewayHome,
   hermesProfileName,
   listClawbooProfiles,
@@ -42,8 +43,9 @@ function currentAgentProfiles(): Set<string> | null {
 }
 
 /** Before each gateway start: profiles of agents Clawboo no longer has are set
- *  aside, and every profile gets the keys Clawboo holds now. */
-async function beforeGatewayStart(home: string): Promise<void> {
+ *  aside, and every profile gets the keys Clawboo holds now, its own gateway key
+ *  included (one minted again since the agent last ran would refuse its jobs). */
+async function beforeGatewayStart(home: string, masterKey: string): Promise<void> {
   try {
     const tidied = await tidyProfiles(home, {
       keep: currentAgentProfiles(),
@@ -58,7 +60,18 @@ async function beforeGatewayStart(home: string): Promise<void> {
       'could not tidy Hermes profiles',
     )
   }
-  await refreshProfileProviderKeys(home, runtimeKeyEnv('hermes'))
+  // Profile by profile: one that cannot be written is passed over, never a
+  // failed start for every Hermes agent.
+  try {
+    await refreshProfileProviderKeys(home, () => runtimeKeyEnv('hermes'), {
+      keyFor: (profile) => derivedHermesKey(masterKey, profile),
+    })
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'could not bring Hermes profile keys up to date',
+    )
+  }
 }
 
 /** The server's Hermes gateway supervisor. */
@@ -201,11 +214,12 @@ export function hermesJobsBackend(): HermesJobsBackend {
   }
 }
 
-/** After Hermes's keys changed (a Disconnect): the profiles keep only the keys
- *  Clawboo still gives Hermes. Never throws. */
+/** After a key Hermes reads was connected, replaced or removed: the profiles
+ *  hold the keys Clawboo gives Hermes now, read as each profile is written.
+ *  Never throws. */
 export async function syncHermesProfileKeys(): Promise<void> {
   try {
-    await refreshProfileProviderKeys(hermesGatewayHome(), runtimeKeyEnv('hermes'))
+    await refreshProfileProviderKeys(hermesGatewayHome(), () => runtimeKeyEnv('hermes'))
   } catch (err) {
     log.warn(
       { err: err instanceof Error ? err.message : String(err) },

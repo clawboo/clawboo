@@ -18,6 +18,7 @@ import {
   hermesProfileName,
   isClawbooProfile,
   listClawbooProfiles,
+  DEFAULT_APPROVAL_PINS,
   holdsPins,
   pinApprovalsMode,
   pinTerminalBlock,
@@ -211,7 +212,7 @@ describe('provider keys between runs', () => {
         providerEnv: { OPENROUTER_API_KEY: 'old' },
       })
       await writeFile(env, before)
-      await refreshProfileProviderKeys(gw, { OPENROUTER_API_KEY: 'new' })
+      await refreshProfileProviderKeys(gw, () => ({ OPENROUTER_API_KEY: 'new' }))
       expect(await readFile(env, 'utf8')).toBe(before)
     } finally {
       await rm(gw, { recursive: true, force: true })
@@ -228,10 +229,46 @@ describe('provider keys between runs', () => {
           renderProfileEnv({ key: 'k', cwd: null, providerEnv: { OPENROUTER_API_KEY: 'old' } }),
         )
       }
-      await refreshProfileProviderKeys(gw, {})
+      await refreshProfileProviderKeys(gw, () => ({}))
       for (const name of ['cb-a', 'cb-b']) {
         expect(await readFile(path.join(gw, 'profiles', name, '.env'), 'utf8')).not.toContain('old')
       }
+    } finally {
+      await rm(gw, { recursive: true, force: true })
+    }
+  })
+
+  it('passes over a profile whose .env cannot be written, and refreshes the rest', async () => {
+    const gw = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-keys-'))
+    try {
+      // An agent replaced its own .env with a folder.
+      await mkdir(path.join(gw, 'profiles', 'cb-a', '.env'), { recursive: true })
+      await mkdir(path.join(gw, 'profiles', 'cb-b'), { recursive: true })
+      await writeFile(
+        path.join(gw, 'profiles', 'cb-b', '.env'),
+        renderProfileEnv({ key: 'k', cwd: null, providerEnv: { OPENROUTER_API_KEY: 'old' } }),
+      )
+      await expect(refreshProfileProviderKeys(gw, () => ({}))).resolves.toBeUndefined()
+      expect(await readFile(path.join(gw, 'profiles', 'cb-b', '.env'), 'utf8')).not.toContain('old')
+    } finally {
+      await rm(gw, { recursive: true, force: true })
+    }
+  })
+
+  it("writes each profile's own gateway key, so one not run since the key changed still answers", async () => {
+    const gw = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-keys-'))
+    try {
+      await mkdir(path.join(gw, 'profiles', 'cb-a'), { recursive: true })
+      const env = path.join(gw, 'profiles', 'cb-a', '.env')
+      await writeFile(env, renderProfileEnv({ key: 'k'.repeat(64), cwd: '/w', providerEnv: {} }))
+      await refreshProfileProviderKeys(gw, () => ({}), {
+        keyFor: (profile) => derivedHermesKey('n'.repeat(64), profile),
+      })
+      const body = await readFile(env, 'utf8')
+      expect(body).toContain(`API_SERVER_KEY="${derivedHermesKey('n'.repeat(64), 'cb-a')}"`)
+      expect(body).not.toContain('k'.repeat(64))
+      expect(body.match(/API_SERVER_KEY=/g)).toHaveLength(1)
+      expect(body).toContain('TERMINAL_CWD="/w"')
     } finally {
       await rm(gw, { recursive: true, force: true })
     }
@@ -280,13 +317,16 @@ describe('readAsHermes', () => {
   })
 
   it('holds the pins only when Hermes would read them', () => {
-    expect(holdsPins('approvals:\n  mode: manual\n', 'manual')).toBe(true)
-    expect(holdsPins('approvals:\n  mode: manual\nterminal:\n  backend: docker\n', 'manual')).toBe(
-      false,
-    )
-    expect(holdsPins('approvals:\n  mode: manual\n"approvals":\n  mode: off\n', 'manual')).toBe(
-      false,
-    )
+    expect(holdsPins('approvals:\n  mode: manual\n', DEFAULT_APPROVAL_PINS)).toBe(true)
+    expect(
+      holdsPins(
+        'approvals:\n  mode: manual\nterminal:\n  backend: docker\n',
+        DEFAULT_APPROVAL_PINS,
+      ),
+    ).toBe(false)
+    expect(
+      holdsPins('approvals:\n  mode: manual\n"approvals":\n  mode: off\n', DEFAULT_APPROVAL_PINS),
+    ).toBe(false)
   })
 })
 
@@ -461,6 +501,20 @@ describe('provisionProfile', () => {
     expect(await readFile(path.join(back.dir, 'jobs.json'), 'utf8')).toBe('{}')
   })
 
+  it('sets a profile aside without its keys or its sign-in copy', async () => {
+    const gw = path.join(root, 'gw')
+    const gone = await provisionProfile(base({ legacyHome: null }))
+    await writeFile(path.join(gone.dir, 'auth.json'), '{"providers":{}}')
+    await tidyProfiles(gw, { keep: new Set<string>(), removeThrowaways: false })
+    const aside = path.join(setAsideProfilesDir(gw), 'cb-agent-1')
+    expect(await readFile(path.join(aside, '.env'), 'utf8')).not.toContain('sk-or')
+    await expect(stat(path.join(aside, 'auth.json'))).rejects.toThrow()
+    // One set aside before this, keys and all, loses them at the next refresh.
+    await writeFile(path.join(aside, '.env'), 'OPENROUTER_API_KEY="sk-or-old"\n')
+    await refreshProfileProviderKeys(gw, () => ({ OPENROUTER_API_KEY: 'sk-or-now' }))
+    expect(await readFile(path.join(aside, '.env'), 'utf8')).not.toContain('sk-or')
+  })
+
   it("pins approvals to the person's own choice before every run, whatever the agent wrote", async () => {
     const out = await provisionProfile(base({ legacyHome: null }))
     const config = path.join(out.dir, 'config.yaml')
@@ -479,6 +533,51 @@ describe('provisionProfile', () => {
     expect(await readFile(config, 'utf8')).toContain('  mode: smart')
   })
 
+  it("sets the jobs' approval setting back too: a job cannot be let run flagged commands", async () => {
+    const out = await provisionProfile(base({ legacyHome: null }))
+    const config = path.join(out.dir, 'config.yaml')
+    expect(readAsHermes(await readFile(config, 'utf8'))).toMatchObject({ cronMode: 'deny' })
+    // The agent lets its own jobs run flagged commands...
+    await writeFile(
+      config,
+      (await readFile(config, 'utf8')).replace(
+        '  mode: manual',
+        '  mode: manual\n  cron_mode: approve',
+      ),
+    )
+    await provisionProfile(base({ legacyHome: null }))
+    expect(readAsHermes(await readFile(config, 'utf8'))).toMatchObject({ cronMode: 'deny' })
+    // ...while the person's own Hermes config decides it.
+    await mkdir(path.join(root, 'home', '.hermes'), { recursive: true })
+    await writeFile(
+      path.join(root, 'home', '.hermes', 'config.yaml'),
+      'approvals:\n  cron_mode: approve\n',
+    )
+    await provisionProfile(base({ legacyHome: null }))
+    expect(readAsHermes(await readFile(config, 'utf8'))).toMatchObject({
+      approvalMode: 'manual',
+      cronMode: 'approve',
+    })
+  })
+
+  it("drops chat channels from an old Hermes home's config when it moves in", async () => {
+    const legacy = path.join(root, 'legacy', 'agent-1')
+    await mkdir(path.join(legacy, 'memories'), { recursive: true })
+    await writeFile(path.join(legacy, 'memories', 'MEMORY.md'), 'x')
+    // An earlier Clawboo copied the person's whole config into the agent's home.
+    await writeFile(
+      path.join(legacy, 'config.yaml'),
+      'model:\n  provider: openrouter\nplatforms:\n  telegram:\n    token: tg-secret\ntelegram:\n  enabled: true\n',
+    )
+    const out = await provisionProfile(base())
+    expect(out.migrated).toBe(true)
+    const body = await readFile(path.join(out.dir, 'config.yaml'), 'utf8')
+    expect(body).toContain('provider: openrouter')
+    expect(body).not.toContain('platforms:')
+    expect(body).not.toContain('tg-secret')
+    expect(body).not.toMatch(/^telegram:/m)
+  })
+
   it('rebuilds a config an agent wrote to slip past the line pins', async () => {
     const out = await provisionProfile(base({ legacyHome: null }))
     const config = path.join(out.dir, 'config.yaml')
@@ -491,7 +590,7 @@ describe('provisionProfile', () => {
       await writeFile(config, tamper)
       await provisionProfile(base({ legacyHome: null }))
       const body = await readFile(config, 'utf8')
-      expect(holdsPins(body, 'manual')).toBe(true)
+      expect(holdsPins(body, DEFAULT_APPROVAL_PINS)).toBe(true)
       expect(readAsHermes(body)).toMatchObject({ approvalMode: 'manual' })
       // Clawboo's MCP servers are attached again too.
       expect(body).toContain('clawboo-tasks:')
@@ -515,7 +614,7 @@ describe('provisionProfile', () => {
       await provisionProfile(base({ legacyHome: null }))
       const after = await readFile(config)
       expect(after.equals(tamper)).toBe(false)
-      expect(holdsPins(after.toString('utf8'), 'manual')).toBe(true)
+      expect(holdsPins(after.toString('utf8'), DEFAULT_APPROVAL_PINS)).toBe(true)
     }
   })
 
