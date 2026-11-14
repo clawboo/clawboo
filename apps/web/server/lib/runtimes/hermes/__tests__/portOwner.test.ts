@@ -59,6 +59,18 @@ describe('gatewayPortOwner', () => {
     expect(await gatewayPortOwner(8642, 5000, darwin({ 4242: 300, 300: 1 }))).toBe('other')
   })
 
+  it("is another's when the listener's process has gone (its socket held by a child)", async () => {
+    // netstat still names the parent that opened the socket; ps knows no such process.
+    const gone = {
+      platform: 'darwin' as const,
+      run: async (command: string) => {
+        if (command === 'netstat') return DARWIN
+        throw new Error('ps exited 1')
+      },
+    }
+    expect(await gatewayPortOwner(8642, 5000, gone)).toBe('other')
+  })
+
   it('is unknown when nothing can be read, and never throws', async () => {
     expect(await gatewayPortOwner(9000, 4242, darwin({}))).toBe('unknown')
     const broken = {
@@ -80,5 +92,29 @@ describe('gatewayPortOwner', () => {
     })
     expect(await gatewayPortOwner(8642, 4242, linux(10002))).toBe('ours')
     expect(await gatewayPortOwner(8642, 4242, linux(10001))).toBe('other')
+  })
+
+  it('on Linux, sees a dual-stack listener that shows only in tcp6', async () => {
+    const tcp6 = [
+      '  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode',
+      '   0: 00000000000000000000000000000000:21C2 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 900 1 0000000000000000 100 0 0 10 0',
+    ].join('\n')
+    const deps = {
+      platform: 'linux' as const,
+      readFile: async (file: string) =>
+        file === '/proc/net/tcp'
+          ? '  sl  local_address rem_address   st\n'
+          : file === '/proc/net/tcp6'
+            ? tcp6
+            : 'Uid:\t10002\t10002\t10002\t10002\n',
+    }
+    expect(await gatewayPortOwner(8642, 4242, deps)).toBe('other')
+    expect(parseProcNetTcpListeners(tcp6, 8642)).toEqual([1001])
+    // ::ffff:127.0.0.1 counts as loopback.
+    const mapped = tcp6.replace(
+      '00000000000000000000000000000000:21C2',
+      '0000000000000000FFFF00000100007F:21C2',
+    )
+    expect(parseProcNetTcpListeners(mapped, 8642)).toEqual([1001])
   })
 })
