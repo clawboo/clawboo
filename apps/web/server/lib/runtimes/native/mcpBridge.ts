@@ -182,6 +182,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
               agentId: opts.agentId ?? null,
               taskId: opts.boundTaskId ?? null,
               runRef: opts.boundRunRef ?? null,
+              teamId: opts.memoryScope?.teamId ?? null,
             }),
           // Same frame capture as the HTTP mount: a native run's screenshots
           // reach the Browser panel even though its model may not see them.

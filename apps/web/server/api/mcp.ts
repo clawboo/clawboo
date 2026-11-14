@@ -529,6 +529,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
             agentId: scope?.agentId ?? null,
             taskId: binding?.taskId ?? null,
             runRef: binding?.runRef ?? null,
+            teamId: scope?.teamId ?? null,
           }),
         // Keep the newest frame so the agent's Browser panel can show a human
         // what it just looked at. Ephemeral and per-agent; never the event log.

@@ -21,8 +21,9 @@ An agent that works in a browser sometimes has to sign in to a site. Instead of 
 
 ## Before you begin
 
-- The agent needs a browser of its own, from the Playwright or Chrome DevTools connector (see [Every agent gets a browser](/using/connectors#every-agent-gets-a-browser)), open on the site's sign-in page. With neither connector connected, **Settings** > **Website logins** says so and agents are not offered the fill; you can still save logins.
-- The tool is offered to Claude Code, Codex, Hermes and Clawboo Native agents. OpenClaw agents do not get it, because Clawboo cannot tell which OpenClaw agent is calling (see [OpenClaw agents and connectors](/using/connectors#openclaw-agents-and-connectors)).
+- The agent needs a browser of its own, from the Playwright or Chrome DevTools connector (see [Every agent gets a browser](/using/connectors#every-agent-gets-a-browser)), open on the site's sign-in page. Every agent is given one; an agent whose browser was taken away, or with neither connector connected, is not offered the fill. With neither connected, **Settings** > **Website logins** says so; you can still save logins.
+- For an `https` site, use the Playwright browser. It is the one that can show Clawboo the site's certificate. The Chrome DevTools browser cannot, so it fills only plain `http` pages on your own computer, such as `http://localhost:3000`, and on any other site the agent is told to open the page in the Playwright browser.
+- The tool is offered to Claude Code, Codex, Hermes and Clawboo Native agents. OpenClaw agents do not get it, because Clawboo cannot tell which OpenClaw agent is calling (see [OpenClaw agents and connectors](/using/connectors#openclaw-agents-and-connectors)). Hermes keeps one tool list for all of an agent's runs, so a Hermes agent sees `fill_login` even in a run that may not use it (such as a routine's), and a call there is refused.
 
 ## Save a login
 
@@ -68,20 +69,20 @@ A fill tries your saved login for the site first, then a 1Password **Login** ite
 
 1. The agent opens the site's sign-in page in its browser.
 2. It calls `fill_login` with the site, for example `example.com`.
-3. Clawboo checks the page's address in the browser itself. The page must be on exactly the login's origin: the same scheme, host and port. A subdomain, a look-alike name or plain `http` does not match.
-4. Clawboo fills only the fields the page shows, and none whose form sends it to another site. A page that asks for the email first gets only the username; the password goes in on the next step, when the agent calls `fill_login` again.
+3. Clawboo checks the page's address in the browser itself. The page must be on exactly the login's origin: the same scheme, host and port. A subdomain, a look-alike name or plain `http` does not match. On `https`, the browser must also accept the site's certificate: a page with a certificate error gets nothing, even one the agent clicked through the warning to reach.
+4. Clawboo fills only the fields the page shows, and none whose form sends it to another site, counting a `<base>` address the page sets. A page that asks for the email first gets only the username; the password goes in on the next step, when the agent calls `fill_login` again.
 5. The agent submits the form.
 
 `fill_login` answers one of:
 
-| Answer           | What it means                                                                                                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `filled`         | The fields were filled. The answer names which ones (username, password, one-time code), never their values.                                                                                |
-| `no saved login` | There is no login for that site that this run may use.                                                                                                                                      |
-| `needs you`      | Only a person can go on: a CAPTCHA, a passkey or a card check, or 1Password could not be read.                                                                                              |
-| `refused`        | The agent's tab is not on that site, it has no browser open, the page shows no sign-in field, you have taken over its browser, or the run belongs to no person. It says what to do instead. |
+| Answer           | What it means                                                                                                                                                                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filled`         | The fields were filled. The answer names which ones (username, password, one-time code), never their values.                                                                                                                                                                                                         |
+| `no saved login` | There is no login for that site that this run may use. Clawboo says this only on a page of that site with a sign-in field, so an agent cannot ask about other sites from wherever it is.                                                                                                                             |
+| `needs you`      | Only a person can go on: a CAPTCHA, a passkey or a card check, or 1Password could not be read.                                                                                                                                                                                                                       |
+| `refused`        | The agent's tab is not on that site, it has no browser open or was given none, the browser reports a certificate error, the page is open in a browser that cannot check certificates, the page shows no sign-in field, you have taken over its browser, or the run belongs to no person. It says what to do instead. |
 
-Clawboo fills through the browser connector the agent already uses, in the tab it has open. It reads the page's address from the browser itself, never from the agent, and checks it again inside the page in the same step that fills, so a page that moved to another site in between gets nothing. While you have taken over the agent's browser, it fills nothing.
+Clawboo fills through the browser connector the agent already uses, in the tab it has open. It reads the page's address from the browser itself, never from the agent, and checks it again inside the page in the same step that fills, so a page that moved to another site in between gets nothing. In the Playwright browser the fill runs in a script world of its own, apart from the page's scripts, so the page cannot catch the values on their way in. While you have taken over the agent's browser, it fills nothing.
 
 ## What only a person can do
 
@@ -109,9 +110,11 @@ An agent works for everyone who may use it, and what it holds comes with it, log
 
 ## What this protects, and what it does not
 
-- **Clawboo never hands the model a login.** No username, password, one-time code or 1Password token is in what `fill_login` answers, in the event log, in the tool audit, in the server's log or in any REST answer. The vault lends the saved passwords to the scrub that cleans stored text, and Clawboo masks a password it filled out of that agent's later browser results.
-- **A login reaches only its own site.** The origin check is on the live page, not the agent's word for it.
-- **A filled password is in the page.** The agent drives that page, so it can still read a field it can see, or run a script that sends it elsewhere. The mask catches a password copied out as it was filled, not one an agent changed first. Give an agent only logins for accounts you would trust it to use.
+- **Clawboo never hands the model a login.** No username, password, one-time code or 1Password token is in what `fill_login` answers, in the event log, in the tool audit, in the server's log or in any REST answer. The vault lends the saved passwords to the scrub that cleans stored text.
+- **What is masked, and what is not.** Clawboo masks the username, password and one-time code it filled out of that agent's browser tool results, error messages included, for a day after the fill. That covers the text the model reads, the tool audit and the event log. A value is masked from the moment Clawboo reads it, before it goes to the page. A value shorter than 4 characters is not masked, because masking it would wipe ordinary page text. **Screenshots are not masked**: a screenshot shows whatever the page shows, so a password field the agent revealed (with a show-password button, say) reaches the model in the picture. The mask also catches only a value copied out as it was filled, not one an agent changed first.
+- **A login reaches only its own site.** The origin check is on the live page, not the agent's word for it, and on `https` the browser must accept the site's certificate.
+- **A filled password is in the page.** The agent drives that page, so it can still read a field it can see, show it in a screenshot, or run a script that sends it elsewhere. Give an agent only logins for accounts you would trust it to use.
+- **A run's Tools address can be read while the run lasts.** Each run's Tools address carries a reference to the run, and whoever holds that address can call `fill_login` as that run until it ends. A Claude Code run gets the address on its command line, and Codex keeps it in its runtime folder. A Hermes agent's one address stands for whichever of its runs is going, and Hermes keeps it in its runtime folder too. Every agent on the [agent user](/operating/agent-isolation) can read those folders, so while a run of yours is going, another agent on this Clawboo could sign in with your logins through it.
 - **A sign-in stays with the agent.** Whoever may use that agent uses its signed-in browser too (see [Who may use an agent can use what it holds](#who-may-use-an-agent-can-use-what-it-holds)).
 - **With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) on**, agents run as their own operating-system user and cannot read the vault, its key or the 1Password token. **Without it**, agents run as your user: they still never get a login through Clawboo, but a misbehaving agent process could read the vault and its key from your Clawboo folder like any other program you run.
 

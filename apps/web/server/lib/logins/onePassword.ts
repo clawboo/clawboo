@@ -343,7 +343,15 @@ export async function onePasswordLoginFor(
     for (const vaultId of await client.listVaultIds()) {
       for (const overview of await client.listLoginItems(vaultId)) {
         searched += 1
-        if (searched > MAX_ITEMS_SEARCHED) return { kind: 'none' }
+        if (searched > MAX_ITEMS_SEARCHED) {
+          // Said in the log, or the person sees only "no saved login" and cannot
+          // tell a missing item from a vault too big to search.
+          log.warn(
+            { searched: MAX_ITEMS_SEARCHED },
+            'stopped searching 1Password for a login: the service account reads too many items',
+          )
+          return { kind: 'none' }
+        }
         if (!overview.websites.some((w) => websiteMatches(w, origin))) continue
         const login = loginFromItem(await client.getItem(overview.vaultId, overview.id))
         if (login) return { kind: 'found', login }

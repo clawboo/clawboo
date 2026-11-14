@@ -45,7 +45,7 @@ It does **not**:
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
 - protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins, and a [website login](/using/website-logins) Clawboo filled into its page;
 - keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder;
-- keep one agent from acting as another on Clawboo's MCP servers. An agent's attach links are long-lived links that carry their own credential, and another agent can read them in that agent's runtime home (they share the agent user), or on the command line of a Claude Code run;
+- keep one agent from acting as another on Clawboo's MCP servers. An agent's attach links are long-lived links that carry their own credential, and another agent can read them in that agent's runtime home (they share the agent user), or on the command line of a Claude Code run. That includes a run's Tools link, which carries the run's reference: while the run lasts, an agent that reads it can call [`fill_login`](/using/website-logins#what-this-protects-and-what-it-does-not) as that run, with its person's logins;
 - change what Clawboo's tools allow. Agents still reach the board, memory and team chat through Clawboo's MCP servers, and approvals, grants and budgets still apply;
 - cover OpenClaw agents. They run inside the OpenClaw Gateway, as whoever started it. Use OpenClaw's own sandbox for them;
 - protect you from running an agent's output yourself, such as merging its branch and running it;

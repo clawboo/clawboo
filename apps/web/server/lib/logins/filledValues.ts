@@ -20,7 +20,7 @@ import { REDACTION_MASK } from '@clawboo/logger'
 import { lendSecretValues } from '../secretsVault'
 
 /** Shorter than this and a "password" is a word; masking it would wipe page text. */
-const MIN_MASKED_LENGTH = 6
+const MIN_MASKED_LENGTH = 4
 /** How long a filled value stays masked. Longer than any browser stays open idle. */
 const KEEP_MS = 24 * 60 * 60_000
 /** Per agent, newest kept. */
