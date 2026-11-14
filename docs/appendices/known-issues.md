@@ -21,7 +21,7 @@ This page lists what does not work yet in Clawboo, or works with a catch. Each e
 - **Open**: no fix exists yet.
 - **Fixed on main**: the fix is in the source code but not in an npm release yet. It ships with the next release.
 
-The latest npm release is 0.6.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
+The latest npm release is 0.7.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
 
 ## Security and access
 
@@ -87,7 +87,7 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** Clawboo does not limit which settings files Claude Code loads. Every Claude Code agent reads what your own `claude` command reads: your user settings and memory in `~/.claude`, plus any `.claude` settings and `CLAUDE.md` in the folder it works in. All Claude Code agents share them.
 
-**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. In releases after 0.6.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user; all Claude Code agents then share that user's one `~/.claude`, which is not yours. See [Claude Code](/runtimes/claude-code).
+**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. From 0.7.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user; all Claude Code agents then share that user's one `~/.claude`, which is not yours. See [Claude Code](/runtimes/claude-code).
 
 **Status:** fixed in 0.6.0. From 0.6.0, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
 
@@ -144,7 +144,7 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** tasks reach **Done** without a check result.
 
-**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files, and, from 0.6.0, for team chat work that changed the team's folder on a team with a [work check](/using/teams#work-check). Other team chat work, agent Routines created in the app and OpenClaw work are never checked. When a task-runner check runs, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From the next release, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
+**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files, and, from 0.6.0, for team chat work that changed the team's folder on a team with a [work check](/using/teams#work-check). Other team chat work, agent Routines created in the app and OpenClaw work are never checked. When a task-runner check runs, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From 0.6.0, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
 
 **What to do:** review results yourself. For runs that are checked, set the team's [work check](/using/teams#work-check) (0.6.0 and later), or name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
 
@@ -268,6 +268,38 @@ The latest npm release is 0.6.0. Run `clawboo --version` to see which one you ha
 **What to do:** behind a reverse proxy, limit concurrent connections there, and keep the access token on. See the [Observability API](/reference/rest-api/observability).
 
 **Status:** open.
+
+## Issues in 0.6.0 that are fixed in 0.7.0
+
+These problems affect the 0.6.0 release. They are fixed in 0.7.0, which the [changelog](/appendices/changelog) describes.
+
+| What you see on 0.6.0                                                                                                                                                                                                                                      | Area          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `../..` from a team folder or a task checkout leads to Clawboo's database and saved keys (from 0.7.0 agent work lives outside that folder, though an agent can still name its full path unless agents run as [their own user](/operating/agent-isolation)) | Security      |
+| Clawboo follows a link, or a hard link, that an agent puts at a task file's name such as `AGENT_HANDOFF.json`, and writes through it                                                                                                                       | Security      |
+| An MCP attach URL signed for the Memory server also opens the Tasks tools                                                                                                                                                                                  | Security      |
+| Pausing a task can remove a checkout git cannot account for, and a checkout's safety checks trust a git setting that hides untracked files                                                                                                                 | Worktrees     |
+| Installing OpenClaw, Claude Code or Codex can need `sudo` or fail with a permission error on a system-wide Node, and is lost when nvm switches Node                                                                                                        | Runtimes      |
+| On a Node outside OpenClaw's range, npm installs an older OpenClaw without a word                                                                                                                                                                          | OpenClaw      |
+| A Gateway rate limit whose message says "too many tokens" gets advice about context-window settings                                                                                                                                                        | OpenClaw      |
+| A provider key set in the environment Clawboo starts with reads as not connected on the Providers page, though runs use it                                                                                                                                 | Providers     |
+| A key that works only through your own gateway reads as invalid and its models do not show, because the key check and the model list always call the provider's public address                                                                             | Providers     |
+| A due routine on an OpenClaw agent fails when the Gateway has not connected yet, such as right after Clawboo starts                                                                                                                                        | Routines      |
+| On a large database, every request waits several seconds right after the server starts, the dashboard's first page included                                                                                                                                | Server        |
+| An archived team's agents keep starting the work left on its board                                                                                                                                                                                         | Teams         |
+| Deleting a team does not stop its runs, and its other tasks can start afterwards                                                                                                                                                                           | Teams         |
+| An empty reply lands its task in Done                                                                                                                                                                                                                      | Board         |
+| A budget cap or the circuit breaker stopping a run reads as your **Stop**                                                                                                                                                                                  | Board         |
+| Editing a task moves it to the front of the queue, and an **Urgent** task waits behind everything queued before it when every run slot is taken                                                                                                            | Board         |
+| The 8 hand-off cap counts each tool call rather than a whole turn, and team chat hand-offs skip the 24-child and 30-per-5-minutes caps                                                                                                                     | Board         |
+| A team chat work check can run in the middle of a teammate's change, fail, and send the fix note to the wrong agent                                                                                                                                        | Checks        |
+| A busy team folder can let finished work reach Done unchecked                                                                                                                                                                                              | Checks        |
+| A restart during a team chat work check loses the agent's reply                                                                                                                                                                                            | Checks        |
+| A crash while the task runner checks work leaves the card stuck on **Verifying**                                                                                                                                                                           | Checks        |
+| A Claude Code task blocked because its run outgrew the context window overflows again on every **Retry**                                                                                                                                                   | Claude Code   |
+| A one-to-one chat with a Claude Code, Codex or Hermes agent keeps resuming a session that outgrew the model's context window                                                                                                                               | Chat          |
+| Task comment and team chat events show `authorType` and `authorAgentId` as `[REDACTED]` in the event log                                                                                                                                                   | Observability |
+| The audit log records no budget edits, and no 80% or 100% warnings for team chat, one-to-one chat or peer-exchange spend                                                                                                                                   | Budgets       |
 
 ## Issues in 0.5.0 that are fixed in 0.6.0
 

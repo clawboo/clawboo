@@ -742,9 +742,9 @@ The answer is built from the running process alone: no database read, no network
 
 ```json
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "apiRevision": 1,
-  "supportFloor": "0.5",
+  "supportFloor": "0.6",
   "features": {
     "runtime.openclaw": true,
     "runtime.clawboo-native": true,

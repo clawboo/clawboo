@@ -22,7 +22,7 @@ By default, Claude Code, Codex, Hermes and Clawboo Native's commands run as your
 It is off unless you set it. An install without the setting runs exactly as before.
 
 <Note>
-Available in releases after 0.6.0. Clawboo 0.6.0 and older ignore `CLAWBOO_AGENT_USER`, and agents keep running as you. Run `clawboo --version` to see yours.
+Available from 0.7.0. Clawboo 0.6.0 and older ignore `CLAWBOO_AGENT_USER`, and agents keep running as you. Run `clawboo --version` to see yours.
 </Note>
 
 ## What it protects, and what it does not
