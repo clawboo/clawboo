@@ -1,9 +1,0 @@
----
-'clawboo': minor
----
-
-Every task now gets a folder of its own for the files its agent makes. A task run with no git worktree (a task handed out in team chat, one you give from the board, a routine, or a research or review task on the task runner) starts in `<team folder>/tasks/<task id>`, so `~/clawboo-work/teams/<team id>/tasks/<task id>` by default (`_no-team` for a task with no team), created `0700`. Before, every such run started in the team's shared folder, so nothing tied a document to the task that made it. The run is told the folder is the task's own. Turns that hold no task, such as the lead's turns and an agent's own chat, still start in the team folder, and the task folders sit inside it, so the team's work check and deleting a team cover them as before. Clawboo Native's file tools are confined to the task's folder on a task run.
-
-The agent's **Computer** tab lists its tasks' folders beside their worktrees, newest first, then the team folder, and the task drawer shows a task's folder under **Files** (the section that was called **Workspace**), with the same read-only file view and the preview of a built page. `GET /api/board/:taskId/folder/tree` and `GET /api/board/:taskId/folder/file` read a task's folder, refusing links the way the worktree routes do; `GET /api/board/:taskId/workspace/detail` names the folder when the task has no worktree, and `GET /api/agents/:agentId/workspaces` lists `taskFolders`. A `research` or `review` kind now reads as isolation `folder` instead of `none`.
-
-At start, Clawboo removes the empty folders of finished tasks (Done, Cancelled or dropped) and keeps every folder that holds a file, since unlike a worktree there is no branch keeping that work; a live task's folder is never touched. Claude Code files a session under the folder it ran in, so Claude Code task sessions saved before this change are dropped once, and those tasks start a fresh session on their next run.
