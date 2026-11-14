@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const forkState = vi.hoisted(() => ({
   calls: [] as { modulePath: string; opts: Record<string, unknown> }[],
+  unrefs: { child: 0, channel: 0 },
 }))
 vi.mock('child_process', async (orig) => {
   const real = await orig<typeof import('child_process')>()
@@ -19,7 +20,17 @@ vi.mock('child_process', async (orig) => {
     ...real,
     fork: (modulePath: string, _args: string[], opts: Record<string, unknown>) => {
       forkState.calls.push({ modulePath, opts })
-      return { unref() {}, channel: { unref() {} }, on() {} }
+      return {
+        unref() {
+          forkState.unrefs.child += 1
+        },
+        channel: {
+          unref() {
+            forkState.unrefs.channel += 1
+          },
+        },
+        on() {},
+      }
     },
   }
 })
@@ -33,6 +44,7 @@ describe('the bundled server launch', () => {
 
   beforeEach(() => {
     forkState.calls = []
+    forkState.unrefs = { child: 0, channel: 0 }
     home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clawboo-cli-cwd-')))
     savedHome = process.env['CLAWBOO_HOME']
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
@@ -71,6 +83,31 @@ describe('the bundled server launch', () => {
     expect(env['CLAWBOO_LAUNCH_DIR']).toBe(process.cwd())
     // Node keeps the compiled bundle between starts, in the data folder.
     expect(env['NODE_COMPILE_CACHE']).toBe(path.join(home, '.clawboo', 'cache', 'compile'))
+  })
+
+  // fork() always gives the server an IPC channel, and the launcher lets go of
+  // it and exits. A server told to stop when its channel closes would stop the
+  // moment `clawboo` returned, so the launcher never passes that on, even from a
+  // shell that has it. (The server side is in apps/web serverStop.test.ts.)
+  it('lets go of the server and its channel, and never has it stop with the launcher', async () => {
+    const realExists = fs.existsSync
+    vi.spyOn(fs, 'existsSync').mockImplementation((p) =>
+      String(p).endsWith(`${path.sep}server.js`) ? true : realExists(p),
+    )
+    vi.stubEnv('CLAWBOO_STOP_ON_DISCONNECT', '1')
+    try {
+      await startDashboard({ port: 1, maxAttempts: 1 })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+
+    expect(forkState.calls).toHaveLength(1)
+    const { opts } = forkState.calls[0]!
+    expect(opts['detached']).toBe(true)
+    expect(forkState.unrefs).toEqual({ child: 1, channel: 1 })
+    // Node leaves a variable whose value is undefined out of the child's env.
+    const env = opts['env'] as NodeJS.ProcessEnv
+    expect(env['CLAWBOO_STOP_ON_DISCONNECT']).toBeUndefined()
   })
 
   it('keeps a compile cache the environment already names', () => {

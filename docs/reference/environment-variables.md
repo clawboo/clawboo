@@ -19,6 +19,7 @@ keywords:
     'OPENROUTER_BASE_URL',
     'ANTHROPIC_BASE_URL',
     'CLAWBOO_AGENT_USER',
+    'CLAWBOO_STOP_ON_DISCONNECT',
     'clawboo-launch',
   ]
 ---
@@ -58,6 +59,8 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_SERVER_USER`                  | none                              | `clawboo-launch` only: the user the server runs as                     |
 | `CLAWBOO_RUN_DIR`                      | `/run/clawboo`                    | `clawboo-launch` only: the folder for the agent host's socket          |
 | `CLAWBOO_NODE`                         | `node` on `PATH`                  | `clawboo-launch` only: the Node that runs the server and the host      |
+| **Started by an app**                  |                                   |                                                                        |
+| `CLAWBOO_STOP_ON_DISCONNECT`           | unset                             | `1` stops the server when its app's IPC channel closes                 |
 | **Pinned by an administrator**         |                                   |                                                                        |
 | `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                             |
 | `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off                   |
@@ -412,6 +415,18 @@ The Node.js that `clawboo-launch` runs the server and the agent host with. Only 
 - Type: path
 - Default: `node` on `PATH`
 - Example: `CLAWBOO_NODE=/usr/local/bin/node`
+
+## Started by an app
+
+### CLAWBOO_STOP_ON_DISCONNECT
+
+Set by an app that starts the server as its own child process, with an IPC channel, so that the server stops with the app. Leave it unset otherwise.
+
+- Type: flag
+- Default: unset, so the server keeps running when its channel closes
+- Example: `CLAWBOO_STOP_ON_DISCONNECT=1`
+
+With it set to `1`, the server stops when the channel closes (the app quit, crashed or called `disconnect()`), as it does on SIGTERM: it stops the agent processes it started, closes the database and exits with code `0`. Any other value leaves it off, and so does a server started without a channel. A `{ "type": "shutdown" }` message on the channel stops the server the same way whether or not this is set. The server reads it once and removes it from its environment, so the runtimes, connectors and commands it starts do not inherit it. The `clawboo` launcher never passes it on: it starts the server with a channel, lets go of it and exits, and the server must keep running. See [Start it from your own app](/operating/deployment#start-it-from-your-own-app).
 
 ## Pinned by an administrator
 

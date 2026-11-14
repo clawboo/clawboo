@@ -750,6 +750,11 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
         // the server's /api/mcp/config emits the right `node <bin>` attach snippet.
         CLAWBOO_MCP_BIN_DIR: path.join(__dirname, 'bin'),
         ...pinned,
+        // An app that starts the server itself sets this so the server stops when
+        // the app's IPC channel closes. This launcher lets go of the channel and
+        // exits, so a server that inherited it from the shell would stop the
+        // moment `clawboo` returned. Undefined drops it from the child's env.
+        CLAWBOO_STOP_ON_DISCONNECT: undefined,
       },
       detached: true,
       stdio: forkStdio,
