@@ -514,7 +514,7 @@ The Tools server is Clawboo's tool broker. Every call is checked, may wait for a
 
 - The [builtin tools](#builtin-tools) whose requirements are met.
 - The tools of every live [connector](/using/connectors) that the calling agent's grants allow. A connector tool the agent has not been granted is not listed at all. The list is recomputed for every list and every call, and the server sends a list-changed notification when a connector connects or disconnects.
-- [`fill_login`](#fill_login), for a bound run that belongs to a person, while a browser connector is connected.
+- [`fill_login`](#fill_login), for a bound caller whose agent holds a live browser connector, unless its run is known to belong to no person.
 - [`read_tool_result`](#read_tool_result), always. Grants, availability and connector tools never hide or replace it.
 
 A call goes through these checks in order:
@@ -550,16 +550,16 @@ Signs in to a website in the agent's own browser with a login its run's person s
 | -------- | ------ | ---------------------------------------------------------------------- |
 | `site`   | string | A host or an address on the site, for example `example.com`. Required. |
 
-Listed only for a bound caller whose run belongs to a person, and only while the Playwright or Chrome DevTools connector is connected. Each run carries a reference to itself on its Tools URL as `scopeRunRef`, inside the signature, and Clawboo forgets the reference when the run ends; Clawboo Native gets it in-process. An OpenClaw agent, a routine's run and an unverified caller are not offered it.
+Listed only for a bound caller whose agent holds the Playwright or Chrome DevTools connector, live, through its own grant or its team's. Each run carries a reference to itself on its Tools URL as `scopeRunRef`, inside the signature, and Clawboo forgets the reference when the run ends; Clawboo Native gets it in-process. A run whose reference names no person (a routine's) is not offered it, nor are an OpenClaw agent and an unverified caller. A live URL's tool list names no run, so it lists `fill_login` and the run in progress is checked at call time.
 
 The result is text that starts with one of:
 
 - `filled:` and the names of the fields filled. Submit the form next.
 - `no saved login:` there is none for that origin that this run may use.
 - `needs you:` a CAPTCHA, passkey or card check, or 1Password could not be read. On a run with a board task, Clawboo hands the task back to the person who asked for it and the card goes to **Needs you**.
-- `refused:` and why (not on that site, no browser open, no sign-in field, an `http` site, or a run with no person).
+- `refused:` and why (not on that site, no browser open, no browser given, a certificate error, an `https` page in a browser that cannot show its certificate, no sign-in field, an `http` site, a person in control of the browser, or a run with no person).
 
-The page must be on exactly the login's origin, read from the browser, not from `site`. The call is risk `safe` and asks no one; its audit row holds the site and the result, never a value.
+The page must be on exactly the login's origin, read from the browser, not from `site`, and on `https` the browser must accept its certificate; only the Playwright browser on Chrome or Chromium (its default) can show Clawboo that. The Chrome DevTools browser fills only plain `http` pages on loopback, and Playwright's bare headless shell, which reports no certificate state, fills none on `https`. `no saved login` comes only from a page of that site with a sign-in field. The call is risk `safe` and asks no one; its audit row holds the site and the result, never a value. Clawboo masks the filled username, password and one-time code (4 characters or longer) out of that agent's later browser tool results; screenshots are not masked.
 
 ### Connector tools
 

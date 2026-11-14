@@ -20,9 +20,15 @@ import { createLogger } from '@clawboo/logger'
 import { emitEvent } from '../obs/emit'
 import type { RunPerson } from '../runPerson'
 import { noteFilledValues } from './filledValues'
-import { hasOnePassword, onePasswordLoginFor } from './onePassword'
+import { onePasswordLoginFor } from './onePassword'
 import { loginOriginOf } from './origin'
-import { fillLoginOnPage, type FillBlocker, type FillField, type PageFillValues } from './pageFill'
+import {
+  errorClass,
+  fillLoginOnPage,
+  type FillBlocker,
+  type FillField,
+  type PageFillValues,
+} from './pageFill'
 import { loginSecretFor } from './store'
 import { totpCode } from './totp'
 
@@ -35,6 +41,9 @@ export type RefusedReason =
   | 'invalid_site'
   | 'insecure_site'
   | 'no_browser'
+  | 'browser_not_granted'
+  | 'insecure_page'
+  | 'certificate_unverifiable'
   | 'person_in_control'
   | 'not_on_site'
   | 'no_form'
@@ -62,6 +71,8 @@ export interface FillLoginInput {
   runPerson: RunPerson
   /** The run's board task, when it has one: a blocker hands it back. */
   taskId?: string | null
+  /** The run's team, whose grants may give the agent its browser. */
+  teamId?: string | null
 }
 
 const BLOCKER_WORDS: Record<NeedsYouReason, string> = {
@@ -132,30 +143,27 @@ export async function fillLogin(input: FillLoginInput): Promise<FillOutcome> {
   if (!person) return { outcome: 'refused', origin, reason: 'no_person' }
   const ownerId = person.id
 
-  // Nothing to fill and no password manager to ask: say so without touching the
-  // browser at all.
-  const hasSaved = loginSecretFor(origin, ownerId) !== null
-  if (!hasSaved && !hasOnePassword(ownerId)) return { outcome: 'no_saved_login', origin }
-
-  // What this call learned while filling, in one place the closure below writes.
-  // `password` is the only value kept past the page call, and only so the masks
-  // know what went into the page; it is dropped before this function returns.
-  const held: { source: 'saved' | '1password'; sourceFailed: boolean; password: string | null } = {
+  // The page first, the logins after: whether a login exists is answered only on a
+  // page of that site showing a field to fill, so an agent cannot ask about sites
+  // from anywhere else (every other page gets the same refusal either way).
+  const held: { source: 'saved' | '1password'; sourceFailed: boolean } = {
     source: 'saved',
     sourceFailed: false,
-    password: null,
   }
 
+  // Every value is recorded for the masks before it leaves this process, so a
+  // browser result that comes back while the fill is still running is masked too.
   const valuesFor = async (): Promise<PageFillValues | null> => {
     const saved = loginSecretFor(origin, ownerId)
     if (saved) {
       held.source = 'saved'
-      held.password = saved.password
-      return {
+      const values = {
         username: saved.username,
         password: saved.password,
         oneTimeCode: saved.otpSecret ? totpCode(saved.otpSecret) : null,
       }
+      noteFilledValues(input.agentId, [values.username, values.password, values.oneTimeCode])
+      return values
     }
     const found = await onePasswordLoginFor(origin, ownerId)
     if (found.kind === 'failed') {
@@ -164,7 +172,11 @@ export async function fillLogin(input: FillLoginInput): Promise<FillOutcome> {
     }
     if (found.kind === 'none') return null
     held.source = '1password'
-    held.password = found.login.password
+    noteFilledValues(input.agentId, [
+      found.login.username,
+      found.login.password,
+      found.login.oneTimeCode,
+    ])
     return {
       username: found.login.username,
       password: found.login.password,
@@ -174,17 +186,15 @@ export async function fillLogin(input: FillLoginInput): Promise<FillOutcome> {
 
   let result: Awaited<ReturnType<typeof fillLoginOnPage>>
   try {
-    result = await fillLoginOnPage(input.agentId, origin, valuesFor)
-  } catch {
+    result = await fillLoginOnPage(
+      { agentId: input.agentId, teamId: input.teamId ?? null },
+      origin,
+      valuesFor,
+    )
+  } catch (err) {
+    log.warn({ agentId: input.agentId, err: errorClass(err) }, 'login fill failed')
     result = { kind: 'failed' }
   }
-
-  // Remembered for the masks whenever a value may have reached the page, including
-  // a fill that threw part way.
-  if (held.password !== null && result.kind !== 'no_login') {
-    noteFilledValues(input.agentId, [held.password])
-  }
-  held.password = null
   const { source, sourceFailed } = held
 
   const needsYou = (reason: NeedsYouReason, fields: FillField[]): FillOutcome => ({
@@ -207,6 +217,12 @@ export async function fillLogin(input: FillLoginInput): Promise<FillOutcome> {
       return { outcome: 'refused', origin, reason: 'not_on_site' }
     case 'no_browser':
       return { outcome: 'refused', origin, reason: 'no_browser' }
+    case 'not_granted':
+      return { outcome: 'refused', origin, reason: 'browser_not_granted' }
+    case 'insecure':
+      return { outcome: 'refused', origin, reason: 'insecure_page' }
+    case 'unverifiable':
+      return { outcome: 'refused', origin, reason: 'certificate_unverifiable' }
     case 'person_in_control':
       return { outcome: 'refused', origin, reason: 'person_in_control' }
     case 'no_form':
@@ -259,6 +275,12 @@ export function outcomeText(o: FillOutcome): string {
           return 'refused: logins are filled only on https sites.'
         case 'no_browser':
           return 'refused: you have no browser open. Open the site sign-in page in your browser first, then call fill_login again.'
+        case 'browser_not_granted':
+          return 'refused: you have not been given a browser (the Playwright or Chrome DevTools connector), so there is no page to fill. Ask a person to give you one.'
+        case 'insecure_page':
+          return `refused: the browser reports a certificate error on ${host}, so the page may not be the real site. Do not sign in there; tell the person.`
+        case 'certificate_unverifiable':
+          return `refused: this browser cannot show Clawboo the certificate of ${host}, so the page may not be the real site. Open the sign-in page with the Playwright browser tools and call fill_login again; if that is the browser you used, tell the person.`
         case 'not_on_site':
           return `refused: your current browser tab is not on ${o.origin}. Open its sign-in page in that tab first, then call fill_login again.`
         case 'person_in_control':

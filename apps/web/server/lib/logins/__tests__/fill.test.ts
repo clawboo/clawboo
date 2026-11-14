@@ -72,8 +72,10 @@ let browser: InstanceType<typeof FakeBrowser> | null = null
 function useBrowser(...pages: ReturnType<typeof makePage>[]): InstanceType<typeof FakeBrowser> {
   const fake = new FakeBrowser(pages)
   browser = fake
-  setAgentPageRunner((agentId, fn, args, origin) =>
-    agentId === AGENT ? fake.runner(agentId, fn, args, origin) : Promise.resolve(null),
+  setAgentPageRunner((owner, fn, args, origin) =>
+    owner.agentId === AGENT
+      ? fake.runner(owner, fn, args, origin)
+      : Promise.resolve({ kind: 'no_browser' }),
   )
   return fake
 }
@@ -366,7 +368,8 @@ describe('whose logins a run may use', () => {
       runPerson: asLocal,
     })
     expect(out.outcome).toBe('no_saved_login')
-    expect(fake.runs).toHaveLength(0)
+    // The page is checked first (a probe with no values); nothing is filled.
+    expect(fake.valueRuns()).toHaveLength(0)
   })
 })
 
@@ -516,7 +519,7 @@ describe('what only a person can do', () => {
 
   it('an agent with no browser open is told to open one', async () => {
     saveLogin('bank.example')
-    setAgentPageRunner(async () => null)
+    setAgentPageRunner(async () => ({ kind: 'no_browser' }))
     const out = await fillLogin({
       db: getDb(),
       agentId: AGENT,
@@ -563,10 +566,19 @@ describe('fill_login as the agent calls it', () => {
     expect(
       loginFillTools({ agentId: 'someone-else', taskId: null, runRef: mine.ref }),
     ).toHaveLength(0)
-    expect(loginFillTools({ agentId: AGENT, taskId: null, runRef: null })).toHaveLength(0)
     expect(loginFillTools({ agentId: AGENT, taskId: null, runRef: mine.ref })).toHaveLength(1)
     mine.release()
     expect(loginFillTools({ agentId: AGENT, taskId: null, runRef: mine.ref })).toHaveLength(0)
+  })
+
+  it('is offered to a session with no run reference (a live URL), and refuses there with no run', async () => {
+    saveLogin('bank.example')
+    const fake = useBrowser(makePage('t1', { url: 'https://bank.example/login', html: LOGIN_FORM }))
+    const [tool] = loginFillTools({ agentId: AGENT, taskId: null, runRef: null })
+    expect(tool?.name).toBe('fill_login')
+    const text = await tool!.executor({ site: 'bank.example' }, { availability: {} as never })
+    expect(String(text)).toMatch(/^refused: this run belongs to no person/)
+    expect(fake.runs).toHaveLength(0)
   })
 
   it('is not offered while nothing can reach agent browsers', () => {
@@ -719,5 +731,177 @@ describe('while a person holds the browser', () => {
     })
     expect(out).toMatchObject({ outcome: 'refused', reason: 'person_in_control' })
     expect(fake.runs).toHaveLength(0)
+  })
+})
+
+describe('review fixes for the fill', () => {
+  it('masks the username, password and code before they reach the page', async () => {
+    saveLogin('bank.example', LOCAL.id, true)
+    const page = makePage('t1', { url: 'https://bank.example/login', html: LOGIN_FORM_WITH_CODE })
+    const fake = useBrowser(page)
+    const seenBeforeFill: string[] = []
+    fake.beforeFill = () => {
+      // A browser result that comes back while the fill is running.
+      seenBeforeFill.push(maskFilledValues(AGENT, `user ${USERNAME} pass ${PASSWORD}`))
+    }
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out.outcome).toBe('filled')
+    expect(seenBeforeFill.join(' ')).not.toContain(USERNAME)
+    expect(seenBeforeFill.join(' ')).not.toContain(PASSWORD)
+    const code = fieldValue(page, 'code')
+    expect(maskFilledValues(AGENT, `the code is ${code}`)).not.toContain(code)
+  })
+
+  it('masks a short password too', async () => {
+    const short = 'k7#Qz'
+    expect(
+      addSavedLogin({
+        site: 'bank.example',
+        username: USERNAME,
+        password: short,
+        ownerId: LOCAL.id,
+      }).ok,
+    ).toBe(true)
+    useBrowser(makePage('t1', { url: 'https://bank.example/login', html: LOGIN_FORM }))
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out.outcome).toBe('filled')
+    expect(maskFilledValues(AGENT, `value="${short}"`)).not.toContain(short)
+  })
+
+  it('a <base href> pointing elsewhere sends the form away, so nothing is filled', async () => {
+    saveLogin('bank.example')
+    const page = makePage('t1', {
+      url: 'https://bank.example/login',
+      html: `<!doctype html><html><head><base href="https://evil.example/" /></head><body>
+        <form action="/session">
+          <input id="user" type="email" autocomplete="username" />
+          <input id="pass" type="password" autocomplete="current-password" />
+        </form></body></html>`,
+    })
+    const fake = useBrowser(page)
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out).toMatchObject({ outcome: 'refused', reason: 'no_form' })
+    expect(fake.valueRuns()).toHaveLength(0)
+  })
+
+  it('a page with a certificate error is refused, and told to the person', async () => {
+    saveLogin('bank.example')
+    const fake = useBrowser(
+      makePage('t1', {
+        url: 'https://bank.example/login',
+        html: LOGIN_FORM,
+        certificateError: true,
+      }),
+    )
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out).toMatchObject({ outcome: 'refused', reason: 'insecure_page' })
+    expect(fake.valueRuns()).toHaveLength(0)
+    expect(outcomeText(out)).toMatch(/certificate error/)
+  })
+
+  it('a browser that cannot show the certificate is refused, and says where to fill instead', async () => {
+    saveLogin('bank.example')
+    setAgentPageRunner(async () => ({ kind: 'unverifiable' }))
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out).toMatchObject({ outcome: 'refused', reason: 'certificate_unverifiable' })
+    expect(outcomeText(out)).toMatch(/cannot show Clawboo the certificate/)
+  })
+
+  it('cannot ask about a site from another page: the same answer with or without a login', async () => {
+    saveLogin('bank.example')
+    useBrowser(makePage('t1', { url: 'https://evil.test/', html: LOGIN_FORM }))
+    const withLogin = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    const withoutLogin = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'other.example',
+      runPerson: asLocal,
+    })
+    expect(withLogin).toMatchObject({ outcome: 'refused', reason: 'not_on_site' })
+    expect(withoutLogin).toMatchObject({ outcome: 'refused', reason: 'not_on_site' })
+  })
+
+  it('an agent that holds no browser connector is told so, not that no browser is open', async () => {
+    saveLogin('bank.example')
+    setAgentPageRunner(async () => ({ kind: 'not_granted' }))
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out).toMatchObject({ outcome: 'refused', reason: 'browser_not_granted' })
+    expect(outcomeText(out)).toMatch(/not been given a browser/)
+  })
+
+  it('logs a page call that throws, by its class and never its message', async () => {
+    saveLogin('bank.example')
+    setAgentPageRunner(async () => {
+      throw new TypeError(`the page said ${PASSWORD}`)
+    })
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'bank.example',
+      runPerson: asLocal,
+    })
+    expect(out.outcome).not.toBe('filled')
+    const log = JSON.stringify(logged)
+    expect(log).toContain('TypeError')
+    expect(log).toContain('login fill')
+    expectNoValue(log, [PASSWORD, USERNAME])
+  })
+
+  it('logs a 1Password search that stopped at its item limit', async () => {
+    const items = Array.from({ length: 2_001 }, (_, i) => ({
+      id: `i${i}`,
+      vaultId: 'v1',
+      websites: [{ url: 'https://other.example' }],
+    }))
+    setOnePasswordClientFactory(async () => ({
+      listVaultIds: async () => ['v1'],
+      listLoginItems: async () => items,
+      getItem: async () => ({ fields: [] }),
+    }))
+    expect(await connectOnePassword(LOCAL.id, OP_TOKEN)).toMatchObject({ ok: true })
+    useBrowser(makePage('t1', { url: 'https://shop.example/signin', html: LOGIN_FORM }))
+    const out = await fillLogin({
+      db: getDb(),
+      agentId: AGENT,
+      site: 'shop.example',
+      runPerson: asLocal,
+    })
+    expect(out.outcome).toBe('no_saved_login')
+    expect(JSON.stringify(logged)).toContain('stopped searching 1Password')
   })
 })

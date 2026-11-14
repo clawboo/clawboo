@@ -22,8 +22,17 @@
 // What comes back from the page is a status and the names of the fields filled.
 // No value is ever read back, logged or returned.
 
-import { isPersonInControlOf, runInAgentPage } from './browserLink'
+import { createLogger } from '@clawboo/logger'
+
+import { isPersonInControlOf, runInAgentPage, type BrowserOwner } from './browserLink'
 import { pageOriginOf } from './origin'
+
+const log = createLogger('website-logins')
+
+/** An error's class name, never its message: a page call's message can quote the call. */
+export function errorClass(err: unknown): string {
+  return err instanceof Error ? err.name : typeof err
+}
 
 export type FillField = 'username' | 'password' | 'one_time_code'
 export type FillBlocker = 'captcha' | 'passkey' | 'card_check'
@@ -34,6 +43,9 @@ export type PageFillResult =
   | { kind: 'not_on_site' }
   | { kind: 'no_form' }
   | { kind: 'no_browser' }
+  | { kind: 'not_granted' }
+  | { kind: 'insecure' }
+  | { kind: 'unverifiable' }
   | { kind: 'person_in_control' }
   | { kind: 'failed' }
 
@@ -67,20 +79,33 @@ const FIND_FIELDS = String.raw`
     // Pushed off the page to the left or above it.
     return r.right > 0 && r.bottom > 0
   }
-  const sameOrigin = (raw) => {
-    if (raw === null || raw === '') return true
-    try { return new URL(raw, location.href).origin === location.origin } catch (e) { return false }
+  // Where a form or a button sends its data, as the browser resolves it: against
+  // the document's base address, so a <base href> pointing elsewhere counts. Read
+  // through the prototype getter, which resolves exactly as a submission does, or,
+  // where a browser has none, the attribute against the node's base address.
+  const baseOf = (el) => Object.getOwnPropertyDescriptor(Node.prototype, 'baseURI').get.call(el)
+  const resolved = (proto, name, el, attrName) => {
+    const own = Object.getOwnPropertyDescriptor(proto, name)
+    if (own && own.get) return own.get.call(el)
+    const raw = attr(el, attrName)
+    if (raw === null || raw === '') return location.href
+    try { return new URL(raw, baseOf(el)).href } catch (e) { return null }
   }
+  const sameOrigin = (url) => {
+    try { return new URL(url).origin === location.origin } catch (e) { return false }
+  }
+  const buttonTarget = (b) =>
+    resolved(b.tagName === 'BUTTON' ? HTMLButtonElement.prototype : HTMLInputElement.prototype, 'formAction', b, 'formaction')
   // A field whose form sends it to another site is not this site's sign-in form,
   // whatever it looks like: neither the form nor any of its buttons may post away.
   const postsHome = (el) => {
     const form = formOf(el)
     if (!form) return true
-    if (!sameOrigin(attr(form, 'action'))) return false
-    return !qsa(document, '[formaction]').some(
+    if (!sameOrigin(resolved(HTMLFormElement.prototype, 'action', form, 'action'))) return false
+    return !qsa(document, 'button[formaction], input[formaction]').some(
       (b) =>
         (within(form, b) || (attr(b, 'form') !== null && attr(b, 'form') === attr(form, 'id'))) &&
-        !sameOrigin(attr(b, 'formaction')),
+        !sameOrigin(buttonTarget(b)),
     )
   }
   const ac = (el) => (attr(el, 'autocomplete') || '').toLowerCase()
@@ -211,7 +236,7 @@ const frameElsewhere = (frameUrl: string | null, origin: string): boolean =>
  * only when it will be used.
  */
 export async function fillLoginOnPage(
-  agentId: string,
+  owner: BrowserOwner,
   origin: string,
   valuesFor: (present: {
     username: boolean
@@ -219,14 +244,16 @@ export async function fillLoginOnPage(
     oneTimeCode: boolean
   }) => Promise<PageFillValues | null>,
 ): Promise<PageFillResult | { kind: 'no_login' }> {
+  const agentId = owner.agentId
   if (isPersonInControlOf(agentId)) return { kind: 'person_in_control' }
   let probed
   try {
-    probed = await runInAgentPage(agentId, PROBE_FN, [], origin)
-  } catch {
+    probed = await runInAgentPage(owner, PROBE_FN, [], origin)
+  } catch (err) {
+    log.warn({ agentId, err: errorClass(err) }, 'login fill: the probe failed')
     return { kind: 'failed' }
   }
-  if (!probed) return { kind: 'no_browser' }
+  if (probed.kind !== 'ran') return probed
   if (frameElsewhere(probed.frameUrl, origin)) return { kind: 'not_on_site' }
   const probe = asProbe(probed.value)
   if (!probe)
@@ -254,7 +281,7 @@ export async function fillLoginOnPage(
   try {
     // Only what the page showed a field for leaves this process.
     filled = await runInAgentPage(
-      agentId,
+      owner,
       FILL_FN,
       [
         origin,
@@ -264,12 +291,15 @@ export async function fillLoginOnPage(
       ],
       origin,
     )
-  } catch {
+  } catch (err) {
     // A page that navigated mid-fill, or a browser that closed: the values went
-    // nowhere the fill can see, and nothing here repeats them.
+    // nowhere the fill can see, and nothing here repeats them. The class only:
+    // an error from the page call could quote the call.
+    log.warn({ agentId, err: errorClass(err) }, 'login fill: the fill call failed')
     return { kind: 'failed' }
   }
-  if (!filled) return { kind: 'failed' }
+  if (filled.kind === 'insecure') return { kind: 'insecure' }
+  if (filled.kind !== 'ran') return { kind: 'failed' }
   if (frameElsewhere(filled.frameUrl, origin)) return { kind: 'not_on_site' }
   const out = filled.value as { status?: unknown; fields?: unknown; blocker?: unknown } | undefined
   const status = typeof out?.status === 'string' ? out.status : ''

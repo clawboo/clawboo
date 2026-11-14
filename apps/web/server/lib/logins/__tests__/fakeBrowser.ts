@@ -23,6 +23,8 @@ export interface FakePageInit {
   /** What the browser reports as the main frame's address, when it differs from
    *  the document's own (a tab whose frame state and document disagree). */
   frameUrl?: string
+  /** The browser reports a certificate error on this page. */
+  certificateError?: boolean
 }
 
 export interface FakePage {
@@ -78,10 +80,10 @@ export class FakeBrowser {
 
   constructor(public pages: FakePage[]) {}
 
-  readonly runner: AgentPageRunner = async (_agentId, fn, args, expectedOrigin) => {
+  readonly runner: AgentPageRunner = async (_owner, fn, args, expectedOrigin) => {
     this.runs.push({ fn, args })
     let page = this.pages[0]
-    if (!page) return null
+    if (!page) return { kind: 'no_browser' }
     if (args.length > 0 && this.beforeFill) {
       const next = this.beforeFill(page)
       if (next) page = next
@@ -93,9 +95,11 @@ export class FakeBrowser {
     } catch {
       origin = null
     }
-    if (origin !== expectedOrigin) return { frameUrl, value: undefined }
+    if (origin !== expectedOrigin) return { kind: 'ran', frameUrl, value: undefined }
+    if (page.init.certificateError && expectedOrigin.startsWith('https:'))
+      return { kind: 'insecure' }
     const value = page.dom.window.eval(callExpression(fn, args))
-    return { frameUrl, value: JSON.parse(JSON.stringify(value)) as unknown }
+    return { kind: 'ran', frameUrl, value: JSON.parse(JSON.stringify(value)) as unknown }
   }
 
   /** Every run that carried values into a page. */
