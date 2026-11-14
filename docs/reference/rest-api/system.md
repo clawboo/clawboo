@@ -776,6 +776,7 @@ The answer is built from the running process alone: no database read, no network
     "workspace.preview": true,
     "agent.nativeShell": true,
     "agent.screenshots": true,
+    "agent.computer": true,
     "routines": true,
     "memory": true,
     "memory.embeddings": true,
@@ -828,6 +829,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                                                                                                                                                                                        |
 | `agent.nativeShell`                                                         | Always. The per-agent switch that lets a Clawboo Native agent ask to run shell commands.                                                                                                                                                                                                                          |
 | `agent.screenshots`                                                         | Always. Screenshots of what an agent's browser shows.                                                                                                                                                                                                                                                             |
+| `agent.computer`                                                            | Always. An agent's screen, live: its own display on Linux, with take over, or its browser elsewhere; and view and control links to it.                                                                                                                                                                            |
 | `routines`                                                                  | Always. Routines, the scheduler (`/api/schedules`).                                                                                                                                                                                                                                                               |
 | `memory`                                                                    | Always. Shared memory: search, save and browse.                                                                                                                                                                                                                                                                   |
 | `memory.embeddings`                                                         | Similarity search may run: `false` when `CLAWBOO_DISABLE_EMBEDDINGS=1`. Whether a provider is ready is in `GET /api/memory/provider`.                                                                                                                                                                             |
@@ -1043,6 +1045,8 @@ A host can stop the server when nobody is using it and start it again when it is
 
   A read never counts, whoever sent it, and neither does a request just because a sign-in proxy or an app link vouched for it: a proxy vouches for everything it forwards, a background tab's polling included.
 
+  A person who holds an agent's screen with [Take over](/using/agents#take-over) counts as here for as long as they hold it, from the dashboard or through a control link, whose page sends no beats.
+
 - **Is work going?** The same answer as `GET /api/system/hold` ([Drain and hold](#drain-and-hold)): `backgroundWork` is `present` while an agent run or a team chat's work check is going. `routinesInFlight` counts routine fires that have begun, a due OpenClaw routine waiting for the Gateway to connect included: it runs or fails within 5 minutes, and stopping the server meanwhile would only mean starting it again for it.
 - **When is scheduled work next due?** The earliest next run across every schedule: Clawboo's own routines, the cron jobs of an OpenClaw Gateway that stops when this machine does, and the jobs of a Hermes gateway Clawboo runs. A Gateway counts unless its address is another machine's IP address; a name this server cannot place (a LAN or tailnet name) counts, since waking for jobs that would have run anyway only costs a wake. Wake the server a minute before it.
 
@@ -1088,7 +1092,7 @@ Reads, which never count anyway. While its tab is visible the dashboard polls, d
 | Field                   | Type                                                                                                                           | Notes                                                                                                               |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `at`                    | `number`                                                                                                                       | The server's clock when it answered, epoch ms                                                                       |
-| `people.present`        | `boolean`                                                                                                                      | A visible, focused tab beat, or something a person did (see above), within the last 60 seconds                      |
+| `people.present`        | `boolean`                                                                                                                      | A focused tab beat or a person's action (see above) in the last 60 seconds, or a person holding an agent's screen   |
 | `people.lastSeenAt`     | `number \| null`                                                                                                               | The latest focused-tab beat or action, epoch ms; `null` when none since the server started                          |
 | `people.lastActedAt`    | `number \| The latest action: a beat's `acted`, or something a person did. Epoch ms; `null` when none since the server started |
 | `people.focusedTabs`    | `number`                                                                                                                       | Tabs whose latest beat said visible and focused                                                                     |

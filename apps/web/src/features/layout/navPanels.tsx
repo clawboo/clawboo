@@ -83,6 +83,11 @@ const PANEL_SOURCES: Record<NavView, RetryableLazy<ComponentType>> = {
   providers: createRetryableLazy(() =>
     import('@/features/providers/ProvidersPanel').then((m) => ({ default: m.ProvidersPanel })),
   ),
+  websiteLogins: createRetryableLazy(() =>
+    import('@/features/websiteLogins/WebsiteLoginsPanel').then((m) => ({
+      default: m.WebsiteLoginsPanel,
+    })),
+  ),
   // MemorySurface branches on where it renders: the graph hero + Graph/List
   // toggle full-screen, the plain list (with an "Open full view" escape hatch)
   // inside the Settings modal. See stores/settingsModal.ts for why Memory is

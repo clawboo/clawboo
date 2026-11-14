@@ -29,6 +29,7 @@ import {
   type ClawbooDb,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
+import type { PersonRef } from '@clawboo/protocol'
 
 import { runTaskOnRuntime, type RunTaskResult } from './executorRunner'
 import { emitEvent } from './obs'
@@ -159,6 +160,8 @@ export function requestRunnerRerun(
     mcpBaseUrl: string | null
     /** The pump started this, not a person: it spends from the job's count. */
     automaticStart?: boolean
+    /** The verified person whose click started it (see runPerson.ts). */
+    startedBy?: PersonRef | null
   },
 ): void {
   const { taskId } = input
@@ -185,6 +188,7 @@ export function requestRunnerRerun(
     ...(Object.keys(apiKeyEnv).length > 0 ? { apiKeyEnv } : {}),
     abortSignal: controller.signal,
     ...(input.automaticStart ? { automaticStart: true } : {}),
+    ...(input.startedBy ? { startedBy: input.startedBy } : {}),
   })
     .then((result) => {
       settle()

@@ -32,6 +32,7 @@ import {
 
 import { apiRouter } from './api/index'
 import { carriesAttachToken, redactAttachCredentials } from './api/mcp'
+import { carriesComputerLink, watchAgentArchives } from './api/computer'
 import { attachIdentity } from './lib/auth'
 import { recordPersonActions } from './lib/personActions'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
@@ -84,6 +85,7 @@ import { onPauseLifted } from './lib/pauseBus'
 import { isRunnerRerunWaiting, pumpRunnerReruns } from './lib/runnerRerun'
 import { runnerTargetOf } from './lib/runnerRoute'
 import { startTask } from './lib/startBoardTask'
+import { jsonBodyErrors } from './lib/jsonBodyErrors'
 import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
@@ -122,6 +124,8 @@ import { mountSpa } from './lib/serveSpa'
 import { ensureBrowserConnectedAtBoot, restoreConnectorsAtBoot } from './api/connectors'
 import { refreshConnectedApps } from './lib/connectors/composio'
 import { BROKERED_TOOLKITS } from '@clawboo/connector-catalog'
+import { isPersonInControl } from './lib/desktop/control'
+import { setPersonInControlCheck } from './lib/logins/browserLink'
 
 /** A duration env var, defaulted and BOUNDED to a positive integer. The bare
  *  `Number(...) || fallback` pattern rejects 0/''/NaN but accepts a negative,
@@ -320,13 +324,18 @@ async function main() {
     // by source address alone, because a same-host reverse proxy delivers every
     // remote request from loopback.
     authorizeRuntime: carriesAttachToken,
+    // A view or control link to one agent's computer reaches that computer's
+    // live view (/api/computer-link/*) and nothing else, without the cookie.
+    authorizeLink: carriesComputerLink,
   })
 
   // ── Proxy identity lane ───────────────────────────────────────────────────
   // Off unless an administrator turned it on. Beside the access gate, not in
   // place of it: a request still needs the access token while the gate is on.
   // A spawned runtime's own control-plane calls are judged by the gate's own
-  // test, so the lane exempts exactly what the gate admits without a cookie.
+  // test, so the lane exempts what the gate admits for a runtime without a
+  // cookie. A link to an agent's computer is not exempted: with a token
+  // required, the person opening one signs in through the proxy too.
   // The app link (an app that started this engine and signs for its own
   // `account:` people) joins it as a second issuer, always in `on` mode.
   const identitySources: LaneSource[] = identityConfigList.map((config) => ({
@@ -465,6 +474,8 @@ async function main() {
   // lib/connectors/dashboardGuard.ts).
   setDashboardPort(port, hostname)
   setDashboardPorts([port], [hostname])
+  // A login fill never runs while a person has taken over the agent's screen.
+  setPersonInControlCheck(isPersonInControl)
   // The base-path middleware STRIPS the prefix from `req.url` before routing, so
   // a route that needs to build an absolute-on-this-origin redirect cannot
   // recover it from the request. Publishing the validated value is how a route
@@ -515,6 +526,8 @@ async function main() {
 
   // JSON body parser — must be before API routes
   app.use(express.json({ limit: '2mb' }))
+  // A body that is not JSON gets a plain 400 that never quotes it (see jsonBodyErrors).
+  app.use(jsonBodyErrors)
 
   // Access gate middleware
   app.use((req, res, next) => {
@@ -814,6 +827,10 @@ async function main() {
   // COLUMNS — nothing rewrites a frozen row's data — so repair them once, here.
   // Guarded by a settings flag, so a user who later turns these tools off keeps
   // them off.
+  // Links, live views and control of an agent's computer end when the agent is
+  // archived by its source, not only when it is deleted here.
+  safeStart('agent-computer-archive-watch', () => watchAgentArchives())
+
   safeStart('coordination-toolset-upgrade', () => {
     const repaired = upgradeFrozenToolsets(getDb())
     if (repaired > 0) log.info({ repaired }, 'repaired coordination toolset on existing agents')

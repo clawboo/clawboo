@@ -26,7 +26,7 @@
 // this needs no migration.
 
 import type { ChildProcess } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -41,9 +41,20 @@ import {
   type ConnectorSession,
 } from '@clawboo/mcp'
 
-import { agentMkdir } from '../agentUser/agentFs'
+import { agentMkdir, agentReadFile, agentWriteFile } from '../agentUser/agentFs'
 import { isAgentUserMode } from '../agentUser/config'
 import { agentHomeDir } from '../agentUser/state'
+import { isPersonInControl } from '../desktop/control'
+import {
+  acquireDisplay,
+  displayFor,
+  displayProblem,
+  NO_SESSION_BUS,
+  onDisplayChange,
+  releaseDisplay,
+} from '../desktop/displays'
+import { desktopDriverRefusal } from '../desktop/driverPolicy'
+import { markDesktopToolsInUse } from '../desktop/tools'
 import { killProcessTree, killProcessTreeByPid } from '../runtimes/killTree'
 import { spawnAgentProcess } from '../runtimes/spawner'
 import {
@@ -83,7 +94,17 @@ export interface AgentBrowserSpawn {
   slug: string
   command: string
   args: string[]
-  profileFlag: string
+  /** The flag for a browser profile of the agent's own, when it is a browser. */
+  profileFlag?: string
+  /**
+   * Runs only on the agent's own display (a desktop driver): with none, the
+   * call is refused rather than run where it could reach another screen.
+   */
+  requiresDisplay?: boolean
+  /** A program Clawboo installs itself: run from that install only. */
+  ownedBinary?: boolean
+  /** Its name in a sentence a person reads. */
+  displayName?: string
   /** How this browser takes origins to block; the dashboard's are passed. */
   blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
   /** How this browser's Chrome takes a launch switch; the host rules are passed. */
@@ -101,6 +122,12 @@ interface AgentBrowser {
    */
   process: ChildProcess | null
   profileDir: string
+  /**
+   * This browser's hold on its agent's display (Linux), or null when it runs
+   * without one. Unique per browser, so a late close of an old browser never
+   * lets go of the display a newer one holds.
+   */
+  displayHold: string | null
   /** In-flight calls. A browser with none is QUIESCENT and may be evicted. */
   calls: number
   lastUsedAt: number
@@ -201,6 +228,78 @@ export function profileDirFor(
   return path.join(root, 'browser-profiles', slug, stem)
 }
 
+/** The file, or null when there is none. Any other failure throws: a file that
+ *  is there but could not be read must not be taken for a missing one and
+ *  replaced with two settings. */
+function readLocal(file: string): Buffer | null {
+  try {
+    return fs.readFileSync(file)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
+/**
+ * Keep Chrome's password manager off in an agent's profile.
+ *
+ * A password Clawboo fills into a page, or one a person types while they have
+ * taken over the agent's screen, must not be saved into the profile: its saved
+ * logins are readable by every process of the user that runs the browser (the
+ * bundled browsers keep them with `--password-store=basic`), the agent's own
+ * programs included. Set in the profile's preferences before each start, while
+ * no browser has the profile open. Never stops a browser from starting: a
+ * preferences file that cannot be read as JSON is left for Chrome to deal with.
+ */
+export async function keepPasswordsOutOfProfile(
+  profileDir: string,
+  inAgentSpace: boolean,
+): Promise<void> {
+  const dir = path.join(profileDir, 'Default')
+  const file = path.join(dir, 'Preferences')
+  try {
+    // Synchronous on this server's own disk: the browser start that waits on
+    // this is counted against the browser cap, and must not yield before its
+    // spawn for local file work.
+    const raw = inAgentSpace
+      ? await agentReadFile(file, { maxBytes: 8 * 1024 * 1024 })
+      : readLocal(file)
+    let prefs: Record<string, unknown> = {}
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw.toString('utf8'))
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+      prefs = parsed as Record<string, unknown>
+    }
+    const profile =
+      prefs['profile'] && typeof prefs['profile'] === 'object' && !Array.isArray(prefs['profile'])
+        ? (prefs['profile'] as Record<string, unknown>)
+        : {}
+    if (
+      prefs['credentials_enable_service'] === false &&
+      profile['password_manager_enabled'] === false
+    ) {
+      return
+    }
+    prefs['credentials_enable_service'] = false
+    prefs['profile'] = { ...profile, password_manager_enabled: false }
+    const body = JSON.stringify(prefs)
+    if (inAgentSpace) {
+      await agentMkdir(dir)
+      await agentWriteFile(file, body, { mode: 0o600 })
+    } else {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+      const tmp = `${file}.${process.pid}.tmp`
+      fs.writeFileSync(tmp, body, { mode: 0o600 })
+      fs.renameSync(tmp, file)
+    }
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'could not turn the password manager off in an agent browser profile',
+    )
+  }
+}
+
 /**
  * The child's working directory, which is a containment boundary rather than a
  * detail.
@@ -214,6 +313,25 @@ export function profileDirFor(
  */
 function scratchDirFor(slug: string, agentId: string, inAgentSpace: boolean): string {
   return path.join(profileDirFor(slug, agentId, inAgentSpace), 'scratch')
+}
+
+/**
+ * The environment of a desktop driver's one shared child, which only lists the
+ * tools (every call goes to an agent's own): no display (the allowlist passes
+ * none), a session bus that cannot exist and a home of its own. Without them
+ * Cua Driver goes looking for the person's desktop session bus, switches
+ * accessibility on for it, and reads its state from the person's home.
+ */
+export async function desktopDriverListingEnv(
+  slug: string,
+  inAgentSpace: boolean,
+): Promise<Record<string, string>> {
+  const root = inAgentSpace ? agentHomeDir() : resolveClawbooDir()
+  // `listing` is never a profile folder's name: those are 16 hex characters.
+  const home = path.join(root, 'browser-profiles', slug, 'listing')
+  if (inAgentSpace) await agentMkdir(home)
+  else fs.mkdirSync(home, { recursive: true, mode: 0o700 })
+  return { HOME: home, DBUS_SESSION_BUS_ADDRESS: NO_SESSION_BUS, NO_AT_BRIDGE: '1' }
 }
 
 function browsersFor(connectorId: string): Map<string, AgentBrowser> {
@@ -258,7 +376,8 @@ function oldestQuiescent(): { connectorId: string; agentId: string } | null {
   let best: { connectorId: string; agentId: string; at: number } | null = null
   for (const [connectorId, perAgent] of browsers) {
     for (const [agentId, browser] of perAgent) {
-      if (browser.calls > 0) continue
+      // A person who took over this agent's screen is using its browser.
+      if (browser.calls > 0 || isPersonInControl(agentId)) continue
       if (!best || browser.lastUsedAt < best.at) {
         best = { connectorId, agentId, at: browser.lastUsedAt }
       }
@@ -284,6 +403,7 @@ export async function closeAgentBrowser(connectorId: string, agentId: string): P
   if (perAgent.size === 0) browsers.delete(connectorId)
   browser.idleTimer?.clear()
   await browser.session.close().catch(() => {})
+  if (browser.displayHold) releaseDisplay(agentId, browser.displayHold)
   if (browser.process) {
     killProcessTree(browser.process)
   } else if (typeof browser.pid === 'number') {
@@ -364,7 +484,7 @@ async function waitForSlot(): Promise<void> {
       if (i >= 0) waiting.splice(i, 1)
       reject(
         new Error(
-          `every browser is busy (${MAX_AGENT_BROWSERS} open). Try again shortly, or run fewer agents in parallel.`,
+          `every per-agent browser and desktop driver place is busy (${MAX_AGENT_BROWSERS} open). Try again shortly, or run fewer agents in parallel.`,
         ),
       )
     }, QUEUE_TIMEOUT_MS)
@@ -379,12 +499,31 @@ function armIdleTimer(connectorId: string, agentId: string, browser: AgentBrowse
   browser.idleTimer = setAwakeTimeout(() => {
     // Re-checked rather than trusted: a call may have started since the timer
     // was armed, and closing mid-navigation would fail it.
-    if (browser.calls > 0) {
+    if (browser.calls > 0 || isPersonInControl(agentId)) {
       armIdleTimer(connectorId, agentId, browser)
       return
     }
     void closeAgentBrowser(connectorId, agentId)
   }, IDLE_TTL_MS)
+}
+
+let watchingDisplays = false
+
+/**
+ * Close an agent's browser when the display it draws on goes away under it
+ * (Xvnc crashed or was killed). Chrome cannot move to another display, and left
+ * running it would fail every call while each failure kept it from idling out.
+ * Closed, its next call starts a browser on a new display.
+ */
+function watchDisplays(): void {
+  if (watchingDisplays) return
+  watchingDisplays = true
+  onDisplayChange((agentId, display) => {
+    if (display) return
+    for (const [connectorId, perAgent] of browsers) {
+      if (perAgent.get(agentId)?.displayHold) void closeAgentBrowser(connectorId, agentId)
+    }
+  })
 }
 
 async function spawnFor(
@@ -420,6 +559,13 @@ async function spawnReservedBrowser(
   connectorId: string,
   agentId: string,
 ): Promise<AgentBrowser> {
+  // A desktop driver types into the agent's browser: only where that browser
+  // runs as the agent's own OS user. Checked here too, not only on Connect, so
+  // a driver connected earlier never starts where the rule no longer holds.
+  if (spec.requiresDisplay) {
+    const refusal = desktopDriverRefusal(spec.displayName ?? spec.slug)
+    if (refusal) throw new Error(refusal)
+  }
   // Which user runs this browser decides where its profile lives, so it is
   // settled before anything is made.
   const declared = resolveConnectorCredentials(spec.slug, spec.authInputs ?? [])
@@ -434,12 +580,19 @@ async function spawnReservedBrowser(
     fs.mkdirSync(profileDir, { recursive: true })
     fs.mkdirSync(scratchDir, { recursive: true })
   }
+  if (spec.profileFlag) await keepPasswordsOutOfProfile(profileDir, asAgent !== null)
 
   const plan = planConnectorSpawn(
-    { command: spec.command, args: spec.args },
+    { command: spec.command, args: spec.args, ...(spec.ownedBinary ? { ownedBinary: true } : {}) },
     { asAgentUser: asAgent !== null },
   )
-  if (plan.unresolved) throw new Error(`cannot resolve ${spec.command}`)
+  if (plan.unresolved) {
+    throw new Error(
+      spec.ownedBinary
+        ? `${spec.displayName ?? spec.command} is not installed. Install it on an agent's Screen view.`
+        : `cannot resolve ${spec.command}`,
+    )
+  }
 
   // APPENDED AFTER the plan, and deliberately absent from the hashed spec. The
   // digest covers transport, command and args as the CATALOG states them, and a
@@ -450,7 +603,25 @@ async function spawnReservedBrowser(
   // re-pin.
   // The dashboard and local-file block is appended the same way, for the same
   // reason: it carries this server's port, which is not the operator's choice.
-  const args = [...plan.args, ...browserGuardArgs(spec.slug, spec), spec.profileFlag, profileDir]
+  const args = [
+    ...plan.args,
+    ...browserGuardArgs(spec.slug, spec),
+    ...(spec.profileFlag ? [spec.profileFlag, profileDir] : []),
+  ]
+
+  // On Linux the browser opens on a display of the agent's own, which a person
+  // can watch and take over. Where agents get none (a Mac, Windows, no display
+  // tools, every display slot taken) it starts as it always has.
+  watchDisplays()
+  const displayHold = `browser:${connectorId}:${randomUUID()}`
+  const display = await acquireDisplay(agentId, displayHold)
+  const heldDisplay = display ? displayHold : null
+  if (spec.requiresDisplay && !display) {
+    throw new Error(
+      displayProblem() ??
+        "This acts only on an agent's own screen, which agents get on Linux with Xvnc (Install the desktop tools, on the agent's Screen view). None could be started for this agent.",
+    )
+  }
 
   let session: ConnectorSession
   try {
@@ -473,9 +644,17 @@ async function spawnReservedBrowser(
       env: {
         ...connectorChildEnv({ declared }),
         ...plan.env,
+        // The display, its cookie and its bus: the display's own private bus,
+        // or one that cannot exist, never unset (see NO_SESSION_BUS).
+        ...(display ? display.env : {}),
+        // A desktop driver keeps its state in this agent's own folder: its
+        // config and history, and the socket of any helper it starts, are not
+        // shared with another agent's driver or found in the person's home.
+        ...(spec.requiresDisplay ? { HOME: profileDir } : {}),
       },
     })
   } catch (err) {
+    if (heldDisplay) releaseDisplay(agentId, heldDisplay)
     // A handshake failure still SPAWNED something. This path is likelier here
     // than on the canonical connect: it runs inside a tool call, against a fresh
     // profile directory, and a profile lock or a cold npx can hold the handshake
@@ -493,12 +672,14 @@ async function spawnReservedBrowser(
   const pid = session.pid
   const agentProcess = asAgent?.process() ?? null
   if (!asAgent) registerConnectorPid(pid)
+  markDesktopToolsInUse(plan.command, agentProcess?.pid ?? pid)
 
   const browser: AgentBrowser = {
     session,
     pid,
     process: agentProcess,
     profileDir,
+    displayHold: heldDisplay,
     calls: 0,
     lastUsedAt: Date.now(),
     idleTimer: null,
@@ -514,6 +695,7 @@ async function spawnReservedBrowser(
       if (perAgent.size === 0) browsers.delete(connectorId)
     }
     browser.idleTimer?.clear()
+    if (browser.displayHold) releaseDisplay(agentId, browser.displayHold)
     if (!browser.process && typeof browser.pid === 'number') {
       unregisterConnectorPid(browser.pid)
       forgetConnectorPid(browser.pid)
@@ -522,6 +704,9 @@ async function spawnReservedBrowser(
   })
 
   browsersFor(connectorId).set(agentId, browser)
+  // The display may have died while this browser started, before it could be
+  // told: it would draw on nothing. Closed now, it starts afresh at its next call.
+  if (display && displayFor(agentId) !== display) void closeAgentBrowser(connectorId, agentId)
   armIdleTimer(connectorId, agentId, browser)
   log.info({ slug: spec.slug, agentId, open: totalOpen() }, 'opened a browser for an agent')
   return browser
@@ -574,23 +759,40 @@ export function noteCallEnd(connectorId: string, agentId: string): void {
 /**
  * Call a tool on an agent's browser ONLY if it already has one.
  *
- * The panel's capture path. It never creates, because a panel opening must not
- * be what puts a headed Chrome on someone's desktop, and it does not go through
- * the broker's executor precisely because that one does create.
+ * The panel's capture path, and the login fill's. It never creates, because a
+ * panel opening must not be what puts a headed Chrome on someone's desktop, and
+ * it does not go through the broker's executor precisely because that one does
+ * create, and audits the arguments (a fill's carry the login).
  */
 export async function callIfRunning(
   connectorId: string,
   agentId: string,
   rawToolName: string,
+  args: Record<string, unknown> = {},
 ): Promise<{ text: string; images?: { data: string; mimeType: string }[] } | null> {
   const browser = browsers.get(connectorId)?.get(agentId)
   if (!browser) return null
   noteCallStart(connectorId, agentId)
   try {
-    return await browser.session.callTool(rawToolName, {})
+    return await browser.session.callTool(rawToolName, args)
   } finally {
     noteCallEnd(connectorId, agentId)
   }
+}
+
+/**
+ * The working folder of this agent's running browser, or null when it has
+ * none. A file the browser saves under a relative name lands here.
+ * `inAgentSpace` says whether the agent user runs that browser, so the folder is
+ * read through the agent host rather than by this server.
+ */
+export function runningBrowserScratchDir(
+  connectorId: string,
+  agentId: string,
+): { dir: string; inAgentSpace: boolean } | null {
+  const browser = browsers.get(connectorId)?.get(agentId)
+  if (!browser) return null
+  return { dir: path.join(browser.profileDir, 'scratch'), inAgentSpace: browser.process !== null }
 }
 
 /** For the panel and for tests: does this agent have a browser running now? */

@@ -1,12 +1,7 @@
 import type { Request, Response } from 'express'
-import { connectorsByCategory } from '@clawboo/connector-catalog'
-import { isToolVisibleToAgent } from '@clawboo/db'
 
-import { connectorInstanceIdForSlug } from '../lib/capabilitySource/connectorIdentity'
-import { callIfRunning } from '../lib/connectors/agentBrowsers'
-import { getLiveConnector } from '../lib/connectors/supervisor'
-import { newestTabForSourceAgent } from '../lib/openclawSessionTabs'
-import { captureOpenClawTab } from '../lib/openclawTabCapture'
+import { captureAgentBrowserFrame } from '../lib/desktop/browserFrames'
+import { forgetAgentComputer } from './computer'
 import { redactValue } from '../lib/redact'
 import { getScreenshot, putScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
@@ -579,12 +574,14 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
       deleteAgentRoutines([agentId])
       // A Hermes agent's own jobs stop with it (its profile is set aside later).
       if (source.id === 'hermes') void pauseDeletedHermesAgentJobs(agentId)
+      forgetAgentComputer(agentId)
       res.json({ ok: true, upstreamDeleted: true })
     } catch (err) {
       if (isDisconnected(err)) {
         const openClaw = getRegistry().source
         const pending = source === openClaw && openClaw.deferUpstreamDelete(agentId)
         deleteLocalAgentRows(agentId)
+        forgetAgentComputer(agentId)
         // Its routines stay while the Gateway delete is only owed: a Gateway that
         // refuses it brings the agent back on the next sync, and the routines
         // must still be there. The source deletes them once the delete settles.
@@ -703,6 +700,7 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
     }
     db.delete(agents).where(inArray(agents.id, toDelete)).run()
     deleteAgentRoutines(toDelete)
+    for (const id of toDelete) forgetAgentComputer(id)
 
     // Sanity-log how many remain — useful when debugging via curl.
     const remaining = db
@@ -728,15 +726,6 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
 //
 // The frame is filed under the requesting agent's id: each Boo has its own
 // browser, and the GET below serves only that agent's frame.
-/**
- * The screenshot tool, found by SUFFIX rather than named outright.
- *
- * The two browsers in the catalog do not agree on what to call it: Playwright
- * ships `browser_take_screenshot`, chrome-devtools ships `take_screenshot`. A
- * literal would work against whichever one happened to be connected on the
- * machine it was written on and silently do nothing on the other.
- */
-const isScreenshotTool = (name: string): boolean => name.endsWith('take_screenshot')
 
 export async function agentScreenshotCapturePOST(req: Request, res: Response): Promise<void> {
   try {
@@ -754,75 +743,15 @@ async function captureScreenshot(req: Request, res: Response): Promise<void> {
     res.status(400).json({ ok: false, error: 'agentId is required' })
     return
   }
-  for (const def of connectorsByCategory('browser')) {
-    const connectorId = connectorInstanceIdForSlug(def.slug)
-    const live = getLiveConnector(connectorId)
-    if (!live) continue
-    const shooter = live.descriptors.find((d) => isScreenshotTool(d.name))
-    const rawName = shooter ? live.rawToolNames.get(shooter.name) : undefined
-    if (!shooter || !rawName) continue
-
-    // THE AGENT'S OWN GRANT DECIDES, even though the operator is the one asking.
-    // Without this an agent whose browser grant was revoked would still have a
-    // frame taken from its browser and filed under its name, and `browserGrants`
-    // is insert-only for exactly the opposite reason: so a revoke sticks.
-    if (!isToolVisibleToAgent(getDb(), shooter, { agentId, connectorId })) continue
-
-    // NEVER CREATES. `callIfRunning` returns null when this agent has no browser
-    // open, and that is the whole safety property of this route: the panel
-    // photographs a window that already exists and is never the thing that opens
-    // one.
-    const result = await callIfRunning(connectorId, agentId, rawName).catch(() => null)
-    const first = result?.images?.[0]
-    if (!first) continue
-    putScreenshot(agentId, {
-      data: first.data,
-      mimeType: first.mimeType,
-      toolName: shooter.name,
-    })
+  // NEVER CREATES a browser, and the agent's own grant decides: see
+  // captureAgentBrowserFrame. OpenClaw agents' own browser tabs are found there
+  // too, by the session stamp OpenClaw writes on each tab.
+  const shot = await captureAgentBrowserFrame(agentId, { live: false })
+  if (shot) {
+    putScreenshot(agentId, { data: shot.data, mimeType: shot.mimeType, toolName: shot.toolName })
     res.json({ ok: true, ts: Date.now() })
     return
   }
-
-  // ── OpenClaw agents browse somewhere clawboo does not broker ────────────────
-  //
-  // The loop above only reaches browsers clawboo itself started, which an OpenClaw
-  // agent can never have: the Gateway's MCP URLs carry no signed scope, so no
-  // agent-scoped grant resolves and it is never offered clawboo's browser tools.
-  // Meanwhile OpenClaw 2026.9 turns its OWN browser on by default, so these agents
-  // do browse — the panel simply had no way to see it, which is why an agent could
-  // demonstrably open a page and the panel still show "nothing captured yet".
-  //
-  // The identity here is READ, NOT INFERRED. OpenClaw stamps the owning session
-  // onto each tab it tracks, and that stamp is the same string clawboo builds for
-  // the agent. Every route that tried to INFER which agent was calling was
-  // rejected precisely because a lost race files one Boo's browsing under another
-  // Boo's name, and that is a privacy bug rather than a missing feature.
-  const agent = getDb()
-    .select({ sourceAgentId: agents.sourceAgentId, runtime: agents.runtime })
-    .from(agents)
-    .where(eq(agents.id, agentId))
-    .get()
-  if (agent?.runtime === 'openclaw' && agent.sourceAgentId) {
-    const tab = newestTabForSourceAgent(agent.sourceAgentId)
-    if (tab) {
-      const shot = await captureOpenClawTab(tab.targetId).catch(() => null)
-      if (shot) {
-        // FILED UNDER THE CLAWBOO ROW ID, not the OpenClaw agent id inside the
-        // session key. They are equal on every row today, so getting this wrong
-        // passes every test that can be written now and misattributes the first
-        // time an OpenClaw agent is renamed or re-imported under a different id.
-        putScreenshot(agentId, {
-          data: shot.data,
-          mimeType: shot.mimeType,
-          toolName: 'openclaw__browser',
-        })
-        res.json({ ok: true, ts: Date.now() })
-        return
-      }
-    }
-  }
-
   res.status(409).json({ ok: false, error: 'this Boo has no browser open right now' })
 }
 

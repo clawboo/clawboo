@@ -76,7 +76,7 @@ describe('InlineEditor Computer tab', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Computer' }))
     expect(screen.getByTestId('computer-panel').textContent).toBe('a1')
-    expect(screen.getByText('Ada · Computer · read-only')).toBeTruthy()
+    expect(screen.getByText('Ada · Computer')).toBeTruthy()
     expect(screen.queryByText(/Workspace/)).toBeNull()
   })
 })

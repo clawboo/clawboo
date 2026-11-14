@@ -294,13 +294,46 @@ function readSavedSecretValues(
   return values
 }
 
-function savedSecretValues(): ReadonlySet<string> {
+function vaultSecretValues(): ReadonlySet<string> {
   const file = vaultPath()
   const lent = lentValues?.vault === file ? lentValues : null
   if (lent?.current) return lent.values
   const values = readSavedSecretValues()
   if (!values) return lent?.values ?? NOTHING_LENT
   lentValues = { vault: file, values, current: true }
+  return values
+}
+
+// Values this process holds for a while that never sit in the vault file: a login
+// fetched from a password manager for one fill. Their owner lends them here under a
+// name and takes them back with null. Same rule as the vault's own: never logged,
+// never returned, only compared against.
+const borrowed = new Map<string, ReadonlySet<string>>()
+let union: {
+  vault: ReadonlySet<string>
+  borrowedVersion: number
+  values: ReadonlySet<string>
+} | null = null
+let borrowedVersion = 0
+
+/** Lend values to the storage scrub under `owner`, or take them back with null. */
+export function lendSecretValues(owner: string, values: ReadonlySet<string> | null): void {
+  if (values && values.size > 0) borrowed.set(owner, new Set(values))
+  else if (!borrowed.delete(owner)) return
+  borrowedVersion += 1
+}
+
+function savedSecretValues(): ReadonlySet<string> {
+  const vault = vaultSecretValues()
+  if (borrowed.size === 0) return vault
+  // The same set object until something changes, so the scrub keeps its compiled
+  // matcher instead of rebuilding it on every write.
+  if (union && union.vault === vault && union.borrowedVersion === borrowedVersion) {
+    return union.values
+  }
+  const values = new Set(vault)
+  for (const lentSet of borrowed.values()) for (const v of lentSet) values.add(v)
+  union = { vault, borrowedVersion, values }
   return values
 }
 
@@ -360,6 +393,11 @@ export function getRuntimeSecret(name: string): string | null {
 /** Presence check that never decrypts the value. */
 export function hasRuntimeSecret(name: string): boolean {
   return Boolean(readVault()[name])
+}
+
+/** The names of the vault slots that start with `prefix`. Names only: never a value. */
+export function vaultSlotNames(prefix: string): string[] {
+  return Object.keys(readVault()).filter((name) => name.startsWith(prefix))
 }
 
 /**

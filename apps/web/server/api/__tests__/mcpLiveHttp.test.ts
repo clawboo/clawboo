@@ -18,9 +18,11 @@ import express from 'express'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../../lib/db'
+import { setAgentPageRunner } from '../../lib/logins/browserLink'
 import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
 import { bindLiveRun, clearLiveRunBindings } from '../../lib/mcpLiveBindings'
-import { mcpTasksPost, mcpTasksSession } from '../mcp'
+import { openRunRef, resetRunRefsForTests } from '../../lib/runPerson'
+import { mcpTasksPost, mcpTasksSession, mcpToolsPost } from '../mcp'
 
 let dir: string
 let prevHome: string | undefined
@@ -55,6 +57,7 @@ beforeAll(async () => {
   app.use(express.json())
   app.post('/api/mcp/tasks', mcpTasksPost)
   app.get('/api/mcp/tasks', mcpTasksSession)
+  app.post('/api/mcp/tools', mcpToolsPost)
   server = http.createServer(app)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -273,3 +276,41 @@ async function toolNamesStateful(url: string): Promise<string[]> {
   const parsed = JSON.parse(line.slice('data:'.length)) as { result: { tools: { name: string }[] } }
   return parsed.result.tools.map((t) => t.name).sort()
 }
+
+describe('the login fill on a live URL', () => {
+  const toolsUrl = (): string =>
+    mcpHttpUrl(base, 'tools', { agentId: 'hermes-1', live: true, attachSecret: secret() })
+
+  afterEach(() => {
+    setAgentPageRunner(null)
+    resetRunRefsForTests()
+  })
+
+  it('is listed to the agent, though the list names no run', async () => {
+    // A replaced runner counts as a browser the agent holds.
+    setAgentPageRunner(async () => ({ kind: 'no_browser' }))
+    expect(await toolNames(toolsUrl())).toContain('fill_login')
+  })
+
+  it("acts for the person of the run in progress, by that run's reference", async () => {
+    setAgentPageRunner(async () => ({ kind: 'no_browser' }))
+    const ref = openRunRef('hermes-1', {
+      person: { id: 'local', name: 'You', role: null },
+      basis: 'started',
+    })
+    const release = bindLiveRun('hermes-1', {
+      agentId: 'hermes-1',
+      teamId: 'team-A',
+      boundRunRef: ref.ref,
+      attachSecret: secret(),
+    })
+    const out = (await rpc(toolsUrl(), 'tools/call', {
+      name: 'fill_login',
+      arguments: { site: 'bank.example' },
+    })) as { result: { content: { text: string }[] } }
+    // Past the person check: the fill went looking for the agent's browser.
+    expect(out.result.content[0]!.text).toMatch(/^refused: you have no browser open/)
+    release()
+    ref.release()
+  })
+})

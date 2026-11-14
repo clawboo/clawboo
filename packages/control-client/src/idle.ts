@@ -12,7 +12,8 @@ import { z } from 'zod'
 const epochMs = z.number().int().nonnegative()
 
 export const idlePeopleSchema = z.object({
-  /** A visible, focused tab beat or a person acted within the last minute. */
+  /** A visible, focused tab beat or a person acted within the last minute, or a
+   *  person holds an agent's screen (Take over) now. */
   present: z.boolean(),
   /** The latest focused-tab beat or action; null when none since the engine started. */
   lastSeenAt: epochMs.nullable(),

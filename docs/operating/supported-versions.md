@@ -67,6 +67,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | The person check on person writes                   | `board.personCheck`                                                                | Supported                      | Planned     | Planned       |
 | Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                              | Supported                      | Planned     | Planned       |
 | Agent browser screenshots                           | `agent.screenshots`                                                                | Supported                      | Planned     | Planned       |
+| An agent's live screen, take over and links         | `agent.computer`                                                                   | Supported                      | Planned     | Planned       |
 | Shell commands for Clawboo Native agents            | `agent.nativeShell`                                                                | Supported                      | Planned     | Planned       |
 | Routines                                            | `routines`                                                                         | Supported                      | Planned     | Planned       |
 | Shared memory and similarity search                 | `memory`, `memory.embeddings`                                                      | Supported                      | Planned     | Planned       |

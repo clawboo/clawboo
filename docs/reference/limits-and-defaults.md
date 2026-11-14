@@ -20,7 +20,7 @@ Limits on running work count only the time the computer is awake. When a laptop 
 | [What reaches an agent](#what-reaches-an-agent)   | Catch-up, inbox digest, tool results, memory injection          |
 | [Memory](#memory)                                 | Search limits, ranking, embedding checks                        |
 | [Approvals and budgets](#approvals-and-budgets)   | Approval windows, remembered answers, budget warnings           |
-| [Agent browsers](#agent-browsers)                 | Browsers at once, idle close, saved screenshots                 |
+| [Agent browsers](#agent-browsers)                 | Browsers and displays at once, take over, links                 |
 | [Network and HTTP](#network-and-http)             | Ports, rate limits, request sizes                               |
 | [Server and CLI](#server-and-cli)                 | Start, stop, logs, health checks, the database                  |
 | [Updates and monitoring](#updates-and-monitoring) | Catalog and update checks, Fleet health thresholds              |
@@ -185,12 +185,22 @@ A budget set to hard cap pauses work at 100% of its limit; the default mode only
 
 ## Agent browsers
 
-| Limit                                     | Value                                | Change it                       | Source                                               |
-| ----------------------------------------- | ------------------------------------ | ------------------------------- | ---------------------------------------------------- |
-| Agent browsers open at once               | 4                                    | `CLAWBOO_MAX_AGENT_BROWSERS`    | `apps/web/server/lib/connectors/agentBrowsers.ts:61` |
-| Idle time before an agent browser closes  | 10 minutes                           | `CLAWBOO_AGENT_BROWSER_IDLE_MS` | `apps/web/server/lib/connectors/agentBrowsers.ts:66` |
-| Wait for a free browser when all are busy | 60 seconds                           | No                              | `apps/web/server/lib/connectors/agentBrowsers.ts:69` |
-| Saved browser screenshots kept in memory  | 24 MiB in total; the oldest go first | No                              | `apps/web/server/lib/screenshotBus.ts:49`            |
+| Limit                                                     | Value                                                    | Change it                       | Source                                               |
+| --------------------------------------------------------- | -------------------------------------------------------- | ------------------------------- | ---------------------------------------------------- |
+| Agent browsers open at once                               | 4                                                        | `CLAWBOO_MAX_AGENT_BROWSERS`    | `apps/web/server/lib/connectors/agentBrowsers.ts:74` |
+| Idle time before an agent browser closes                  | 10 minutes, not counted while a person has taken over    | `CLAWBOO_AGENT_BROWSER_IDLE_MS` | `apps/web/server/lib/connectors/agentBrowsers.ts:79` |
+| Wait for a free browser when all are busy                 | 60 seconds                                               | No                              | `apps/web/server/lib/connectors/agentBrowsers.ts:82` |
+| Saved browser screenshots kept in memory                  | 24 MiB in total; the oldest go first                     | No                              | `apps/web/server/lib/screenshotBus.ts:49`            |
+| Agent displays at once (Linux)                            | As many as agent browsers                                | `CLAWBOO_MAX_AGENT_BROWSERS`    | `apps/web/server/lib/desktop/displays.ts:62`         |
+| Size of an agent display                                  | 1280x800                                                 | `CLAWBOO_AGENT_DISPLAY_SIZE`    | `apps/web/server/lib/desktop/displays.ts:175`        |
+| How long a display outlives its browser                   | 30 seconds                                               | No                              | `apps/web/server/lib/desktop/displays.ts:55`         |
+| How long control lasts after the view that took it closes | 30 seconds                                               | No                              | `apps/web/server/lib/desktop/control.ts:23`          |
+| How long control lasts with no key or click               | 10 minutes                                               | No                              | `apps/web/server/lib/desktop/control.ts:26`          |
+| How long a link works                                     | View link 8 hours, control link 1 hour, at most 24 hours | Per link, from 1 minute         | `apps/web/server/lib/desktop/links.ts:34,40`         |
+| Links per agent                                           | 20; another is refused until one is revoked              | No                              | `apps/web/server/lib/desktop/links.ts:43`            |
+| People watching                                           | 8 per agent, 32 in all; links get 6, 24 and 2 per link   | No                              | `apps/web/server/lib/desktop/liveView.ts:63-70`      |
+| Pictures of a browser without a display, while watched    | One a second, sent only when the page changed            | No                              | `apps/web/server/lib/desktop/liveView.ts:55`         |
+| Input events in one request                               | 256                                                      | No                              | `apps/web/server/lib/desktop/liveView.ts:73`         |
 
 ## Network and HTTP
 
@@ -221,7 +231,7 @@ Over a rate limit the server answers 429 with a `Retry-After` header. The [REST 
 | `clawboo stop`: wait after SIGTERM, then after SIGKILL                                           | 4 seconds, then 2 seconds                                                                 | No                                            | `apps/cli/src/lifecycle.ts:1168,1170`                     |
 | `server.log` size before it rotates to `server.log.1`                                            | 5 MiB, checked at each launch                                                             | No                                            | `apps/cli/src/server-log.ts:19`                           |
 | Log lines shown after a start timeout                                                            | The last 12, from the final 8 KiB                                                         | No                                            | `apps/cli/src/server-log.ts:60`                           |
-| A restarted server's wait for its old port                                                       | 15 seconds                                                                                | No                                            | `apps/web/server/index.ts:287`                            |
+| A restarted server's wait for its old port                                                       | 15 seconds                                                                                | No                                            | `apps/web/server/index.ts:291`                            |
 | Shutdown wait for runtime processes to exit                                                      | 5 seconds                                                                                 | No                                            | `apps/web/server/lib/runtimes/subprocess.ts:182`          |
 | Hermes gateway port                                                                              | 8642, or the next free port up to 39 above it                                             | `CLAWBOO_HERMES_GATEWAY_PORT`                 | `apps/web/server/lib/runtimes/hermes/gateway.ts:43,45`    |
 | Hermes gateway start: wait for its API server to answer                                          | 2 minutes                                                                                 | No                                            | `apps/web/server/lib/runtimes/hermes/gateway.ts:49`       |
@@ -237,9 +247,9 @@ Over a rate limit the server answers 429 with a `Retry-After` header. The [REST 
 | A page load, or a switch to the dashboard's tab, counts as a person without a touch              | 2 minutes                                                                                 | No                                            | `apps/web/src/features/presence/presenceBeater.ts:23`     |
 | SQLite checks of the database: time each may take before it reads as not run                     | 2 minutes for the quick check, 15 for the full one                                        | No                                            | `apps/web/server/lib/dbCheck.ts:30`                       |
 | Full SQLite check in the background                                                              | Once a day, first 2 minutes after a start                                                 | No                                            | `apps/web/server/lib/bootProbe.ts:563`                    |
-| `GET /api/system/idle`: wait to see whether anything listens at a disconnected Gateway's address | 1 second                                                                                  | No                                            | `apps/web/server/lib/gatewayPlace.ts:95`                  |
-| `GET /api/system/idle`: wait for one schedule source                                             | 3 seconds, then that source reads `unknown`                                               | No                                            | `apps/web/server/lib/idleState.ts:42`                     |
-| Write of Node's compiled-code cache after a start                                                | 15 seconds                                                                                | `NODE_COMPILE_CACHE` (where; the CLI sets it) | `apps/web/server/index.ts:1228`                           |
+| `GET /api/system/idle`: wait to see whether anything listens at a disconnected Gateway's address | 1 second                                                                                  | No                                            | `apps/web/server/lib/gatewayPlace.ts:101`                 |
+| `GET /api/system/idle`: wait for one schedule source                                             | 3 seconds, then that source reads `unknown`                                               | No                                            | `apps/web/server/lib/idleState.ts:54`                     |
+| Write of Node's compiled-code cache after a start                                                | 15 seconds                                                                                | `NODE_COMPILE_CACHE` (where; the CLI sets it) | `apps/web/server/index.ts:1245`                           |
 
 ## Updates and monitoring
 

@@ -8,13 +8,20 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installGlobalErrorHandlers } from './app/globalErrorHandlers'
+import { readInjectedBase } from './app/injectedBase'
 import { AccessLock } from './features/access/AccessLock'
+import { ComputerLinkPage } from './features/computer/ComputerLinkPage'
 import { ErrorBoundary } from './features/shared/ErrorBoundary'
 import './app/globals.css'
 
 // Non-React failures (a throw inside a listener, a promise nobody awaited) never
 // reach an error boundary — without this they vanish with no app context.
 installGlobalErrorHandlers()
+
+// A link to one agent's screen opens that screen and nothing else: whoever holds
+// it is not signed in to this Clawboo, and gets neither its dashboard nor its
+// access lock.
+const isComputerLink = window.location.pathname === `${readInjectedBase()}/computer-link`
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -29,9 +36,13 @@ createRoot(document.getElementById('root')!).render(
     <ErrorBoundary variant="app" label="Clawboo">
       {/* A browser without the access cookie gets one screen saying how to get
           in, and nothing of the app mounts behind it. */}
-      <AccessLock>
-        <App />
-      </AccessLock>
+      {isComputerLink ? (
+        <ComputerLinkPage />
+      ) : (
+        <AccessLock>
+          <App />
+        </AccessLock>
+      )}
     </ErrorBoundary>
   </StrictMode>,
 )

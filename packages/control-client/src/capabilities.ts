@@ -79,6 +79,9 @@ export const ENGINE_FEATURES = [
   // Per-agent surfaces.
   'agent.nativeShell',
   'agent.screenshots',
+  // An agent's computer: its live screen, take over when it has a display of its
+  // own, and view and control links to it (/api/agents/:agentId/computer).
+  'agent.computer',
   'routines',
   // Shared memory, and whether similarity search may run at all.
   'memory',

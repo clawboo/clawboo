@@ -116,6 +116,7 @@
             "pages": [
               "using/providers-and-runtimes",
               "using/connectors",
+              "using/website-logins",
               "using/capabilities",
               "using/memory"
             ]
@@ -237,6 +238,7 @@
               "reference/rest-api/memory",
               "reference/rest-api/capabilities",
               "reference/rest-api/connectors",
+              "reference/rest-api/website-logins",
               "reference/rest-api/boo-zero",
               "reference/rest-api/runtimes",
               "reference/rest-api/schedules",

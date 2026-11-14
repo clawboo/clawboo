@@ -77,6 +77,7 @@ const CATEGORY_LABELS: Record<ConnectorCategory, string> = {
   data: 'Data',
   observability: 'Observability',
   browser: 'Browser',
+  desktop: 'Desktop',
   search: 'Search',
   productivity: 'Productivity',
   finance: 'Finance',

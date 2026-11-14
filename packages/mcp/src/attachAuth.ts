@@ -62,12 +62,16 @@ export interface SignableScope {
    *  progress (see `AttachScope.live`). Signed so a per-run URL cannot be turned
    *  into one, or the reverse. */
   live?: boolean
+  /** The run's reference (`scopeRunRef`, Tools URL only): the live run a tool that
+   *  acts for the run's person looks up. Signed so a runtime cannot claim another
+   *  run's person. */
+  boundRunRef?: string | null
 }
 
 /** One canonical byte string per semantic scope, independent of which param
  *  spelling carried it (`scopeAgentId` vs `postAuthorAgentId`). `\x1f` separators
  *  cannot appear in ids, so fields can never bleed into each other. `teamRun`, the
- *  bound task and the run's id are appended only when set. `v2` is the version that
+ *  bound task, the run's id and the run's reference are appended only when set. `v2` is the version that
  *  names the server: every URL a run holds is rewritten for that run, and a URL copied
  *  by hand from `/api/mcp/config` before it has to be copied again. */
 const canonical = (s: SignableScope): string =>
@@ -83,6 +87,7 @@ const canonical = (s: SignableScope): string =>
     ...(s.boundTaskId ? [`task:${s.boundTaskId}`] : []),
     ...(s.boundExecutionId ? [`exec:${s.boundExecutionId}`] : []),
     ...(s.live ? ['live'] : []),
+    ...(s.boundRunRef ? [`run:${s.boundRunRef}`] : []),
   ].join('\x1f')
 
 /** Sign a scope. Hex HMAC-SHA256; safe to place in a URL. */

@@ -32,6 +32,7 @@ import {
 } from '@clawboo/db'
 import { resolveRuntimeIntegration, type RuntimeAdapter } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
+import type { PersonRef } from '@clawboo/protocol'
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource'
@@ -79,6 +80,8 @@ export interface RunTeamExchangeDeps {
   teamId: string
   /** The initiating message for the first speaker's turn (e.g. the user's prompt). */
   stimulus?: string | null
+  /** The verified person who started the exchange, when one did (see runPerson.ts). */
+  startedBy?: PersonRef | null
   /** Agent ids seeded to speak first (defaults to the team leader). */
   firstSpeakers?: string[]
   maxExchangeTurns?: number
@@ -308,6 +311,7 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
           teamId,
           makeAdapter: r.factory,
           stimulus: turnIndex === 1 ? (deps.stimulus ?? null) : null,
+          startedBy: deps.startedBy ?? null,
           mcpBaseUrl: deps.mcpBaseUrl ?? null,
           ...(homeDir ? { homeDir } : {}),
           ...(cwd ? { cwd } : {}),

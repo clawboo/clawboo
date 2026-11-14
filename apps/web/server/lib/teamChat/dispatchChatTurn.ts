@@ -46,6 +46,7 @@ import {
 } from '@clawboo/db'
 import type { RuntimeAdapter, RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
+import type { PersonRef } from '@clawboo/protocol'
 import { formatPeerPost } from '@clawboo/mcp'
 
 import { agentMkdir } from '../agentUser/agentFs'
@@ -59,12 +60,15 @@ import type { ChatTurnOutcome } from './exchange'
 import { loadChatLeaderState, saveChatLeaderState } from './leaderState'
 import type { ChatParticipant } from './selectNextSpeaker'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
+import { openRunRef, runPersonOf } from '../runPerson'
 
 export interface DispatchChatTurnDeps {
   db: ClawbooDb
   participant: ChatParticipant
   roomId: string
   teamId: string
+  /** The verified person who started the exchange, when one did (see runPerson.ts). */
+  startedBy?: PersonRef | null
   /** Adapter factory (injected — the test supplies a fake; production passes
    *  `adapterFactoryFor(runtime)`). Mirrors executorRunner's `makeAdapter`. */
   makeAdapter: (ctx: RuntimeRunContext) => RuntimeAdapter
@@ -174,9 +178,12 @@ export async function dispatchChatTurn(
   // budgetHold).
   const gate = reserveRunBudget(db, { agentId, teamId }, { kind: 'exchange', ref: deps.roomId })
   if (gate.blocked) return refuseTurn(deps, gate.scope, gate.reason)
+  // Whose run this is, for the tools that act for that person (the login fill).
+  const runRef = openRunRef(agentId, runPersonOf({ db, startedBy: deps.startedBy ?? null }))
   try {
-    return await dispatchHeldTurn(deps, gate.hold)
+    return await dispatchHeldTurn(deps, gate.hold, runRef.ref)
   } finally {
+    runRef.release()
     gate.hold.release()
   }
 }
@@ -201,6 +208,7 @@ function refuseTurn(
 async function dispatchHeldTurn(
   deps: DispatchChatTurnDeps,
   hold: RunBudgetHold,
+  runRef: string,
 ): Promise<ChatTurnOutcome> {
   const { db, participant, roomId, teamId } = deps
   const agentId = participant.agentId
@@ -252,7 +260,12 @@ async function dispatchHeldTurn(
     model: null,
     resume,
     mcpBaseUrl: deps.mcpBaseUrl ?? null,
-    memoryScope: { teamId, agentId, attachSecret: getMcpAttachSecret(deps.db) },
+    memoryScope: {
+      teamId,
+      agentId,
+      attachSecret: getMcpAttachSecret(deps.db),
+      boundRunRef: runRef,
+    },
     ...(deps.homeDir ? { homeDir: deps.homeDir } : {}),
     ...(deps.apiKeyEnv ? { apiKeyEnv: deps.apiKeyEnv } : {}),
   }

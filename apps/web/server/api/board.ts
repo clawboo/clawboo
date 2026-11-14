@@ -598,7 +598,9 @@ export function boardRetryPOST(req: Request, res: Response): void {
         person: personOf(req),
       }),
     )
-    startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
+    startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req), {
+      startedBy: actsAsPerson(req) ? actingPerson(req) : null,
+    })
     res.status(202).json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })
@@ -686,7 +688,9 @@ export function boardAssignPOST(req: Request, res: Response): void {
         person: personOf(req),
       }),
     )
-    startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
+    startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req), {
+      startedBy: actsAsPerson(req) ? actingPerson(req) : null,
+    })
     res.json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })
@@ -999,7 +1003,16 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
             {
               dispatch: (teamId, id) => {
                 const current = getTask(db, id)
-                startTask(db, id, teamId, current ? runnerTargetOf(db, current) : null, mcpBaseUrl)
+                startTask(
+                  db,
+                  id,
+                  teamId,
+                  current ? runnerTargetOf(db, current) : null,
+                  mcpBaseUrl,
+                  {
+                    startedBy: actsAsPerson(req) ? actingPerson(req) : null,
+                  },
+                )
               },
               // As Retry: team chat could not run a task its engine cannot see.
               startRefusal: (t) => startRefusal(db, t, runnerTargetOf(db, t) !== null),

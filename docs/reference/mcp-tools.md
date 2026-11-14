@@ -56,6 +56,7 @@ Every server reports version `0.1.0` and declares the `tools.listChanged` capabi
 | [`memory_browse`](#memory_browse)             | Memory   | List the most recently updated facts                     |
 | [`memory_feedback`](#memory_feedback)         | Memory   | Report whether a recalled fact helped                    |
 | [`echo`, `note`](#builtin-tools)              | Tools    | Simple builtins that exercise the broker and audit       |
+| [`fill_login`](#fill_login)                   | Tools    | Sign in to a site in the agent's own browser             |
 | [Connector tools](#connector-tools)           | Tools    | Tools from connectors the agent has been granted         |
 | [`read_tool_result`](#read_tool_result)       | Tools    | Page through a result that was too large to return whole |
 | [`team_chat_post`](#team_chat_post)           | TeamChat | Post to the peer room as a named teammate                |
@@ -100,14 +101,14 @@ A Clawboo Native agent's tool settings choose which servers it gets. The default
 
 ### Attach URL parameters
 
-| Server   | Identity parameters                                                                                             | Signed by                                      |
-| -------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Tasks    | `scopeTeamId` limits reads and writes to the team; `scopeAgentId` turns on mailbox delivery                     | `scopeSig`                                     |
-| Memory   | `scopeTeamId`, `scopeAgentId`, `scopeTenantId`; provenance stamps `provRuntime`, `provTaskId`, `provSessionKey` | `scopeSig`; the provenance stamps by `provSig` |
-| Tools    | `scopeTeamId`, `scopeAgentId` (decide which connector grants apply), `scopeTaskId` (named on approvals)         | `scopeSig`                                     |
-| TeamChat | `roomTeamId` (the room is `team:<roomTeamId>`), `postAuthorAgentId`, and `delegate=1` on orchestrated runs      | `scopeSig`, which also covers `delegate`       |
+| Server   | Identity parameters                                                                                                                                | Signed by                                      |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Tasks    | `scopeTeamId` limits reads and writes to the team; `scopeAgentId` turns on mailbox delivery                                                        | `scopeSig`                                     |
+| Memory   | `scopeTeamId`, `scopeAgentId`, `scopeTenantId`; provenance stamps `provRuntime`, `provTaskId`, `provSessionKey`                                    | `scopeSig`; the provenance stamps by `provSig` |
+| Tools    | `scopeTeamId`, `scopeAgentId` (decide which connector grants apply), `scopeTaskId` (named on approvals), `scopeRunRef` (the run, for `fill_login`) | `scopeSig`                                     |
+| TeamChat | `roomTeamId` (the room is `team:<roomTeamId>`), `postAuthorAgentId`, and `delegate=1` on orchestrated runs                                         | `scopeSig`, which also covers `delegate`       |
 
-- `scopeSig` is an HMAC-SHA256 over the server the URL is for, the team, agent, tenant and delegate fields, and the team-run mark, `scopeTaskId` and `scopeExecutionId` when present, so a signature for one server opens no other, under a per-install secret stored in the `settings` table (`mcp-attach-scope-secret`). A spawned runtime only ever sees the derived signature. A URL without the newer fields signs exactly as before.
+- `scopeSig` is an HMAC-SHA256 over the server the URL is for, the team, agent, tenant and delegate fields, and the team-run mark, `scopeTaskId`, `scopeExecutionId` and `scopeRunRef` when present, so a signature for one server opens no other, under a per-install secret stored in the `settings` table (`mcp-attach-scope-secret`). A spawned runtime only ever sees the derived signature. A URL without the newer fields signs exactly as before.
 - Provenance stamps record which run saved a fact or reported an outcome. They never widen what a session can see, and they are dropped when `provSig` does not verify.
 - `delegate=1` is inside the signature, so a run cannot add it to its own URL. Clawboo writes it only for runs driven by the team engine, which is watching for the `team_delegate` call.
 - Every URL Clawboo writes also carries an `attachToken`. When the access gate is on, a cookieless MCP request needs it (see [Transports](#transports)).
@@ -513,6 +514,7 @@ The Tools server is Clawboo's tool broker. Every call is checked, may wait for a
 
 - The [builtin tools](#builtin-tools) whose requirements are met.
 - The tools of every live [connector](/using/connectors) that the calling agent's grants allow. A connector tool the agent has not been granted is not listed at all. The list is recomputed for every list and every call, and the server sends a list-changed notification when a connector connects or disconnects.
+- [`fill_login`](#fill_login), for a bound caller whose agent holds a live browser connector, unless its run is known to belong to no person.
 - [`read_tool_result`](#read_tool_result), always. Grants, availability and connector tools never hide or replace it.
 
 A call goes through these checks in order:
@@ -539,6 +541,25 @@ These two exist to exercise the broker (the round trip and the audit). Neither h
 | `note` | `{ note: string }` (non-empty) | safe | Always | `noted: <note>`; nothing is stored |
 
 There is no built-in web search. For search, connect a search connector such as Exa Search in [Connectors](/using/connectors) and give it to the agents that need it; its tools are then listed as [connector tools](#connector-tools). With no grant that covers every agent (a `global` grant), an unverified caller is served three tools: `echo`, `note` and `read_tool_result`.
+
+### fill_login
+
+Signs in to a website in the agent's own browser with a login its run's person saved, or one from their 1Password (see [Let agents sign in to websites](/using/website-logins)). Clawboo fills the page itself; the agent never gets the username, password or one-time code.
+
+| Argument | Type   | Notes                                                                  |
+| -------- | ------ | ---------------------------------------------------------------------- |
+| `site`   | string | A host or an address on the site, for example `example.com`. Required. |
+
+Listed only for a bound caller whose agent holds the Playwright or Chrome DevTools connector, live, through its own grant or its team's. Each run carries a reference to itself on its Tools URL as `scopeRunRef`, inside the signature, and Clawboo forgets the reference when the run ends; Clawboo Native gets it in-process. A run whose reference names no person (a routine's) is not offered it, nor are an OpenClaw agent and an unverified caller. A live URL's tool list names no run, so it lists `fill_login` and the run in progress is checked at call time.
+
+The result is text that starts with one of:
+
+- `filled:` and the names of the fields filled. Submit the form next.
+- `no saved login:` there is none for that origin that this run may use.
+- `needs you:` a CAPTCHA, passkey or card check, or 1Password could not be read. On a run with a board task, Clawboo hands the task back to the person who asked for it and the card goes to **Needs you**.
+- `refused:` and why (not on that site, no browser open, no browser given, a certificate error, an `https` page in a browser that cannot show its certificate, no sign-in field, an `http` site, a person in control of the browser, or a run with no person).
+
+The page must be on exactly the login's origin, read from the browser, not from `site`, and on `https` the browser must accept its certificate; only the Playwright browser on Chrome or Chromium (its default) can show Clawboo that. The Chrome DevTools browser fills only plain `http` pages on loopback, and Playwright's bare headless shell, which reports no certificate state, fills none on `https`. `no saved login` comes only from a page of that site with a sign-in field. The call is risk `safe` and asks no one; its audit row holds the site and the result, never a value. Clawboo masks the filled username, password and one-time code (4 characters or longer) out of that agent's later browser tool results; screenshots are not masked.
 
 ### Connector tools
 

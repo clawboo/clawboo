@@ -40,14 +40,18 @@ import {
   closeAllForConnector,
   noteCallEnd,
   noteCallStart,
+  desktopDriverListingEnv,
   type AgentBrowserSpawn,
 } from './agentBrowsers'
+import { maskFilledValues } from '../logins/filledValues'
 import { killProcessTree, killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn, type ConnectorSpawnPlan } from './spawnPlan'
 import { browserGuardArgs } from './dashboardGuard'
+import { isPersonInControl, personInControlMessage } from '../desktop/control'
+import { markDesktopToolsInUse } from '../desktop/tools'
 
 /** What the catalog gives us, narrowed to what a connection needs. */
 export interface ConnectableDefinition {
@@ -72,6 +76,15 @@ export interface ConnectableDefinition {
          * declaring it.
          */
         perAgentProfileFlag?: string
+        /**
+         * One child per agent on that agent's own display, never without one
+         * (a desktop driver). Like the profile flag, presence routes per agent;
+         * unlike it, a call that names no agent is refused, never sent to the
+         * shared session.
+         */
+        perAgentDisplay?: boolean
+        /** A program Clawboo installs itself: run from that install only. */
+        ownedBinary?: boolean
         /** How this browser takes a list of origins to block (see dashboardGuard). */
         blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
         /** How this browser's Chrome takes a launch switch (see dashboardGuard). */
@@ -93,6 +106,9 @@ export interface ConnectableDefinition {
   /** The catalog's own list of destructive tools, which replaces the server's
    *  `destructiveHint` when present (see ConnectorDefinition.destructiveTools). */
   destructiveTools?: readonly string[]
+  /** Arguments with which the server writes a file wherever it is told; a call
+   *  carrying one is refused (see ConnectorDefinition.fileWritingArgs). */
+  fileWritingArgs?: readonly string[]
   /** Credentials the connector declared. Resolved from the vault, never ambient. */
   authInputs?: readonly DeclaredInput[]
 }
@@ -168,14 +184,56 @@ function toDescriptor(
       // grant gate already trusts it, and it is not model-supplied - over HTTP
       // it is HMAC-verified before it is believed, and on the native path it
       // comes from the run.
+      // Before anything starts: a read-only tool of some servers writes a file
+      // anywhere it is told when given one of these, through links too.
+      const writes = fileWritingArgIn(args, def.fileWritingArgs)
+      if (writes) {
+        throw new Error(
+          `${def.displayName} may not write files for an agent here: leave out "${writes}". A screenshot comes back in the reply.`,
+        )
+      }
       const routedAgentId = perAgentTarget(def, ctx.agentId ?? null)
+      // A desktop driver works for one agent, on that agent's own screen. With
+      // no agent named there is no screen it may touch.
+      if (def.launch.transport === 'stdio' && def.launch.perAgentDisplay && !routedAgentId) {
+        throw new Error(
+          `${def.displayName} acts only for an agent, on that agent's own screen, and this call named no agent.`,
+        )
+      }
+      // A person has taken over this agent's screen: its own clicks would land
+      // in the window they are using. Refused before a browser is touched, with
+      // the reason, so the model waits rather than fighting them.
+      if (routedAgentId && isPersonInControl(routedAgentId)) {
+        throw new Error(personInControlMessage())
+      }
       const session = routedAgentId
         ? await agentBrowserSession(spawnSpecFor(def), connectorId, routedAgentId, { create: true })
         : (live.get(connectorId)?.session ?? null)
       if (!session) return `connector ${def.slug} is not connected`
+      // Again, after the wait: starting a browser takes seconds, and a person
+      // may have taken over meanwhile.
+      if (routedAgentId && isPersonInControl(routedAgentId)) {
+        throw new Error(personInControlMessage())
+      }
       if (routedAgentId) noteCallStart(connectorId, routedAgentId)
       try {
-        return await callThrough(session, tool.name, args)
+        let result: Awaited<ReturnType<typeof callThrough>>
+        try {
+          result = await callThrough(session, tool.name, args)
+        } catch (err) {
+          // A failed call's message can quote the page too, and it reaches the
+          // model and the audit row the same way.
+          if (!routedAgentId || !(err instanceof Error)) throw err
+          const masked = maskFilledValues(routedAgentId, err.message)
+          if (masked === err.message) throw err
+          throw new Error(masked)
+        }
+        // A password the login fill put into this agent's page never comes back
+        // out through its own browser tools spelled as it was filled.
+        if (!routedAgentId) return result
+        return typeof result === 'string'
+          ? maskFilledValues(routedAgentId, result)
+          : { ...result, text: maskFilledValues(routedAgentId, result.text) }
       } finally {
         // In a `finally` so a throw still releases the browser for eviction.
         // Without it one failed navigation would pin a slot until the process
@@ -184,6 +242,60 @@ function toDescriptor(
       }
     },
   })
+}
+
+/** Deeper than any real call nests; past it a call is refused, not read. */
+const FILE_ARG_MAX_DEPTH = 32
+
+/**
+ * The first of `names` that `args` carries as a key, at any depth, or null.
+ *
+ * Walks the arguments and compares each key exactly, as the server's own
+ * parser will see it. A string that holds JSON is parsed and walked too: a
+ * server may parse a step list sent as a string, and only a parse undoes the
+ * escapes (`screenshot\u005fout_file`) that hide a key from a text match.
+ * Nesting past FILE_ARG_MAX_DEPTH, or a value that cannot be read, is refused.
+ */
+export function fileWritingArgIn(
+  args: Record<string, unknown>,
+  names: readonly string[] | undefined,
+): string | null {
+  if (!names || names.length === 0) return null
+  const wanted = new Set(names)
+  const visit = (value: unknown, depth: number): string | null => {
+    if (depth > FILE_ARG_MAX_DEPTH) return names[0]!
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (!text.startsWith('{') && !text.startsWith('[')) return null
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        return null
+      }
+      return visit(parsed, depth + 1)
+    }
+    if (!value || typeof value !== 'object') return null
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = visit(item, depth + 1)
+        if (found) return found
+      }
+      return null
+    }
+    for (const [key, item] of Object.entries(value)) {
+      if (wanted.has(key)) return key
+      const found = visit(item, depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+  try {
+    return visit(args, 0)
+  } catch {
+    // A getter that throws, or a structure too strange to walk: refused.
+    return names[0]!
+  }
 }
 
 /**
@@ -198,19 +310,25 @@ function toDescriptor(
  */
 function perAgentTarget(def: ConnectableDefinition, agentId: string | null): string | null {
   if (def.launch.transport !== 'stdio') return null
-  if (!def.launch.perAgentProfileFlag) return null
+  if (!def.launch.perAgentProfileFlag && !def.launch.perAgentDisplay) return null
   return agentId && agentId.length > 0 ? agentId : null
 }
 
 function spawnSpecFor(def: ConnectableDefinition): AgentBrowserSpawn {
-  if (def.launch.transport !== 'stdio' || !def.launch.perAgentProfileFlag) {
-    throw new Error(`${def.slug} does not declare a per-agent profile`)
+  if (
+    def.launch.transport !== 'stdio' ||
+    (!def.launch.perAgentProfileFlag && !def.launch.perAgentDisplay)
+  ) {
+    throw new Error(`${def.slug} does not run one child per agent`)
   }
   return {
     slug: def.slug,
+    displayName: def.displayName,
     command: def.launch.command,
     args: def.launch.args,
-    profileFlag: def.launch.perAgentProfileFlag,
+    ...(def.launch.perAgentProfileFlag ? { profileFlag: def.launch.perAgentProfileFlag } : {}),
+    ...(def.launch.perAgentDisplay ? { requiresDisplay: true } : {}),
+    ...(def.launch.ownedBinary ? { ownedBinary: true } : {}),
     ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
     ...(def.launch.chromeSwitchArg ? { chromeSwitchArg: def.launch.chromeSwitchArg } : {}),
     ...(def.authInputs ? { authInputs: def.authInputs } : {}),
@@ -305,8 +423,20 @@ async function performConnect(
       ? { command: launch.url, args: [], env: {}, display: launch.url, unresolved: false }
       : planConnectorSpawn(launch, { asAgentUser: asAgent !== null })
   if (plan.unresolved) {
-    throw new Error(`cannot find ${plan.command} on PATH. Is Node installed?`)
+    throw new Error(
+      launch.transport === 'stdio' && launch.ownedBinary
+        ? `${def.displayName} is not installed. Install it on an agent's Screen view, then connect it.`
+        : `cannot find ${plan.command} on PATH. Is Node installed?`,
+    )
   }
+  // The one shared child of a desktop driver only lists the tools: every call
+  // goes to an agent's own (see perAgentTarget). It gets no display, a bus
+  // that cannot exist, and a home of its own, so it finds nobody's desktop
+  // session and starts no shared helper.
+  const sharedDriverEnv =
+    launch.transport === 'stdio' && launch.perAgentDisplay
+      ? await desktopDriverListingEnv(def.slug, asAgent !== null)
+      : {}
 
   let session: ConnectorSession
   try {
@@ -348,6 +478,7 @@ async function performConnect(
             env: {
               ...connectorChildEnv({ declared: declared ?? {} }),
               ...plan.env,
+              ...sharedDriverEnv,
             },
           })
   } catch (err) {
@@ -372,6 +503,8 @@ async function performConnect(
   // The agent user's process is already tracked, by handle, from the moment
   // the hook started it; its pid means nothing to this server's own signals.
   const agentProcess = asAgent?.process() ?? null
+  // A program from Clawboo's runtimes folder keeps its install while it runs.
+  markDesktopToolsInUse(plan.command, agentProcess?.pid ?? pid)
   if (!asAgent) {
     registerConnectorPid(pid)
     // The durable record is already written by `onSpawn` above, which fires

@@ -51,7 +51,7 @@ import {
 import { createLogger } from '@clawboo/logger'
 import { personCommentReport } from '@clawboo/team-orchestration'
 
-import { actingPerson, actorField, refuseUnlessPerson } from '../lib/auth'
+import { actingPerson, actorField, actsAsPerson, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { engineHeld } from '../lib/engineHold'
@@ -103,7 +103,9 @@ function pumpDeps(db: ClawbooDb, req: Request, taskId: string): TaskWakePumpDeps
   return {
     held: engineHeld,
     startForPerson: (task) =>
-      startTask(db, task.id, task.teamId, runnerTargetOf(db, task), mcpBaseUrl),
+      startTask(db, task.id, task.teamId, runnerTargetOf(db, task), mcpBaseUrl, {
+        startedBy: actsAsPerson(req) ? actingPerson(req) : null,
+      }),
     startByItself: (task) =>
       startTask(db, task.id, task.teamId, runnerTargetOf(db, task), mcpBaseUrl, {
         automatic: true,

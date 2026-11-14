@@ -41,6 +41,8 @@ const ALLOWED: Record<string, string> = {
   'lib/openclawDetect.ts': 'openclaw --version',
   'lib/openclawRepair.ts': "repairs the server's OpenClaw install",
   'lib/modelCache.ts': 'openclaw models list, against the server-side Gateway',
+  'lib/desktop/tools.ts':
+    "downloads (curl through a proxy) and unpacks (tar) the desktop tools into the server's runtimes folder",
 }
 
 const SPEC = `['"](?:node:)?child_process['"]`

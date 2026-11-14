@@ -1,7 +1,7 @@
 ---
 title: 'Agents API'
 sidebarTitle: 'Agents'
-description: 'REST reference for agents: list, create, sync, delete, move to another team, agent files, sessions, model, workspaces, browser screenshots, the native shell switch and 1:1 chat.'
+description: 'REST reference for agents: list, create, sync, delete, move to another team, agent files, sessions, model, workspaces, browser screenshots, the live screen with take over and links, the native shell switch and 1:1 chat.'
 keywords: ['agents', 'boo', 'agent files', 'screenshot', 'browser', 'shell', 'registry']
 ---
 
@@ -883,6 +883,130 @@ The route tries each browser connector Clawboo runs (Playwright's `browser_take_
 ```bash
 curl -X POST http://localhost:18790/api/agents/<agent-id>/screenshot/capture
 ```
+
+---
+
+## An agent's computer
+
+The live view of an agent's screen, take over, and links to it. See [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over) for what each does in the dashboard.
+
+On Linux with TigerVNC's `Xvnc` installed, each agent's browser opens on a display of the agent's own, and the live view sends what changes on it; a person in control sends mouse and key events to it. Elsewhere the live view sends a picture of the agent's browser about once a second, and take over is refused.
+
+The `/api/agents/:agentId/computer/*` routes need the access cookie like every other route. The `/api/computer-link/*` routes take a link instead: send its token in the `x-clawboo-computer-link` header, never in the URL. The access gate admits those paths, and only those, when the token belongs to a link that still works. A link reaches its own agent only, and a view link can never take control. Making and revoking links and taking over are a person's acts (see [the person check](/operating/security#the-person-check): a caller that does not pass it gets `403 { "ok": false, "error": "person_only" }`); handing back is not. `POST /api/agents/:agentId/computer/links` is on the sensitive rate tier.
+
+| Method | Path                                          | Summary                                                                            | Stream? |
+| ------ | --------------------------------------------- | ---------------------------------------------------------------------------------- | ------- |
+| GET    | `/api/agents/:agentId/computer`               | Whether agents get displays here, this agent's display, who has control, its links | No      |
+| GET    | `/api/agents/:agentId/computer/live`          | The agent's screen, live                                                           | SSE     |
+| POST   | `/api/agents/:agentId/computer/control`       | Take over, or hand back                                                            | No      |
+| POST   | `/api/agents/:agentId/computer/input`         | Mouse and key events from the person in control                                    | No      |
+| POST   | `/api/agents/:agentId/computer/links`         | Make a view or control link (sensitive tier)                                       | No      |
+| DELETE | `/api/agents/:agentId/computer/links`         | Revoke every link to this agent                                                    | No      |
+| DELETE | `/api/agents/:agentId/computer/links/:linkId` | Revoke one link                                                                    | No      |
+| POST   | `/api/computer/tools/install`                 | Install the pinned desktop tools (Linux, sensitive tier)                           | No      |
+| GET    | `/api/computer-link/info`                     | What a link is for: its kind, expiry and agent name                                | No      |
+| GET    | `/api/computer-link/live`                     | The screen a link reaches, live                                                    | SSE     |
+| POST   | `/api/computer-link/control`                  | Take over or hand back through a control link                                      | No      |
+| POST   | `/api/computer-link/input`                    | Mouse and key events through a control link                                        | No      |
+
+### `GET /api/agents/:agentId/computer`
+
+**`200 OK`**:
+
+```json
+{
+  "ok": true,
+  "displays": { "available": true, "windowManager": true },
+  "display": {
+    "running": true,
+    "width": 1280,
+    "height": 800,
+    "holders": ["browser:connector:playwright:..."]
+  },
+  "control": { "by": "person", "via": "dashboard" },
+  "browserOpen": true,
+  "watchers": 1,
+  "links": [
+    {
+      "id": "6f0c...",
+      "agentId": "a1",
+      "kind": "view",
+      "createdAt": 1762870000000,
+      "expiresAt": 1762898800000
+    }
+  ],
+  "controlLinks": { "allowed": true, "reason": null }
+}
+```
+
+`displays` is `{ "available": false, "code": "no-xvnc", "reason": "...", "installable": true }` where agents get no display: `code` is `platform` (not Linux), `off` (`CLAWBOO_AGENT_DISPLAYS=0`) or `no-xvnc`, and `installable` is `true` only for `no-xvnc` on x86_64, where `POST /api/computer/tools/install` gives agents a screen (TigerVNC publishes no arm64 build). Where agents get displays, `displays.problem` says why the last display failed to start (a missing library), or is `null`, and `displays.driverInstallable` says whether Cua Driver can still be installed. `display` is `{ "running": false }` while this agent has none. `control.by` is `agent` or `person`, and `via` says whether that person came through the dashboard or a link. `browserOpen` says whether one of the agent's own browsers is open now. `controlLinks.allowed` is `false`, with the `reason`, unless agents run as their own OS user (`CLAWBOO_AGENT_USER`). A link's token is never listed. **`404`**: no such agent, or an archived one.
+
+### `GET /api/agents/:agentId/computer/live` and `GET /api/computer-link/live`
+
+A Server-Sent Events stream. Events, each with JSON `data`:
+
+| Event     | Data                                                                                                      | When                                                                                                     |
+| --------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `hello`   | `{ "viewerId": "..." }`                                                                                   | First. Name this id when you take over, send input, or reconnect.                                        |
+| `source`  | `{ "source": "display" \| "browser", "width": 1280 \| null, "height": 800 \| null }`                      | At the start, and when the agent's display starts or stops.                                              |
+| `control` | `{ "state": "agent" \| "you" \| "other", "canControl": true }`                                            | At the start, and whenever control changes. `canControl` is false for a view link and without a display. |
+| `rects`   | `{ "width": 1280, "height": 800, "rects": [{ "x": 0, "y": 0, "w": 1280, "h": 800, "png": "<base64>" }] }` | Display only: pictures of the regions that changed. The first covers the whole screen.                   |
+| `image`   | `{ "mimeType": "image/jpeg", "data": "<base64>", "ts": 1762870000000 }`                                   | Browser only: a new picture of the agent's browser, sent when it changed.                                |
+| `idle`    | `{ "reason": "no-browser" }`                                                                              | Browser only: the agent has no browser open.                                                             |
+| `busy`    | `{ "reason": "..." }`                                                                                     | Every place for a watcher is taken. The stream closes; try again later.                                  |
+| `end`     | `{ "reason": "..." }`                                                                                     | The stream is over for good: the link was revoked or expired, or the agent was deleted.                  |
+
+While `control` says `other`, another person has taken over, and this stream gets no `rects` or `image` until they hand back: only the view that took over sees the screen, so nobody else sees what they type. The first picture after that covers the whole screen. A watcher whose connection falls behind gets fewer, larger pictures of the current screen, never a backlog. To reconnect without losing control you hold, send the previous `viewerId` in the `x-clawboo-viewer` header within 30 seconds. At most 8 watchers per agent and 32 in all, of which links may use 6 per agent, 24 in all and 2 per link: the rest are kept for the dashboard. Past that the stream sends `busy` with the reason and closes; try again a little later (the dashboard and a link's page do). A reconnect that names its `viewerId` replaces its own earlier stream if that one still looks open. Through a link: **`401`** when the link does not work, or its agent was archived, deleted, or deleted and made again under the same id.
+
+### `POST /api/agents/:agentId/computer/control` and `POST /api/computer-link/control`
+
+- **Request body**: `{ "viewerId": "...", "action": "take" | "release" }`, with the `viewerId` your live view got in `hello`.
+
+**`200 OK`**: `{ "ok": true, "control": "you" }` after `take`, `{ "ok": true, "control": "agent" }` after `release`. The newest take over wins. While a person has control, the agent's own browser calls fail with a message telling it a person is using its computer. Control goes back to the agent on `release`, 30 seconds after the controlling live view closes, or after 10 minutes with no input from it.
+
+**`400`**: a missing `viewerId` or `action`. **`403`**: a view link, a control link while agents run as the server's own user, or (from the dashboard) a request the person check refuses. **`404`**: that live view is not open, or was opened another way. **`409`**: the agent has no display of its own. `release` always answers `200`, and hands control back only when that viewer holds it and asks the same way it took it, even after its live view closed.
+
+### `POST /api/agents/:agentId/computer/input` and `POST /api/computer-link/input`
+
+- **Request body**: `{ "viewerId": "...", "events": [...] }`, at most 256 events, each `{ "t": "p", "x": 10, "y": 20, "b": 1 }` (pointer at display pixel `x`, `y` with buttons `b`: bit 0 left, 1 middle, 2 right, 3 and 4 a wheel step up and down) or `{ "t": "k", "s": 65293, "d": true }` (X keysym `s` pressed or released).
+
+**`200 OK`**: `{ "ok": true, "control": "you" }`. **`400`**: a malformed event, and none of the batch is sent. **`404`**: that live view is not open. **`409`**: this live view does not hold control, or the display stopped.
+
+### `POST /api/agents/:agentId/computer/links`
+
+- **Request body**: `{ "kind": "view" | "control", "ttlMinutes": 60 }`. `ttlMinutes` is optional, between 1 and 1440; the default is 480 for a view link and 60 for a control link.
+
+**`201 Created`** with `Cache-Control: no-store`. The token is in this answer only; Clawboo keeps a fingerprint of it:
+
+```json
+{
+  "ok": true,
+  "token": "cbcl_...",
+  "link": {
+    "id": "6f0c...",
+    "agentId": "a1",
+    "kind": "control",
+    "createdAt": 1762870000000,
+    "expiresAt": 1762873600000
+  }
+}
+```
+
+The dashboard opens a link as `<clawboo address>/computer-link#<token>`. **`400`**: an unknown `kind` or a `ttlMinutes` out of range. **`403`**: the person check refused it. **`404`**: no such agent. **`409`**: a `control` link while agents run as the server's own user (a person who takes over can reach what the agent's browser can on the machine, which then includes Clawboo's own files), or the agent already has 20 links; revoke one first.
+
+### `DELETE /api/agents/:agentId/computer/links` and `DELETE /api/agents/:agentId/computer/links/:linkId`
+
+Revoke every link to this agent (`{ "ok": true, "revoked": 2 }`), or one (`{ "ok": true }`, or **`404`** when it is not one of this agent's links). Every live view open through a revoked link ends at once, and control held through it goes back to the agent. **`403`**: the person check refused it.
+
+### `POST /api/computer/tools/install`
+
+Installs TigerVNC's `Xvnc` 1.16.2 (x86_64) and Cua Driver 0.38.0 (x86_64, arm64) into Clawboo's runtimes folder, each checked against its pinned SHA-256 as it downloads and before it is unpacked, beside any install already there, which stays current unless everything worked. Where the system has its own `Xvnc`, TigerVNC is not downloaded. Linux only. A person's act, on the sensitive tier. A request made while an install runs waits for that one and gets its answer. Behind a proxy it downloads with `curl` through `HTTPS_PROXY`.
+
+**`200 OK`**: `{ "ok": true, "xvnc": true, "cuaDriver": true }` (`xvnc` is `false` on arm64, where TigerVNC publishes no build, and where the system's own `Xvnc` is used). **`422`** `{ "ok": false, "code": "UNSUPPORTED", "error": "..." }`: not Linux on x86_64 or arm64. **`502`**: a download failed or was not the pinned release (`DOWNLOAD_FAILED`, `CHECKSUM`), or it could not be unpacked or installed (`UNPACK_FAILED`, `INSTALL_FAILED`); nothing was switched to. **`403`**: the person check refused it.
+
+### `GET /api/computer-link/info`
+
+**`200 OK`**: `{ "ok": true, "kind": "view", "expiresAt": 1762898800000, "agent": { "name": "Research Boo" } }`. **`401`**: the link does not work any more. **`404`**: its agent is gone.
 
 ---
 

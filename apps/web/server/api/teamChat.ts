@@ -6,6 +6,7 @@
 import { readRoom, resolveRoomForTeam } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
+import { actingPerson, actsAsPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { releaseRoom, tryAcquireRoom } from '../lib/teamChat/roomLock'
@@ -83,6 +84,9 @@ export async function teamChatExchangePOST(req: Request, res: Response): Promise
       teamId,
       stimulus: typeof body['stimulus'] === 'string' ? body['stimulus'] : null,
       mcpBaseUrl: loopbackMcpBaseUrl(req),
+      // The person who started it, so the turns are theirs (runPerson.ts). A caller
+      // that fails the person check starts turns that belong to no one.
+      startedBy: actsAsPerson(req) ? actingPerson(req) : null,
       signal: controller.signal,
       ...(firstSpeakers && firstSpeakers.length ? { firstSpeakers } : {}),
       ...(maxExchangeTurns != null ? { maxExchangeTurns } : {}),

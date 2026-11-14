@@ -29,7 +29,7 @@ Available in releases after 0.6.0. Clawboo 0.6.0 and older ignore `CLAWBOO_AGENT
 
 With the setting on, a prompt-injected agent can no longer:
 
-- read the vault's key and the vault, and with them every saved provider key;
+- read the vault's key and the vault, and with them every saved provider key, website login and 1Password token;
 - read or change Clawboo's database: the board, approvals, budgets, routines and connector grants;
 - read the secret Clawboo signs MCP attach links with, so it cannot make itself a link with another agent's identity or a privilege it was not given;
 - read the access token and answer its own approval card through the API;
@@ -43,9 +43,9 @@ Clawboo checks the first and the last of these from inside the agent user's acco
 It does **not**:
 
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
-- protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins;
-- keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder;
-- keep one agent from acting as another on Clawboo's MCP servers. An agent's attach links are long-lived links that carry their own credential, and another agent can read them in that agent's runtime home (they share the agent user), or on the command line of a Claude Code run;
+- protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins, and a [website login](/using/website-logins) Clawboo filled into its page;
+- keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder, and on Linux one agent's programs can open another agent's display;
+- keep one agent from acting as another on Clawboo's MCP servers. An agent's attach links are long-lived links that carry their own credential, and another agent can read them in that agent's runtime home (they share the agent user), or on the command line of a Claude Code run. That includes a run's Tools link, which carries the run's reference: while the run lasts, an agent that reads it can call [`fill_login`](/using/website-logins#what-this-protects-and-what-it-does-not) as that run, with its person's logins;
 - change what Clawboo's tools allow. Agents still reach the board, memory and team chat through Clawboo's MCP servers, and approvals, grants and budgets still apply;
 - cover OpenClaw agents. They run inside the OpenClaw Gateway, as whoever started it. Use OpenClaw's own sandbox for them;
 - protect you from running an agent's output yourself, such as merging its branch and running it;
@@ -65,6 +65,7 @@ When Clawboo starts with `CLAWBOO_AGENT_USER` set, it starts one long-lived proc
 | The verify command a task's check runs                                        | the agent user                       |
 | git in a task's checkout, and in the agent user's copy of each repository     | the agent user                       |
 | Connectors with local reach and no saved credential, and each agent's browser | the agent user                       |
+| Each agent's display on Linux, its window manager and session bus             | the agent user                       |
 | Connectors that hold a saved credential (OAuth, an API key)                   | you, so agents cannot read the token |
 | Clawboo itself, its database, the vault, installs and updates                 | you                                  |
 
@@ -74,17 +75,19 @@ Agents keep every tool. They reach Clawboo's MCP servers over HTTP on `127.0.0.1
 
 ### Where things live
 
-| What                                                      | Where, with the setting on                                     | Owner and mode                                                            |
-| --------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Clawboo's data folder (`~/.clawboo`)                      | unchanged                                                      | you, `0700`                                                               |
-| The database, the vault, settings, the token              | unchanged                                                      | you, `0600`                                                               |
-| The work folder (team and task folders, task checkouts)   | `<agent home>/work`, or `CLAWBOO_WORK_DIR`                     | agent user, `0700`                                                        |
-| Each agent's runtime home (`CODEX_HOME`, `HERMES_HOME`)   | `<agent home>/runtimes/<runtime>/<agent>`                      | agent user, `0700`                                                        |
-| Claude Code's settings and sessions                       | the agent user's own `~/.claude`                               | agent user                                                                |
-| Each agent's browser profile                              | `<agent home>/browser-profiles/`                               | agent user, `0700`                                                        |
-| The agent user's copy of each repository                  | `<work folder>/mirrors/<repository hash>.git`                  | agent user                                                                |
-| Installed runtimes (Claude Code, Codex, Hermes, OpenClaw) | `CLAWBOO_RUNTIMES_DIR`, outside your home and the agent user's | you (or root), `0755`: the agent user runs them, nobody else changes them |
-| Clawboo Native's conversation history                     | unchanged, in the data folder                                  | you                                                                       |
+| What                                                                              | Where, with the setting on                                                       | Owner and mode                                                            |
+| --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Clawboo's data folder (`~/.clawboo`)                                              | unchanged                                                                        | you, `0700`                                                               |
+| The database, the vault, settings, the token                                      | unchanged                                                                        | you, `0600`                                                               |
+| The work folder (team and task folders, task checkouts)                           | `<agent home>/work`, or `CLAWBOO_WORK_DIR`                                       | agent user, `0700`                                                        |
+| Each Codex agent's runtime home (`CODEX_HOME`)                                    | `<agent home>/runtimes/codex/<agent>`                                            | agent user, `0700`                                                        |
+| The Hermes gateway's home (`HERMES_HOME`), with each Hermes agent's profile in it | `<agent home>/runtimes/hermes/_gateway`, one profile per agent under `profiles/` | agent user, `0700`                                                        |
+| Claude Code's settings and sessions                                               | the agent user's own `~/.claude`                                                 | agent user                                                                |
+| Each agent's browser profile                                                      | `<agent home>/browser-profiles/`                                                 | agent user, `0700`                                                        |
+| Each agent's display: its VNC socket and X cookie                                 | `<agent home>/desktops/<hash>`                                                   | agent user, `0700`                                                        |
+| The agent user's copy of each repository                                          | `<work folder>/mirrors/<repository hash>.git`                                    | agent user                                                                |
+| Installed runtimes (Claude Code, Codex, Hermes, OpenClaw)                         | `CLAWBOO_RUNTIMES_DIR`, outside your home and the agent user's                   | you (or root), `0755`: the agent user runs them, nobody else changes them |
+| Clawboo Native's conversation history                                             | unchanged, in the data folder                                                    | you                                                                       |
 
 `<agent home>` is the agent user's home folder: `/var/lib/clawboo-agent` on Linux and `/var/clawboo-agent` on macOS with the setup commands below.
 

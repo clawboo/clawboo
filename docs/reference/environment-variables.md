@@ -92,6 +92,8 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_DISABLE_EMBEDDINGS`           | unset                             | `1` turns memory embeddings off                                        |
 | `CLAWBOO_MAX_AGENT_BROWSERS`           | `4`                               | Agent browsers open at once                                            |
 | `CLAWBOO_AGENT_BROWSER_IDLE_MS`        | `600000` (10 min)                 | Idle time before an agent browser closes                               |
+| `CLAWBOO_AGENT_DISPLAYS`               | on (Linux with `Xvnc`)            | `0` gives agents no display of their own                               |
+| `CLAWBOO_AGENT_DISPLAY_SIZE`           | `1280x800`                        | Size of each agent's display                                           |
 | `CLAWBOO_OPENCLAW_CDP_PORT`            | `18800`                           | Debugging port of OpenClaw's browser                                   |
 | `OPENCLAW_GATEWAY_PORT`                | `18789`                           | Only used to work out that debugging port                              |
 | `CLAWBOO_MCP_PROBE_MS`                 | `60000` (1 min)                   | How often the server checks its MCP servers                            |
@@ -801,6 +803,22 @@ At most this many agent browsers run at once; each takes roughly 400 MB. A brows
 - Example: `CLAWBOO_AGENT_BROWSER_IDLE_MS=300000`
 
 An agent browser nobody has used for this long is closed. Time the computer spends asleep does not count, except a sleep of under about a minute.
+
+### CLAWBOO_AGENT_DISPLAYS
+
+- Type: flag; `0`, `off` or `false` turns it off
+- Default: on, on Linux with TigerVNC's `Xvnc` found
+- Example: `CLAWBOO_AGENT_DISPLAYS=0`
+
+On Linux, each agent's browser opens on a display of the agent's own, which you can watch and take over (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Turned off, agents' browsers start as they would without `Xvnc`. Has no effect on macOS or Windows, where agents get no display.
+
+### CLAWBOO_AGENT_DISPLAY_SIZE
+
+- Type: `WIDTHxHEIGHT` in pixels, from 640x480 to 3840x2160
+- Default: `1280x800`
+- Example: `CLAWBOO_AGENT_DISPLAY_SIZE=1440x900`
+
+The size of each agent's display. A value it cannot read gives the default.
 
 ### CLAWBOO_OPENCLAW_CDP_PORT
 

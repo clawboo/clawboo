@@ -1,6 +1,7 @@
 // The idle answer's next due time across schedule sources: each source is ok, off
 // or unknown, an unknown one makes the answer incomplete, and the earliest time
-// any source named is the answer's time.
+// any source named is the answer's time. And who is here: a person holding an
+// agent's screen counts, though no tab of theirs beats.
 
 import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
@@ -23,8 +24,17 @@ import {
 } from '@clawboo/scheduler'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  IDLE_LAPSE_MS,
+  RECONNECT_GRACE_MS,
+  releaseControl,
+  resetControlForTests,
+  takeControl,
+  viewerDetached,
+} from '../desktop/control'
 import type { PlacedGateway } from '../gatewayPlace'
 import { IDLE_SOURCE_READ_TIMEOUT_MS, buildIdleState } from '../idleState'
+import { createPresence, setPresenceForTests } from '../presence'
 import type { GatewayState } from '../routines/gatewayWait'
 import { SCHEDULER_TIME_ZONE_KEY } from '../routines/timeZone'
 
@@ -40,6 +50,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers()
+  resetControlForTests()
+  setPresenceForTests(null)
   db.$client.close()
   rmSync(dir, { recursive: true, force: true })
 })
@@ -259,6 +271,42 @@ describe('idle answer: next due', () => {
   it('a source that throws, against its own contract, reads as unknown', async () => {
     const state = await build(source(() => Promise.reject(new Error('boom'))))
     expect(state.nextDue.sources[1]).toMatchObject({ state: 'unknown', reason: 'boom' })
+  })
+})
+
+describe('idle answer: people', () => {
+  const nobodyDue = () => source(async () => ok([]))
+
+  it("counts a person holding an agent's screen as here, though no tab of theirs beats", async () => {
+    setPresenceForTests(createPresence())
+    expect((await build(nobodyDue())).people.present).toBe(false)
+    // Through a control link: its page sends no presence beat.
+    takeControl('agent-1', 'viewer-1', { kind: 'link', linkId: 'link-1' })
+    expect((await build(nobodyDue())).people).toMatchObject({
+      present: true,
+      focusedTabs: 0,
+      lastSeenAt: null,
+    })
+    releaseControl('agent-1', 'viewer-1')
+    expect((await build(nobodyDue())).people.present).toBe(false)
+  })
+
+  it('stops counting a hold once it has run out, before it is handed back', async () => {
+    setPresenceForTests(createPresence())
+    let t = NOW
+    resetControlForTests(() => t)
+    takeControl('agent-1', 'viewer-1', { kind: 'dashboard' })
+    t += IDLE_LAPSE_MS - 1
+    expect((await build(nobodyDue())).people.present).toBe(true)
+    t += 1
+    expect((await build(nobodyDue())).people.present).toBe(false)
+
+    takeControl('agent-2', 'viewer-2', { kind: 'dashboard' })
+    viewerDetached('agent-2', 'viewer-2')
+    t += RECONNECT_GRACE_MS - 1
+    expect((await build(nobodyDue())).people.present).toBe(true)
+    t += 1
+    expect((await build(nobodyDue())).people.present).toBe(false)
   })
 })
 

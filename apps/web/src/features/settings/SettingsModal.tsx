@@ -8,6 +8,7 @@ import {
   Gauge,
   HeartPulse,
   KeyRound,
+  LogIn,
   Puzzle,
   Repeat,
   Search,
@@ -49,6 +50,11 @@ const GROUPS: SettingsGroup[] = [
         id: 'providers',
         icon: KeyRound,
         keywords: 'api key anthropic openai google openrouter vault provider llm',
+      },
+      {
+        id: 'websiteLogins',
+        icon: LogIn,
+        keywords: 'website login password sign in 1password autofill credentials',
       },
       {
         id: 'runtimes',

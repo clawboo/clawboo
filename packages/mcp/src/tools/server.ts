@@ -84,6 +84,14 @@ export interface ToolsServerOptions {
    * gives up calling it.
    */
   onConnectorsChanged?: (notify: () => void) => () => void
+  /**
+   * Tools the host serves to this session alone, beside the builtins: a tool whose
+   * work needs the host's own state (the login fill needs the vault and the
+   * agent's browser). Ungoverned like a builtin (no connector), so they go through
+   * the inspectors, the audit and the result ceiling like any other call. A name
+   * that collides with a builtin is dropped, never the server.
+   */
+  hostTools?: () => readonly ToolDescriptor[]
   /** Broker knobs (provenance enforcement, approval TTL/timeout, compaction). */
   broker?: Omit<BrokerOptions, 'registry'>
   /**
@@ -112,6 +120,13 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
   const compose = (): { registry: ToolRegistry; connectorOf: Map<string, string> } => {
     const registry = createBuiltinRegistry()
     const connectorOf = new Map<string, string>()
+    for (const descriptor of opts.hostTools?.() ?? []) {
+      try {
+        registry.registerOrThrow(descriptor)
+      } catch {
+        // A host tool never replaces a builtin.
+      }
+    }
     const entries =
       typeof opts.connectorTools === 'function'
         ? opts.connectorTools()

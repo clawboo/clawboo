@@ -44,6 +44,7 @@ const definitionSchema = z.object({
     'data',
     'observability',
     'browser',
+    'desktop',
     'search',
     'productivity',
     'finance',
@@ -114,6 +115,12 @@ describe('the honesty invariants', () => {
       const launch = c.launch
       if (launch.transport !== 'stdio') continue
       expect(launch.pinnedVersion, c.slug).toMatch(/\d/)
+      // A program Clawboo installs itself is pinned by that install (a release
+      // checked against its SHA-256), not by an npm spec: it is never npx.
+      if (launch.ownedBinary) {
+        expect(launch.command, c.slug).not.toBe('npx')
+        continue
+      }
       expect(
         launch.args.some((a) => a.includes(`@${launch.pinnedVersion}`)),
         c.slug,
@@ -288,6 +295,44 @@ describe('per-agent browser profiles', () => {
         def.launch.transport === 'stdio' ? def.launch.perAgentProfileFlag : undefined,
       ).toBeTruthy()
     }
+  })
+})
+
+describe('per-agent displays', () => {
+  it('are declared only by Linux desktop drivers Clawboo installs itself', () => {
+    // A child per agent on its own display, never the server's: an entry from
+    // anywhere else that picked this up would get a process per agent with the
+    // run of every agent's screen.
+    for (const def of CONNECTOR_DEFINITIONS) {
+      if (def.launch.transport !== 'stdio' || !def.launch.perAgentDisplay) continue
+      expect(def.provenance, def.slug).toBe('curated')
+      expect(def.category, def.slug).toBe('desktop')
+      expect(def.launch.ownedBinary, def.slug).toBe(true)
+      expect(def.launch.platforms, def.slug).toEqual(['linux'])
+      expect(def.launch.perAgentProfileFlag, def.slug).toBeUndefined()
+    }
+  })
+
+  it('names the driver tools that run code, install things or move files', () => {
+    const def = CONNECTOR_DEFINITIONS.find((d) => d.slug === 'cua-driver')
+    expect(def?.destructiveTools).toEqual(
+      expect.arrayContaining([
+        'run_script',
+        'launch_app',
+        'install_extension',
+        'browser_set_input_files',
+        'browser_prepare',
+      ]),
+    )
+  })
+
+  it('runs the driver in its own process and refuses the arguments that write files', () => {
+    const def = CONNECTOR_DEFINITIONS.find((d) => d.slug === 'cua-driver')!
+    // Without --direct, `mcp` may forward to one shared `cua-driver serve`.
+    expect(def.launch.transport === 'stdio' && def.launch.args).toEqual(['mcp', '--direct'])
+    expect(def.fileWritingArgs).toEqual(
+      expect.arrayContaining(['screenshot_out_file', 'output_dir']),
+    )
   })
 })
 

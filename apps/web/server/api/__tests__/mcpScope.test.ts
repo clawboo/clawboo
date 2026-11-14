@@ -438,4 +438,42 @@ describe('parseToolsBinding', () => {
     expect(parseToolsBinding(req('/api/mcp/tools'))).toBeUndefined()
     expect(parseToolsBinding(undefined)).toBeUndefined()
   })
+
+  // The run's reference: what the login fill looks the run's person up by. Signed, so
+  // a runtime cannot claim another run's person.
+  const refUrl = (boundRunRef: string): string =>
+    mcpHttpUrl('http://127.0.0.1:1', 'tools', {
+      teamId: 'team-A',
+      agentId: 'coder',
+      boundRunRef,
+      attachSecret: getMcpAttachSecret(getDb()),
+    }).replace('http://127.0.0.1:1', '')
+
+  it('reads the run reference inside the signature', () => {
+    expect(parseToolsBinding(req(refUrl('run-ref-1')))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      runRef: 'run-ref-1',
+    })
+  })
+
+  it('refuses the URL when the run reference was moved, stripped or added', () => {
+    const url = refUrl('run-ref-1')
+    expect(
+      parseToolsBinding(req(url.replace('scopeRunRef=run-ref-1', 'scopeRunRef=run-ref-2'))),
+    ).toBeUndefined()
+    expect(parseToolsBinding(req(url.replace(/&?scopeRunRef=run-ref-1/, '')))).toBeUndefined()
+    expect(parseToolsBinding(req(`${toolsUrl()}&scopeRunRef=run-ref-1`))).toBeUndefined()
+  })
+
+  it('puts the run reference on the Tools URL only', () => {
+    for (const server of ['tasks', 'memory', 'teamchat'] as const) {
+      const url = mcpHttpUrl('http://127.0.0.1:1', server, {
+        teamId: 'team-A',
+        agentId: 'coder',
+        boundRunRef: 'run-ref-1',
+        attachSecret: getMcpAttachSecret(getDb()),
+      })
+      expect(url).not.toContain('scopeRunRef')
+    }
+  })
 })

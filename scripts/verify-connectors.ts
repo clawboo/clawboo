@@ -81,6 +81,12 @@ function checkOffline(): void {
     if (def.launch.transport === 'stdio') {
       const { pinnedVersion, args, command } = def.launch
       if (!pinnedVersion) fail(def.slug, 'stdio launch has no pinnedVersion')
+      // A program Clawboo installs itself is pinned by that install (a release
+      // checked against its SHA-256), not by an npm spec, so its argv carries
+      // no `@version`. It must never be launched through npx.
+      else if (def.launch.ownedBinary) {
+        if (command === 'npx') fail(def.slug, 'an owned binary is launched through npx')
+      }
       // The pin must be in argv, not just recorded. A version in a field the
       // spawner never reads is theatre: `npx -y pkg` still resolves to @latest,
       // so the executing code changes with no consent event.
