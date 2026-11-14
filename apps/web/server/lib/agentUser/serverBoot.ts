@@ -4,6 +4,7 @@
 
 import { resolveBootAccessToken } from '../bootAccessToken'
 import { resolveRuntimeBin } from '../platform'
+import { ownedRuntimeLaunch } from '../runtimeFolder'
 import { resolveAgentSdkBinary } from '../runtimes/agentSdkBinary'
 import { secretValuesForExposureCheck } from '../secretsVault'
 import { startAgentUser } from './boot'
@@ -19,6 +20,16 @@ function runtimeBinaries(): { runtime: string; path: string }[] {
   for (const name of ['codex', 'hermes']) {
     const bin = resolveRuntimeBin(name)
     if (bin) out.push({ runtime: name, path: bin })
+  }
+  // A runtime Clawboo installed into its runtimes folder starts through a
+  // launcher that runs a fixed command (the Node.js that installed it, or
+  // Hermes's own Python). The agent user must be able to run both.
+  for (const name of ['openclaw', 'codex', 'hermes']) {
+    const launch = ownedRuntimeLaunch(name)
+    if (!launch) continue
+    for (const p of [launch.launcher, launch.command]) {
+      if (!out.some((b) => b.runtime === name && b.path === p)) out.push({ runtime: name, path: p })
+    }
   }
   return out
 }

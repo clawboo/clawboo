@@ -38,8 +38,15 @@ import { and, eq } from 'drizzle-orm'
 import { createLogger } from '@clawboo/logger'
 import { connectorChildEnv } from '@clawboo/mcp'
 
+import { isAgentUserMode } from '../../agentUser/config'
 import { emitEvent } from '../../obs'
-import { classifyArgv, inspectResolvedProgram, isSameFile, resolveProgramPath } from './execPolicy'
+import {
+  classifyArgv,
+  inspectResolvedProgram,
+  isSameFile,
+  resolveAgentProgram,
+  resolveProgramPath,
+} from './execPolicy'
 import { runApprovedCommand } from './execRun'
 import type { NativeLocalTool, NativeToolOutcome } from './fileTools'
 
@@ -200,7 +207,17 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
         // target, so the check has to see the real binary, and the approval has
         // to be for that same path. Doing this before the approval row exists
         // also means a command that cannot run never reaches a person.
-        const resolved = await resolveProgramPath(verdict.program, childPath())
+        //
+        // With agents on their own OS user the command runs as that user, and a
+        // program has to pass more before this server looks at it at all (see
+        // `resolveAgentProgram`); a refusal says why, so the model can adapt.
+        const forAgent = isAgentUserMode()
+          ? await resolveAgentProgram(verdict.program, childPath())
+          : null
+        if (forAgent && !forAgent.ok) return { output: forAgent.message, isError: true }
+        const resolved = forAgent
+          ? forAgent.resolved
+          : await resolveProgramPath(verdict.program, childPath())
         if (!resolved) {
           return {
             output: `"${verdict.program}" was not found, or is not executable, in this Boo's PATH.`,

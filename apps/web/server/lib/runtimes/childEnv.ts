@@ -230,10 +230,20 @@ function isScrubbedKey(key: string, opts: { keepAwsCreds: boolean }): boolean {
  * CLIs read (OPENAI_API_KEY / GEMINI_API_KEY / …) are preserved; a configured proxy
  * additionally gets loopback added to NO_PROXY (see keepLoopbackOffProxy).
  */
-export function buildChildEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
+export function buildChildEnv(
+  extra: Record<string, string | undefined> = {},
+  opts: {
+    /**
+     * The child runs as the server's own user even with agents on their own OS
+     * user (OpenClaw's sign-in, whose Gateway is the server's): keep who the
+     * server is and where its state is, or it would sign in to a different home.
+     */
+    serverSide?: boolean
+  } = {},
+): NodeJS.ProcessEnv {
   // Keep AWS creds only when the operator explicitly runs Claude Code against Bedrock.
   const keepAwsCreds = isTruthyFlag(process.env['CLAUDE_CODE_USE_BEDROCK'])
-  const dropIdentity = agentUserModeOn()
+  const dropIdentity = agentUserModeOn() && !opts.serverSide
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue

@@ -19,6 +19,7 @@ import {
   agentMkdir,
   agentReadFile,
   agentRemove,
+  agentRemoveEmptyDir,
   agentRename,
   agentStat,
   agentWriteFile,
@@ -163,6 +164,11 @@ describe.runIf(posix)('spawnAgentProcess with agent isolation on', () => {
     // Ambient provider auth and the caller's grant still pass, as without isolation.
     expect(env['OPENAI_API_KEY']).toBe('sk-ambient')
     expect(env['CODEX_HOME']).toBe('/var/lib/clawboo-agent/runtimes/codex/a1')
+    // A child that runs as the server's own user keeps who the server is.
+    const own = buildChildEnv({}, { serverSide: true })
+    expect(own['HOME']).toBe('/Users/operator')
+    expect(own['SSH_AUTH_SOCK']).toBe('/private/tmp/ssh.sock')
+    expect(own['CLAWBOO_SECRETS_MASTER_KEY']).toBeUndefined()
   })
 })
 
@@ -201,6 +207,20 @@ describe.runIf(posix)('agent-space file verbs', () => {
 
     expect((await agentStat(config))?.type).toBe('file')
     expect(await agentStat(path.join(home, 'missing'))).toBeNull()
+    // An empty-folder removal never takes a folder with something in it, nor a link.
+    const docs = path.join(home, 'docs')
+    await agentMkdir(docs)
+    fs.writeFileSync(path.join(docs, 'report.md'), 'keep me')
+    await expect(agentRemoveEmptyDir(docs)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(fs.readFileSync(path.join(docs, 'report.md'), 'utf8')).toBe('keep me')
+    fs.symlinkSync(docs, path.join(home, 'docs-link'))
+    await expect(agentRemoveEmptyDir(path.join(home, 'docs-link'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+    fs.rmSync(path.join(home, 'docs-link'))
+    fs.rmSync(path.join(docs, 'report.md'))
+    await agentRemoveEmptyDir(docs)
+    expect(fs.existsSync(docs)).toBe(false)
     await agentRename(config, path.join(home, 'c2.yaml'))
     expect((await agentList(home)).entries.map((e) => e.name)).toEqual(['c2.yaml'])
     await agentRemove(path.join(dir, 'home'))
@@ -230,7 +250,16 @@ describe.runIf(posix)('agent-space file verbs', () => {
     })
     await exercise()
     expect(new Set(ops)).toEqual(
-      new Set(['fs.mkdir', 'fs.read', 'fs.write', 'fs.stat', 'fs.rename', 'fs.list', 'fs.rm']),
+      new Set([
+        'fs.mkdir',
+        'fs.read',
+        'fs.write',
+        'fs.stat',
+        'fs.rmdir',
+        'fs.rename',
+        'fs.list',
+        'fs.rm',
+      ]),
     )
   })
 })

@@ -18,8 +18,10 @@ import {
 } from '@clawboo/governance'
 import type { RuntimeAdapter } from '@clawboo/executor'
 import { driveStructuredJudge } from '@clawboo/obs'
-import { provisionReviewWorktree, removeReviewWorktree } from '@clawboo/worktrees'
+import { isCommitId, provisionReviewWorktree, removeReviewWorktree } from '@clawboo/worktrees'
 
+import { isAgentUserMode } from '../agentUser/config'
+import { installAgentWorktreeIo, isInAgentSpace } from '../agentUser/worktreeIo'
 import { isLocalModel } from '../costUtils'
 import type { RuntimeRunContext } from '../runtimes'
 import { estimateRunCostUsdFromUsage } from '../runtimes/estimateCost'
@@ -41,6 +43,8 @@ const NOT_RUN: CriticVerdict = {
 }
 
 export interface CriticInput {
+  /** The repository the review checkout is made from: with agents on their own
+   *  OS user, the agent's mirror, where the commit to review is. */
   repoPath: string
   /** The committed SHA to review (a detached read-only checkout is made at it). */
   reviewSha: string
@@ -139,6 +143,24 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
       reviewedSha: input.reviewSha,
     })
 
+  // The commit to review was read from git in a checkout an agent controls, and
+  // goes back to git as an argument: nothing but a commit id will do.
+  if (!isCommitId(input.reviewSha)) {
+    return errored(null, `The commit to review is not a commit id: ${input.reviewSha.slice(0, 80)}`)
+  }
+  // With agents on their own OS user the review checkout is the agent user's,
+  // made from the agent's mirror by the agent host. A repository outside the
+  // work folder is the server's, and git there must not make a checkout an
+  // agent can write.
+  if (isAgentUserMode()) {
+    installAgentWorktreeIo()
+    if (!isInAgentSpace(input.repoPath)) {
+      return errored(
+        null,
+        `A review checkout is made only from the agents' copy of a repository while agents run as a separate user, and ${input.repoPath} is not one.`,
+      )
+    }
+  }
   let review: Awaited<ReturnType<typeof provisionReviewWorktree>>
   try {
     review = await provisionReviewWorktree({

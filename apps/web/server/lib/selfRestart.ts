@@ -78,6 +78,9 @@ export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): boo
     ...process.env,
     CLAWBOO_API_PORT: String(port),
     CLAWBOO_AWAIT_PORT: String(port),
+    // With agents on their own OS user, this process stops every agent process
+    // as it exits; the successor waits for that before starting its own.
+    CLAWBOO_AWAIT_PID: String(process.pid),
   }
   // Force the successor to recompute its version from the freshly-installed
   // package.json (the inherited env var is the pre-update version).

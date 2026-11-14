@@ -15,14 +15,16 @@
 // it shipped with, whose ids the backend refuses. That answer is never trusted: it is
 // reported as `updateRequired`, and the cache (if any) is used instead.
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { agentReadFile } from '../agentUser/agentFs'
 import { isWindows, resolveRuntimeBin } from '../platform'
 import { buildChildEnv } from './childEnv'
-import { isCodexLoggedIn, userCodexHome } from './codexAuth'
+import { agentCodexHome, isAgentCodexLoggedIn, isCodexLoggedIn, userCodexHome } from './codexAuth'
 import { killProcessTree } from './killTree'
+import { spawnAgentProcess } from './spawner'
 import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
 import { resolveWindowsSpawn } from './winSpawn'
 
@@ -183,9 +185,13 @@ export function probeCodexAppServer(
     let child: ChildProcess
     try {
       const plan = resolveWindowsSpawn(spawnPlan)
-      child = spawn(plan.command, plan.args, {
+      // As the agent user when agents run as their own OS user; a refused start
+      // (the agent host is down) resolves null like any failed probe.
+      child = spawnAgentProcess({
+        kind: 'probe',
+        command: plan.command,
+        args: plan.args,
         env,
-        shell: false,
         windowsHide: isWindows,
         // A process-group leader, so the reap below takes any grandchildren too.
         detached: !isWindows,
@@ -314,9 +320,45 @@ export async function readCodexModelsCache(
   }
 }
 
+/** The same cache in a Codex home in agent space, read through the agent-space
+ *  file verbs (the agent host, when agents run as their own OS user). */
+async function readAgentCodexModelsCache(
+  codexHome: string,
+): Promise<{ models: CodexModelOption[]; defaultModel: string | null } | null> {
+  try {
+    const raw = await agentReadFile(path.join(codexHome, 'models_cache.json'))
+    if (!raw) return null
+    const parsed = parseModelsCache(JSON.parse(raw.toString('utf8')))
+    return parsed.models.length > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * With agents on their own OS user the probe runs as that user, who cannot read
+ * the person's own Codex home. It runs in the agent user's own `~/.codex`, where
+ * the in-app sign-in keeps the agents' login, and only when that holds one; the
+ * cache is the one there. The person's own login and list are never the agents'
+ * (see `seedCodexAuth`), so neither is read.
+ */
+async function loadAgentCodexModels(agentHome: string): Promise<CodexModelList> {
+  const bin = resolveRuntimeBin('codex')
+  const probe =
+    bin && (await isAgentCodexLoggedIn())
+      ? await probeCodexAppServer(
+          { command: bin, args: ['app-server'] },
+          buildChildEnv({ CODEX_HOME: agentHome, RUST_LOG: 'error' }),
+        )
+      : null
+  return combineCodexModelSources(probe, await readAgentCodexModelsCache(agentHome))
+}
+
 /** Probe the installed CLI (only when it is signed in: an anonymous `model/list`
  *  is the shipped catalog) and read the cache, then pick what to trust. */
 async function loadCodexModels(): Promise<CodexModelList> {
+  const agentHome = agentCodexHome()
+  if (agentHome) return loadAgentCodexModels(agentHome)
   const codexHome = userCodexHome()
   const bin = resolveRuntimeBin('codex')
   const probe =

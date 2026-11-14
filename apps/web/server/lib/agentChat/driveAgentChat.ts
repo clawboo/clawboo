@@ -14,8 +14,6 @@
 // agents keep the Gateway 1:1 path. Hand-offs from Boo Zero's chat are not this file's
 // business: chatHandOffs wraps a turn and reads what it replied.
 
-import { mkdir } from 'node:fs/promises'
-
 import {
   agents,
   getSetting,
@@ -41,6 +39,7 @@ import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { agentMkdir } from '../agentUser/agentFs'
 import { auditBudgetCrossing } from '../budgetAudit'
 import { reserveRunBudget, type RunBudgetGate, type RunBudgetHold } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
@@ -418,7 +417,9 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
       }
       return paused
     }
-    if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+    // Owner-only, made through the agent-space file verbs (the agent host, when
+    // agents run as their own OS user).
+    if (homeDir) await agentMkdir(homeDir, { mode: 0o700 }).catch(() => undefined)
     // CONTINUATION, read while holding the lock: a message queued behind a running
     // turn must resume the session that turn just saved, not the one both turns saw
     // when they were sent. Empty pointer (first turn / after /reset) → a fresh session.

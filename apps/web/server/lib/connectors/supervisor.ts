@@ -291,14 +291,6 @@ async function performConnect(
 
   // A remote connector spawns nothing: no command to resolve, no process to
   // reap. `display` is the URL, which is still the thing consent is asked for.
-  const plan: ConnectorSpawnPlan =
-    launch.transport === 'streamable-http'
-      ? { command: launch.url, args: [], env: {}, display: launch.url, unresolved: false }
-      : planConnectorSpawn(launch)
-  if (plan.unresolved) {
-    throw new Error(`cannot find ${plan.command} on PATH. Is Node installed?`)
-  }
-
   // Resolved once, because it decides two things: what the child's environment
   // carries, and (with agent isolation on) which user starts it. A connector
   // holding a credential stays with the server; see `agentUserConnectorStart`.
@@ -307,6 +299,14 @@ async function performConnect(
       ? resolveConnectorCredentials(def.slug, def.authInputs ?? [])
       : null
   const asAgent = declared ? agentUserConnectorStart('connector', declared) : null
+
+  const plan: ConnectorSpawnPlan =
+    launch.transport === 'streamable-http'
+      ? { command: launch.url, args: [], env: {}, display: launch.url, unresolved: false }
+      : planConnectorSpawn(launch, { asAgentUser: asAgent !== null })
+  if (plan.unresolved) {
+    throw new Error(`cannot find ${plan.command} on PATH. Is Node installed?`)
+  }
 
   let session: ConnectorSession
   try {

@@ -172,7 +172,7 @@ export function spawnAgentProcess(opts: AgentSpawnOptions): ChildProcess {
   const detached = opts.detached ?? process.platform !== 'win32'
   if (!isAgentUserMode()) {
     return spawn(opts.command, [...opts.args], {
-      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
       env: opts.env as NodeJS.ProcessEnv,
       stdio: [stdio[0], stdio[1], stdio[2]],
       shell: false,
@@ -188,7 +188,7 @@ export function spawnAgentProcess(opts: AgentSpawnOptions): ChildProcess {
   return client.spawn({
     command: opts.command,
     args: opts.args,
-    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     env: agentEnv(opts.env),
     stdio: [stdio[0], stdio[1], stdio[2]],
     group: detached,

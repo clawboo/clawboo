@@ -176,11 +176,16 @@ export function buildCliLoginPlan(
   // NO --device-code: the default `oauth` method is the ungated browser-PKCE
   // flow (see the header ground truth).
   const loginArgs = ['models', 'auth', 'login', '--provider', 'openai-codex']
-  const env = buildChildEnv({
-    // The clack note box sizes itself off stdout columns; keep it wide enough
-    // that the URL/Code lines never wrap mid-token under the script PTY.
-    COLUMNS: '120',
-  })
+  const env = buildChildEnv(
+    {
+      // The clack note box sizes itself off stdout columns; keep it wide enough
+      // that the URL/Code lines never wrap mid-token under the script PTY.
+      COLUMNS: '120',
+    },
+    // OpenClaw's sign-in runs as the server's user (its Gateway is the server's),
+    // so it keeps HOME and the rest even with agents on their own OS user.
+    { serverSide: true },
+  )
   if (platform === 'darwin') {
     // BSD script: `script -q /dev/null <command> [args…]` — plain argv.
     return {

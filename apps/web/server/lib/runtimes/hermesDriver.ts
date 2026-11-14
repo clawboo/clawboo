@@ -46,8 +46,6 @@
 // (the newest session in this home, which under the per-identity home mutex is
 // the stopped run). The tool call in flight at the stop is lost; the run is not.
 
-import { mkdtemp } from 'node:fs/promises'
-import os from 'node:os'
 import path from 'node:path'
 
 import type { HermesDriver, HermesNativeEvent } from '@clawboo/adapter-hermes'
@@ -63,7 +61,13 @@ import {
   type HermesMcpServers,
   type ProvisionedHermesHome,
 } from './hermesHome'
-import { hasUsableHermesCodexAuth, userHermesAuthPath } from './hermesAuth'
+import {
+  hasUsableHermesCodexAuth,
+  hasUsableHermesCodexAuthIn,
+  userHermesAuthPath,
+} from './hermesAuth'
+import { isAgentUserMode } from '../agentUser/config'
+import { makeThrowawayRuntimeHome } from './identityHome'
 import { createSpawnDriver, type ResolvedSpawn } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
@@ -401,6 +405,11 @@ export interface HermesRunSettings {
   env: Record<string, string>
 }
 
+/** Why a Hermes subscription run with agents on their own OS user has no credential. */
+export const HERMES_AGENT_SIGN_IN_MESSAGE =
+  'Sign in to Hermes for the agents from the Runtimes page (agents run as their own user, ' +
+  'so your own Hermes login is not shared with them), or add an API key for a Hermes provider.'
+
 /** Pure run-settings resolver, shared by both drivers. */
 export async function resolveHermesRun(
   opts: StartOpts,
@@ -423,13 +432,22 @@ export async function resolveHermesRun(
   // (first-provision timing). An EXPLICIT rule, not the unmapped-provider pass
   // below, so an auth-less subscription pick degrades exactly like a keyless
   // key-provider pick instead of hard-failing "codex_auth_missing".
-  const hermesCodexUsable = () =>
-    hasUsableHermesCodexAuth(path.join(home.home, 'auth.json')) ||
-    hasUsableHermesCodexAuth(userHermesAuthPath())
+  // The managed home is agent space, so its store is read through the agent-space
+  // file verbs; the person's own store is the server's. Read once, on first need.
+  // With agents on their own OS user the person's own login is never shared with
+  // the agents, so only the home's counts.
+  const agentMode = isAgentUserMode()
+  let codexUsable: boolean | null = null
+  const hermesCodexUsable = async (): Promise<boolean> => {
+    codexUsable ??=
+      (await hasUsableHermesCodexAuthIn(home.home)) ||
+      (!agentMode && hasUsableHermesCodexAuth(userHermesAuthPath()))
+    return codexUsable
+  }
   const pickUsable =
     requestedProvider != null &&
     (requestedProvider === 'openai-codex'
-      ? hermesCodexUsable()
+      ? await hermesCodexUsable()
       : PICK_PROVIDER_ENV[requestedProvider] == null ||
         !!ctx.apiKeyEnv?.[PICK_PROVIDER_ENV[requestedProvider]!])
   const pickedProvider = pickUsable ? requestedProvider : null
@@ -458,9 +476,26 @@ export async function resolveHermesRun(
             : // Last rung before hermes `auto`: the ChatGPT subscription. Keyed
               // on seeded-auth presence, AFTER every key rung so existing keyed
               // setups keep today's exact behavior.
-              hermesCodexUsable()
+              (await hermesCodexUsable())
               ? 'openai-codex'
               : null
+  // With agents on their own OS user, a run that needs the subscription and has
+  // neither the agents' own sign-in nor a provider key fails here with a message
+  // that says why, rather than on Hermes's own missing-credential error.
+  if (agentMode && !(await hermesCodexUsable())) {
+    // Ambient keys the child inherits count too: Hermes's `auto` picks Gemini
+    // from GEMINI_API_KEY or GOOGLE_API_KEY, which no pick names.
+    const keyed =
+      Object.keys(ctx.apiKeyEnv ?? {}).length > 0 ||
+      [...Object.values(PICK_PROVIDER_ENV), 'GEMINI_API_KEY', 'GOOGLE_API_KEY'].some((name) =>
+        Boolean(process.env[name]),
+      )
+    const wantsSubscription =
+      requestedProvider === 'openai-codex' ||
+      configuredProvider === 'openai-codex' ||
+      (!providerFlag && !configuredProvider)
+    if (!keyed && wantsSubscription) throw new Error(HERMES_AGENT_SIGN_IN_MESSAGE)
+  }
   // Resume only into a PRE-EXISTING home — a freshly created one cannot hold
   // the prior session.
   const resume = !home.created && ctx.resume ? ctx.resume : null
@@ -560,11 +595,13 @@ export function createHermesDriver(
     async resolve() {
       // Persistent per-identity home when the runner materialized one;
       // otherwise a throwaway home (the conservative one-shot default).
-      homeDir = ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-')))
+      homeDir = ctx.homeDir ?? (await makeThrowawayRuntimeHome('clawboo-hermes-home-'))
       const home = await provisionHermesHome(homeDir, {
         mcpServers: ctx.mcpBaseUrl
           ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
           : null,
+        hasApiKey: Object.keys(ctx.apiKeyEnv ?? {}).length > 0,
+        providerHint: ctx.providerHint ?? null,
       })
       if (ctx.mcpBaseUrl && !home.mcpAttached) {
         // The seeded config declares `mcp_servers` on one line with servers in it,

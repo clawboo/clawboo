@@ -54,6 +54,10 @@ import { access, open, realpath, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 
+import { isAgentUserMode } from '../../agentUser/config'
+import { activeAgentHost, agentHomeDir } from '../../agentUser/state'
+import { realPathOrSpelling, workDirSpellings } from '../../workDir'
+
 /** Refusal codes, carried to the model so it can adapt rather than retry blindly. */
 export type ExecRefusalCode =
   | 'not-argv'
@@ -64,6 +68,8 @@ export type ExecRefusalCode =
   | 'interpreter'
   | 'path-separator-in-program'
   | 'not-found'
+  | 'agent-space'
+  | 'not-trusted-owner'
 
 export interface ExecRefusal {
   ok: false
@@ -80,6 +86,9 @@ export interface ExecAccepted {
 }
 
 export const MAX_ARGV_LENGTH = 64
+
+const NOFOLLOW = constants.O_NOFOLLOW ?? 0
+const OPEN_PROGRAM = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0)
 export const MAX_ARG_BYTES = 2048
 
 /**
@@ -277,12 +286,11 @@ export async function resolveProgramPath(
   program: string,
   pathEnv: string | undefined,
 ): Promise<string | null> {
-  const candidates = program.startsWith('/')
-    ? [program]
-    : (pathEnv ?? '')
-        .split(':')
-        .filter(Boolean)
-        .map((dir) => path.join(dir, program))
+  if (isAgentUserMode()) {
+    const found = await resolveAgentProgram(program, pathEnv)
+    return found.ok ? found.resolved : null
+  }
+  const candidates = programCandidates(program, pathEnv)
 
   for (const candidate of candidates) {
     try {
@@ -297,6 +305,136 @@ export async function resolveProgramPath(
     }
   }
   return null
+}
+
+function programCandidates(program: string, pathEnv: string | undefined): string[] {
+  return program.startsWith('/')
+    ? [program]
+    : (pathEnv ?? '')
+        .split(':')
+        .filter(Boolean)
+        .map((dir) => path.join(dir, program))
+}
+
+// WITH AGENTS ON THEIR OWN OS USER (CLAWBOO_AGENT_USER) the command runs as that
+// user, and the agent can write its home and its work folder (and could open
+// them up to this server). Every look at a program here is this server's own
+// file access on a path the model chose, so in that mode:
+//
+//  - a program in agent space is refused by name, before any file is touched:
+//    the agent could swap it for a named pipe between a check and the open, and
+//    a blocked open holds one of the few threads all of this server's file work
+//    shares;
+//  - the agent host (as the agent user) says first which candidates that user
+//    can execute at all. A program it cannot run would fail at the spawn anyway,
+//    and a path only this server can reach is never looked at, so the answer
+//    says nothing about it. The host is on the agents' side, so its answer only
+//    narrows the list: the checks after it are this server's own;
+//  - the program must be owned by root or by the user this server runs as,
+//    and writable by neither its group nor others. The agent user can change
+//    such a file only by being one of those owners, so it cannot have put it
+//    there or changed it, and the file that was shown on the card is the file
+//    the agent user runs. (The server's own user counts: on a one-person Mac,
+//    Homebrew's programs belong to that person, who is the server user.)
+
+/** Agent space in every spelling: the work folder and the agent user's home. */
+function agentSpaceRoots(): string[] {
+  const home = path.resolve(agentHomeDir())
+  return [...new Set([...workDirSpellings(), home, realPathOrSpelling(home)])]
+}
+
+function isInAgentSpace(p: string, roots: readonly string[]): boolean {
+  const abs = path.resolve(p)
+  return roots.some(
+    (root) => abs === root || abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep),
+  )
+}
+
+/** Owned by root or this server's user, and neither group nor others may write it. */
+function hasTrustedOwner(st: { uid: number; mode: number }): boolean {
+  const owner = st.uid === 0 || st.uid === process.getuid?.()
+  return owner && (st.mode & 0o022) === 0
+}
+
+const inAgentSpace = (shown: string): ExecRefusal =>
+  refuse(
+    'agent-space',
+    `"${shown}" is in the agents' own folders. Agents run as their own user here, so a ` +
+      'program they could have written is not run. Call an installed program instead, by ' +
+      'name (such as git) or by a path outside those folders.',
+  )
+
+const notTrustedOwner = (real: string): ExecRefusal =>
+  refuse(
+    'not-trusted-owner',
+    `"${real}" is owned by another user, or its group or others may change it. Agents run ` +
+      'as their own user here, so only a program installed by root or by the user Clawboo ' +
+      'runs as, and writable by no one else, can be run. Call an installed program instead.',
+  )
+
+/** The candidates the agent user can execute, as the agent host reports it. */
+async function agentCanExec(paths: string[]): Promise<Set<string>> {
+  const res = await activeAgentHost().client.request({ op: 'canExec', paths })
+  const ok = new Set<string>()
+  for (const r of Array.isArray(res.results) ? res.results : []) {
+    if (r && r.ok === true && typeof r.path === 'string') ok.add(r.path)
+  }
+  return ok
+}
+
+export type AgentProgramResolution = { ok: true; resolved: string } | ExecRefusal
+
+/**
+ * `resolveProgramPath` with agents on their own OS user, saying why when a
+ * program cannot be used. A bare name takes the first PATH entry that passes
+ * every check, so a copy someone installed for themselves earlier in PATH does
+ * not hide the system one.
+ */
+export async function resolveAgentProgram(
+  program: string,
+  pathEnv: string | undefined,
+): Promise<AgentProgramResolution> {
+  try {
+    const roots = agentSpaceRoots()
+    const candidates = programCandidates(program, pathEnv)
+    const outside = candidates.filter((c) => !isInAgentSpace(c, roots))
+    if (program.startsWith('/') && outside.length === 0) return inAgentSpace(program)
+    const runnable = outside.length > 0 ? await agentCanExec(outside) : new Set<string>()
+    let first: ExecRefusal | null = null
+    for (const candidate of outside) {
+      if (!runnable.has(candidate)) continue
+      try {
+        const real = await realpath(candidate)
+        if (isInAgentSpace(real, roots)) {
+          first ??= inAgentSpace(real)
+          continue
+        }
+        const st = await stat(real)
+        if (!st.isFile()) continue
+        if (!hasTrustedOwner(st)) {
+          first ??= notTrustedOwner(real)
+          continue
+        }
+        return { ok: true, resolved: real }
+      } catch {
+        // Gone since the host looked. Try the next PATH entry.
+      }
+    }
+    return (
+      first ??
+      refuse(
+        'not-found',
+        `"${program}" was not found as a program this Boo may run. Agents run as their own ` +
+          'user here, so a program must be one that user can run, installed by root or by the ' +
+          "user Clawboo runs as, and outside the agents' own folders.",
+      )
+    )
+  } catch (err) {
+    return refuse(
+      'not-found',
+      `"${program}" could not be checked: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 }
 
 /**
@@ -366,12 +504,36 @@ export async function inspectResolvedProgram(
     )
   }
 
+  // With agents on their own user, refused by name before the open (see
+  // `resolveAgentProgram`), and the open below takes no link at the path's end:
+  // the resolved path is a real path, so a link there now is a swap.
+  const agentMode = isAgentUserMode()
+  if (agentMode) {
+    let roots: string[]
+    try {
+      roots = agentSpaceRoots()
+    } catch (err) {
+      return refuse(
+        'not-found',
+        `"${resolved}" could not be checked: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    if (isInAgentSpace(resolved, roots)) return inAgentSpace(resolved)
+  }
+
   let identity: ExecFileIdentity
   let shebang = ''
+  let ownership: ExecRefusal | null = null
   try {
-    const handle = await open(resolved, 'r')
+    // O_NONBLOCK, so a named pipe swapped in after the checks cannot hold the
+    // open (and one of the threads this server's file work shares) until
+    // something writes to it. It changes nothing for a regular file, and
+    // anything else is refused just below, before a read.
+    const handle = await open(resolved, OPEN_PROGRAM | (agentMode ? NOFOLLOW : 0))
     try {
       const st = await handle.stat()
+      if (!st.isFile()) throw new Error('not a regular file')
+      if (agentMode && !hasTrustedOwner(st)) ownership = notTrustedOwner(resolved)
       identity = {
         dev: st.dev,
         ino: st.ino,
@@ -388,6 +550,7 @@ export async function inspectResolvedProgram(
   } catch {
     return refuse('not-found', `"${resolved}" could not be read.`)
   }
+  if (ownership) return ownership
 
   if (shebang.startsWith('#!')) {
     const line = shebang.split('\n', 1)[0] ?? ''

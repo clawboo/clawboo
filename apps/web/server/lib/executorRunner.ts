@@ -47,8 +47,6 @@ import {
   type DbExecutionProcess,
   type RunCostSource,
 } from '@clawboo/db'
-import { existsSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
 
 import { BUDGET_REFUSED_CLASS } from '@clawboo/board-core'
 import { compactToolResultMarkdown } from '@clawboo/compaction'
@@ -83,11 +81,11 @@ import {
   isolationForTask,
   KeyedMutex,
   reconstructState,
-  worktreeRegistration,
   type AgentHandoffInput,
   type ResumeState,
 } from '@clawboo/worktrees'
 
+import { agentMkdir } from './agentUser/agentFs'
 import { reserveRunBudget, type RunBudgetHold } from './budgetHold'
 import { budgetPreflight, budgetRefusalText, reviewerBudgetRefusal } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
@@ -128,6 +126,7 @@ import {
   actOnTaskWorkspace,
   getTaskWorkspace,
   provisionTaskWorkspace,
+  recordedCheckoutState,
   resumeTaskWorkspace,
   writeTaskHandoff,
 } from './worktrees'
@@ -331,7 +330,7 @@ type WorkspaceOutcome =
   | { ok: true; cwd: string | null; resume: ResumeState | null }
   | {
       ok: false
-      refusal: 'no_isolation' | 'registration_unknown' | 'unsafe_to_rebuild'
+      refusal: 'no_isolation' | 'registration_unknown' | 'unsafe_to_rebuild' | 'rebuild_failed'
       reason: string
     }
 
@@ -340,6 +339,7 @@ const REFUSAL_TAG: Record<Extract<WorkspaceOutcome, { ok: false }>['refusal'], s
   no_isolation: '[blocked: no isolation]',
   registration_unknown: '[not started: worktree unchecked]',
   unsafe_to_rebuild: '[blocked: worktree kept]',
+  rebuild_failed: '[not started: worktree not rebuilt]',
 }
 
 function registrationUnknown(
@@ -410,11 +410,17 @@ async function acquireWorkspace(
     // reaped checkout (stale row / dir gone / not git-registered) and rebuild it
     // from the retained branch before use; fall through to a fresh provision
     // only if the rebuild can't run (no repoPath / branch gone).
-    const onDisk = existsSync(wtPath)
     // Probed whenever the folder is there, a `stale` row included: the rebuild
     // may replace the folder, so a failed `git worktree list` must not read as
-    // "reaped". It says nothing about a checkout that may be live.
-    const registration = onDisk && repoPath ? await worktreeRegistration(repoPath, wtPath) : null
+    // "reaped". It says nothing about a checkout that may be live. With agents on
+    // their own OS user the checkout is the agent user's, asked about through
+    // the agent host and against the agent user's copy of the repository.
+    // Asked of the repository the row records: the checkout belongs to it (and
+    // with agents on their own OS user, the agent's copy is derived from it).
+    const { onDisk, registration } = await recordedCheckoutState(
+      existing.workspace.repoPath || repoPath,
+      wtPath,
+    )
     if (registration === 'unknown') return registrationUnknown(wtPath, repoPath)
     const reaped =
       existing.workspace.status === 'stale' || !onDisk || registration === 'unregistered'
@@ -432,9 +438,24 @@ async function acquireWorkspace(
       }
       // A fresh provision would replace the folder the same way.
       if (resumed.reason === 'unsafe_to_rebuild') return unsafeWorkspace(resumed)
+      // Refused for a reason a person can act on (Git LFS or submodules while
+      // agents run as their own OS user): say it rather than retry.
+      if (resumed.reason === 'not_supported') {
+        return { ok: false, refusal: 'no_isolation', reason: resumed.why }
+      }
       // Resume asks git again, and an unanswered check stops it the same way.
       if (resumed.reason === 'registration_unknown') {
         return registrationUnknown(resumed.worktreePath, repoPath)
+      }
+      // The branch is there but its checkout could not be rebuilt (agents on
+      // their own OS user): a fresh provision would reset the branch, so the run
+      // stops here and the task can run again.
+      if (resumed.reason === 'rebuild_failed') {
+        return {
+          ok: false,
+          refusal: 'rebuild_failed',
+          reason: `Could not rebuild the worktree at ${resumed.worktreePath}: ${resumed.why}. Nothing was reset or deleted. The task can run again.`,
+        }
       }
     }
   }
@@ -457,6 +478,8 @@ async function acquireWorkspace(
   const prov = await provisionTaskWorkspace(taskId, { repoPath, kind })
   if (!prov.ok) {
     if (prov.reason === 'unsafe_to_rebuild') return unsafeWorkspace(prov)
+    if (prov.reason === 'not_supported')
+      return { ok: false, refusal: 'no_isolation', reason: prov.why }
     return {
       ok: false,
       refusal: 'no_isolation',
@@ -1122,7 +1145,9 @@ async function runTaskInner(
   // Materialize the persistent identity home owner-only (0700) before the driver
   // touches it — it holds the runtime's private memory/transcripts, which must
   // not land world-readable on a multi-user host (matches the Hermes home mode).
-  if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => {})
+  // It is agent space, so the agent host makes it when agents run as their own
+  // OS user.
+  if (homeDir) await agentMkdir(homeDir, { mode: 0o700 }).catch(() => {})
   const baseSessionKey = `runtime:${runtimeId}:task:${taskId}`
   const ctx: RuntimeRunContext = {
     cwd: cwd ?? runDir,

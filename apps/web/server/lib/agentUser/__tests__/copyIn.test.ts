@@ -66,8 +66,39 @@ describe.runIf(posix)('copying agent state into agent space', () => {
       path.join(data, 'clawboo.db'),
       path.join(data, 'runtimes', 'hermes', 'a1', 'notes.db'),
     )
-    fs.mkdirSync(path.join(data, 'workspaces', 'team-1'), { recursive: true })
+    // A login copy and a key file the server put there before isolation, and a
+    // Native home (its conversation history stays in the data folder).
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'hermes', 'a1', 'auth.json'),
+      '{"tokens":"operator"}',
+    )
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'hermes', 'a1', '.env'),
+      'OPENAI_API_KEY=sk-operator',
+    )
+    fs.mkdirSync(path.join(data, 'runtimes', 'clawboo-native', 'a1', 'sessions'), {
+      recursive: true,
+    })
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'clawboo-native', 'a1', 'sessions', 's.json'),
+      '[]',
+    )
+    // Hermes settings seeded from the operator's own, with a provider key; a
+    // skill's own config.yaml deeper in the home is the agent's.
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'hermes', 'a1', 'config.yaml'),
+      'providers:\n  mine:\n    api_key: sk-operator-config\n',
+    )
+    fs.mkdirSync(path.join(data, 'runtimes', 'hermes', 'a1', 'skills', 's1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(data, 'runtimes', 'hermes', 'a1', 'skills', 's1', 'config.yaml'),
+      'x: 1\n',
+    )
+    fs.mkdirSync(path.join(data, 'workspaces', 'team-1', 'app'), { recursive: true })
     fs.writeFileSync(path.join(data, 'workspaces', 'team-1', 'plan.md'), '# plan')
+    // The team's project settings: nothing writes these again.
+    fs.writeFileSync(path.join(data, 'workspaces', 'team-1', '.env'), 'PORT=3000\n')
+    fs.writeFileSync(path.join(data, 'workspaces', 'team-1', 'app', '.env'), 'DB=local\n')
     fs.mkdirSync(work, { recursive: true })
     const plan = planCopyIn({
       dataDir: data,
@@ -98,8 +129,23 @@ describe.runIf(posix)('copying agent state into agent space', () => {
     expect(fs.statSync(path.join(home, 'run.sh')).mode & 0o777).toBe(0o700)
     expect(fs.existsSync(path.join(home, 'key.txt'))).toBe(false)
     expect(fs.existsSync(path.join(home, 'notes.db'))).toBe(false)
-    expect(report.skipped.map((s) => path.basename(s.path)).sort()).toEqual(['key.txt', 'notes.db'])
-    expect(fs.readFileSync(path.join(work, 'teams', 'team-1', 'plan.md'), 'utf8')).toBe('# plan')
+    const source = path.join(data, 'runtimes', 'hermes', 'a1')
+    expect(report.skipped.map((s) => path.relative(source, s.path)).sort()).toEqual([
+      '.env',
+      'auth.json',
+      'config.yaml',
+      'key.txt',
+      'notes.db',
+    ])
+    expect(fs.existsSync(path.join(home, 'auth.json'))).toBe(false)
+    expect(fs.existsSync(path.join(home, '.env'))).toBe(false)
+    expect(fs.existsSync(path.join(home, 'config.yaml'))).toBe(false)
+    expect(fs.readFileSync(path.join(home, 'skills', 's1', 'config.yaml'), 'utf8')).toBe('x: 1\n')
+    expect(fs.existsSync(path.join(agentRt, 'clawboo-native'))).toBe(false)
+    const team = path.join(work, 'teams', 'team-1')
+    expect(fs.readFileSync(path.join(team, 'plan.md'), 'utf8')).toBe('# plan')
+    expect(fs.readFileSync(path.join(team, '.env'), 'utf8')).toBe('PORT=3000\n')
+    expect(fs.readFileSync(path.join(team, 'app', '.env'), 'utf8')).toBe('DB=local\n')
     // Every write went through the host.
     expect(ops).toEqual(expect.arrayContaining(['fs.mkdir', 'fs.write', 'fs.rename']))
     // The originals stay, so turning the setting off is the rollback.
@@ -190,7 +236,7 @@ describe.runIf(posix)('copying agent state into agent space', () => {
       return orig(req as never)
     }) as never)
     const report = await copyIntoAgentSpace([
-      { from: team, to: path.join(work, 'teams', 'team-1') },
+      { from: team, to: path.join(work, 'teams', 'team-1'), kind: 'team' },
     ])
     expect(report.copied).toEqual([])
     expect(report.failed).toHaveLength(1)
@@ -204,6 +250,14 @@ describe.runIf(posix)('copying agent state into agent space', () => {
     }
     walk(path.join(dir, 'agent'))
     expect(found).not.toContain('master.key')
+  })
+})
+
+describe("Clawboo Native's homes", () => {
+  it('are skipped by the name its runtime id gives their folder', async () => {
+    const { getDescriptor } = await import('../../runtimes/descriptor')
+    const { NATIVE_RUNTIME_ID } = await import('../copyIn')
+    expect(getDescriptor(NATIVE_RUNTIME_ID as never).id).toBe(NATIVE_RUNTIME_ID)
   })
 })
 

@@ -21,7 +21,7 @@ import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
 import { resolveClawbooDir } from '@clawboo/config'
-import { execGit } from '@clawboo/worktrees'
+import { execGit, GitError } from '@clawboo/worktrees'
 
 import { buildChildEnv } from '../runtimes/childEnv'
 import { spawnAgentProcess } from '../runtimes/spawner'
@@ -301,21 +301,85 @@ async function pruneBaseRefs(mirror: string): Promise<void> {
   }
 }
 
+/** The branch's commit in `repoPath`, or null when there is no such branch. */
+async function userBranchTip(repoPath: string, ref: string): Promise<string | null> {
+  try {
+    const sha = (
+      await execGit(repoPath, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+    ).trim()
+    if (!SHA_RE.test(sha)) throw new MirrorError(`${ref} in ${repoPath} is not a commit`)
+    return sha
+  } catch (err) {
+    if (err instanceof GitError && err.exitCode === 1 && !err.stderr.trim()) return null
+    throw err
+  }
+}
+
+/** Where `ref` is checked out in `repoPath` (any of its checkouts, a stale
+ *  registration whose folder is gone included), or null. */
+export async function checkedOutAt(repoPath: string, ref: string): Promise<string | null> {
+  let at: string | null = null
+  for (const line of (await execGit(repoPath, ['worktree', 'list', '--porcelain'])).split('\n')) {
+    if (line.startsWith('worktree ')) at = line.slice('worktree '.length)
+    else if (line === `branch ${ref}`) return at ?? 'a checkout'
+  }
+  return null
+}
+
+/** True when `commit` is `ref` or comes before it in `repoPath`. A commit
+ *  `repoPath` does not have is not; any other failure throws. */
+async function containsIn(repoPath: string, commit: string, ref: string): Promise<boolean> {
+  try {
+    await execGit(repoPath, ['merge-base', '--is-ancestor', commit, ref])
+    return true
+  } catch (err) {
+    if (err instanceof GitError && err.exitCode === 1) return false
+    throw err
+  }
+}
+
+/** Throw unless no checkout of `repoPath` has `ref` checked out. A fetch into a
+ *  checked-out branch is refused by git; `update-ref` is not, and moving the
+ *  branch under someone's working tree would make their files look changed. */
+async function refuseCheckedOut(repoPath: string, ref: string): Promise<void> {
+  const at = await checkedOutAt(repoPath, ref)
+  if (at !== null) throw new MirrorError(`${ref} is checked out at ${at} of ${repoPath}`)
+}
+
 /**
  * Bring a task branch out of the mirror into the user's repository, under the
  * same name. `baseSha` is where the task started: only commits after it travel.
  * Returns the branch tip now in the user's repository, or null when the branch
  * has nothing past the base (nothing to bring).
+ *
+ * `expected` is the branch's commit in the user's repository that the caller
+ * decided may be replaced (null: there must be no such branch); absent, the one
+ * it is at now. The branch moves only from that commit (compare-and-swap), so a
+ * commit someone made to it meanwhile is never overwritten.
+ *
+ * `mustContain`, when given, is a commit the task's work must have in its
+ * history. It is checked by the server in the user's repository, on the work
+ * as it arrived, before the branch moves: the mirror's own answer to that
+ * question is the agent's to give.
  */
 export async function exportTaskBranch(
   repoPath: string,
   branch: string,
   baseSha: string,
+  expected?: string | null,
+  opts: { mustContain?: string | null } = {},
 ): Promise<string | null> {
   if (!/^[A-Za-z0-9._/-]{1,200}$/.test(branch) || branch.includes('..')) {
     throw new MirrorError(`unsafe branch name: ${branch}`)
   }
   if (!SHA_RE.test(baseSha)) throw new MirrorError(`not a commit id: ${baseSha}`)
+  if (expected != null && !SHA_RE.test(expected)) {
+    throw new MirrorError(`not a commit id: ${expected}`)
+  }
+  const mustContain = opts.mustContain ?? null
+  if (mustContain !== null && !SHA_RE.test(mustContain)) {
+    throw new MirrorError(`not a commit id: ${mustContain}`)
+  }
   const mirror = mirrorPathFor(repoPath)
   const tip = (
     await runAgentGit(['-C', mirror, 'rev-parse', '--verify', `refs/heads/${branch}^{commit}`])
@@ -323,9 +387,16 @@ export async function exportTaskBranch(
   if (!SHA_RE.test(tip)) throw new MirrorError(`the mirror has no branch ${branch}`)
   if (tip === baseSha) return null
 
+  const want = `refs/heads/${branch}`
+  const theirs = expected !== undefined ? expected : await userBranchTip(repoPath, want)
+  await refuseCheckedOut(repoPath, want)
+
   const tag = randomBytes(8).toString('hex')
   const outgoing = `${mirror}.out-${tag}.bundle`
   const bundle = path.join(serverBundleDir(), `out-${tag}.bundle`)
+  // Fetched under a name of its own first, so the branch itself moves in one
+  // compare-and-swap below.
+  const staged = `refs/clawboo-export/${tag}`
   try {
     await runAgentGit([
       '-C',
@@ -345,20 +416,43 @@ export async function exportTaskBranch(
     const heads = (await execGit(repoPath, ['bundle', 'list-heads', '--', pathArg(bundle)]))
       .trim()
       .split('\n')
-    const want = `refs/heads/${branch}`
     if (heads.length !== 1 || !heads[0]!.endsWith(` ${want}`) || heads[0]!.split(' ')[0] !== tip) {
       throw new MirrorError(`the bundle from the mirror does not hold exactly ${want}`)
     }
+    // Every object the agent's commits bring is checked as it arrives: a
+    // malformed one is refused, never stored in the user's repository.
     await execGit(repoPath, [
       ...BUNDLE_FETCH_ONLY,
+      '-c',
+      'transfer.fsckObjects=true',
+      '-c',
+      'fetch.fsckObjects=true',
       'fetch',
       '--quiet',
       '--no-tags',
       '--',
       pathArg(bundle),
-      `+${want}:${want}`,
+      `+${want}:${staged}`,
     ])
+    if (mustContain !== null && !(await containsIn(repoPath, mustContain, staged))) {
+      throw new MirrorError(
+        `${want} in ${repoPath} has commits the task's branch does not, so it was left as it is`,
+      )
+    }
+    // Checked again here, not only before the bundle: someone may have checked
+    // the branch out (at the same commit) while it was being made and copied.
+    // What is left is the moment between this check and the move.
+    await refuseCheckedOut(repoPath, want)
+    try {
+      // An empty old value: the branch must not exist yet.
+      await execGit(repoPath, ['update-ref', want, tip, theirs ?? ''])
+    } catch (err) {
+      throw new MirrorError(
+        `${want} in ${repoPath} changed while the task's work was being brought over, so it was left as it is (${err instanceof Error ? err.message : String(err)})`,
+      )
+    }
   } finally {
+    await execGit(repoPath, ['update-ref', '-d', staged]).catch(() => undefined)
     fs.rmSync(bundle, { force: true })
     await agentRemove(outgoing).catch(() => undefined)
   }

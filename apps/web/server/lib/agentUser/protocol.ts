@@ -29,6 +29,13 @@ export const MAX_FRAME_CHARS = 16 * 1024 * 1024
 /** The most a single file read may return. */
 export const MAX_READ_BYTES = 8 * 1024 * 1024
 
+/** The most a listing reply may carry, encoded, so an honest one always fits
+ *  in a frame; past it the host stops and says `truncated`. */
+export const MAX_LIST_REPLY_CHARS = 4 * 1024 * 1024
+
+/** The most paths a search reply (`inodes`) may name. */
+export const MAX_SEARCH_MATCHES = 1000
+
 /** The most a single file write may carry. */
 export const MAX_WRITE_BYTES = 8 * 1024 * 1024
 
@@ -68,13 +75,18 @@ export type HostRequest =
   | { op: 'fs.append'; path: string; data: string; mode: number }
   | { op: 'fs.mkdir'; path: string; mode: number }
   | { op: 'fs.rm'; path: string }
+  /** Remove an EMPTY folder; fails on anything in it, and on a link. */
+  | { op: 'fs.rmdir'; path: string }
   | { op: 'fs.rename'; from: string; to: string }
   | { op: 'fs.stat'; path: string }
+  /** The path with every link in it resolved; fails when nothing is there. */
+  | { op: 'fs.realpath'; path: string }
   | { op: 'fs.list'; path: string; max: number }
   | { op: 'probe'; checks: ProbeCheck[] }
   | { op: 'procView'; pid: number }
   | { op: 'inodes'; root: string; targets: InodeRef[]; maxEntries: number }
-  | { op: 'sudoList' }
+  /** Try, as the agent user, every way it might become another user. */
+  | { op: 'privCheck'; serverUser: string }
   | { op: 'canExec'; paths: string[] }
 
 export type HostOp = HostRequest['op']
@@ -128,8 +140,10 @@ export interface HostReplies {
   'fs.append': Record<string, never>
   'fs.mkdir': Record<string, never>
   'fs.rm': Record<string, never>
+  'fs.rmdir': Record<string, never>
   'fs.rename': Record<string, never>
   'fs.stat': { stat: FsStat | null }
+  'fs.realpath': { path: string }
   'fs.list': { entries: FsEntry[]; truncated: boolean }
   probe: { results: ProbeResult[] }
   procView: {
@@ -140,8 +154,29 @@ export interface HostReplies {
     /** macOS: `ps -E -ww -p <pid>`, which shows the environment to whoever may see it. */
     psEnv: { ok: boolean; code?: string; text?: string }
   }
-  inodes: { matches: string[]; truncated: boolean }
-  sudoList: { ran: boolean; exitCode: number | null; stdout: string; stderr: string; code?: string }
+  inodes: {
+    matches: string[]
+    /** setuid files another user owns, and setgid files for a group the agent
+     *  user is not in: each would give an agent someone else's rights. */
+    privileged: string[]
+    truncated: boolean
+    /** The host runs with no_new_privs (Linux), so such files give nothing.
+     *  Absent from an older host. */
+    noNewPrivs?: boolean
+    /** Folders the agent user could not search, so not searched. Absent from
+     *  an older host. */
+    unreadable?: string[]
+  }
+  privCheck: {
+    /** Each attempt and whether it SUCCEEDED (exit 0). `unchecked`: sudo said
+     *  no_new_privs stops it from running, so the attempt tells nothing. */
+    attempts: { what: string; ran: boolean; succeeded: boolean; unchecked?: boolean }[]
+    /** Whether the agent user may schedule its own jobs (`crontab -l` not refused). */
+    crontab: 'allowed' | 'denied' | 'absent'
+    /** The host runs with no_new_privs (Linux), under which no sudo or doas
+     *  rule can be tried. Absent from an older host. */
+    noNewPrivs?: boolean
+  }
   canExec: { results: { path: string; ok: boolean; code?: string }[] }
 }
 
@@ -156,8 +191,14 @@ export type ProcEventFrame =
   | { t: 'ev'; proc: string; ev: 'exit' | 'close'; code: number | null; signal: string | null }
   | { t: 'ev'; proc: string; ev: 'error'; code: string; message: string }
 
-/** Server to host: a started process's stdin. No reply. */
-export type StdinFrame = { t: 'in'; proc: string; data: string } | { t: 'in-end'; proc: string }
+/** Server to host: a started process's stdin, and flow control for its output
+ *  (`pause` when the server's buffer for it is full, `resume` when drained).
+ *  No reply. */
+export type StdinFrame =
+  | { t: 'in'; proc: string; data: string }
+  | { t: 'in-end'; proc: string }
+  | { t: 'pause'; proc: string }
+  | { t: 'resume'; proc: string }
 
 export type ReqFrame = { t: 'req'; id: number } & HostRequest
 

@@ -6,8 +6,9 @@
 // When clawboo-managed skills are merged into a run's view, the NATIVE skill
 // wins on any name collision — clawboo never shadows a self-created skill.
 
-import { readdir } from 'node:fs/promises'
 import path from 'node:path'
+
+import { agentList } from '../agentUser/agentFs'
 
 export interface HermesSkillRef {
   name: string
@@ -15,13 +16,15 @@ export interface HermesSkillRef {
 }
 
 /** Skill names under `<home>/skills` (dirs as-is, files extension-stripped).
- *  Read-only; `[]` when the dir is absent or unreadable. */
+ *  Read-only; `[]` when the dir is absent or unreadable. The home is agent space,
+ *  so it is listed through the agent-space file verbs (the agent host, when
+ *  agents run as their own OS user). */
 export async function listNativeSkills(home: string): Promise<string[]> {
   try {
-    const entries = await readdir(path.join(home, 'skills'), { withFileTypes: true })
+    const { entries } = await agentList(path.join(home, 'skills'))
     return entries
       .filter((e) => !e.name.startsWith('.'))
-      .map((e) => (e.isDirectory() ? e.name : e.name.replace(/\.[^.]+$/, '')))
+      .map((e) => (e.type === 'dir' ? e.name : e.name.replace(/\.[^.]+$/, '')))
       .filter(Boolean)
       .sort()
   } catch {

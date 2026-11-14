@@ -25,8 +25,6 @@
 // The board stays canonical: this posts NARRATION to the room. A DECISION is a
 // board mutation made via the board repository, never via a chat post.
 
-import { mkdir } from 'node:fs/promises'
-
 import {
   connectorAskBody,
   connectorAskEntryId,
@@ -50,6 +48,7 @@ import type { RuntimeAdapter, RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { formatPeerPost } from '@clawboo/mcp'
 
+import { agentMkdir } from '../agentUser/agentFs'
 import { auditBudgetCrossing } from '../budgetAudit'
 import { reserveRunBudget, type RunBudgetHold } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
@@ -242,8 +241,8 @@ async function dispatchHeldTurn(
   // Materialize the persistent identity home (owner-only) BEFORE the driver touches
   // it — a persistent runtime (Hermes/native) must reuse its per-identity home so
   // its native memory/sessions compound across turns, not degrade to a throwaway.
-  if (deps.homeDir)
-    await mkdir(deps.homeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+  // It is agent space: the agent host makes it when agents run as their own OS user.
+  if (deps.homeDir) await agentMkdir(deps.homeDir, { mode: 0o700 }).catch(() => undefined)
   // The team folder must exist before the runtime starts in it. A failure throws:
   // the turn never falls back to the server's working directory.
   if (deps.cwd) await ensureTeamWorkdir(deps.cwd)

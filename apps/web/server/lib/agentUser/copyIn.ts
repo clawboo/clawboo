@@ -1,7 +1,11 @@
 // Turning agent isolation on copies the agents' existing state into agent
 // space once (design 4.10): each runtime home (Hermes memory and skills, Codex
-// sessions) and each team folder. The originals stay where they are, so turning
-// the setting off again is the rollback.
+// sessions) and each team folder. Not Clawboo Native's homes, and from a
+// runtime home no sign-in or key file (`auth.json`, `.env`) and not Hermes's
+// `config.yaml`: before isolation those were copies of the operator's own
+// logins, saved keys and settings. A team folder is copied whole. The
+// originals stay where they are, so turning the setting off again is the
+// rollback.
 //
 // The server reads the originals as itself: they sit in its own folders. Those
 // folders were written by agents that ran as the server's user, though, so the
@@ -31,6 +35,9 @@ import { MAX_WRITE_BYTES } from './protocol'
 export interface CopyInItem {
   from: string
   to: string
+  /** A runtime's home (which runtime), or a team folder. Only a runtime home
+   *  leaves files out (see `leftOut`). */
+  kind: { runtime: string } | 'team'
   /** The source folder as planned (device and inode). The copy refuses a
    *  source that is no longer this folder, such as one reached through a
    *  parent swapped for a link since. */
@@ -49,6 +56,30 @@ export interface CopyInReport {
 
 const STAGING = '.clawboo-copying'
 
+/** Files never carried out of a runtime home, at any depth: sign-ins and keys
+ *  the server put there before isolation came from the operator's own logins
+ *  and vault; the agent user gets its own, and runs write what they need. */
+const NEVER_COPIED = new Set(['auth.json', '.env'])
+
+/** Why `rel` (a path inside a copied item) is left out, or null to copy it.
+ *  A team folder keeps everything: its `.env` is the project's own settings,
+ *  which nothing writes again. */
+function leftOut(kind: CopyInItem['kind'], rel: string): string | null {
+  if (kind === 'team') return null
+  if (NEVER_COPIED.has(path.basename(rel))) return 'a sign-in or key file, written again per run'
+  // Hermes's settings in its home were seeded from the operator's own, and can
+  // hold a provider's `api_key`. With isolation on they are never seeded:
+  // each run writes Clawboo's block into a fresh one.
+  if (kind.runtime === 'hermes' && rel === 'config.yaml') {
+    return "Hermes settings seeded from the operator's own, which can hold a provider key"
+  }
+  return null
+}
+
+/** Clawboo Native's runtime id, which names its homes' folder under `runtimes/`
+ *  (`runtimeIdentityHomePath('clawboo-native', ...)`; the descriptor's id). */
+export const NATIVE_RUNTIME_ID = 'clawboo-native'
+
 /** Every copy to make: runtime homes and team folders, by their folder names. */
 export function planCopyIn(opts: {
   dataDir: string
@@ -60,10 +91,10 @@ export function planCopyIn(opts: {
   keepTeam?: (root: string, name: string) => boolean
 }): CopyInItem[] {
   const items: CopyInItem[] = []
-  const item = (from: string, to: string): void => {
+  const item = (kind: CopyInItem['kind'], from: string, to: string): void => {
     try {
       const st = fs.lstatSync(from)
-      if (st.isDirectory()) items.push({ from, to, planned: { dev: st.dev, ino: st.ino } })
+      if (st.isDirectory()) items.push({ from, to, kind, planned: { dev: st.dev, ino: st.ino } })
     } catch {
       /* gone since it was listed */
     }
@@ -85,8 +116,15 @@ export function planCopyIn(opts: {
   }
   const runtimes = path.join(opts.dataDir, 'runtimes')
   for (const rt of realDirs(runtimes)) {
+    // Clawboo Native's homes hold its conversation history, which stays in the
+    // data folder: its model loop is server code and no agent process uses it.
+    if (rt === NATIVE_RUNTIME_ID) continue
     for (const agent of realDirs(path.join(runtimes, rt))) {
-      item(path.join(runtimes, rt, agent), path.join(opts.agentRuntimesRoot, rt, agent))
+      item(
+        { runtime: rt },
+        path.join(runtimes, rt, agent),
+        path.join(opts.agentRuntimesRoot, rt, agent),
+      )
     }
   }
   const seen = new Set<string>()
@@ -94,7 +132,7 @@ export function planCopyIn(opts: {
     for (const team of realDirs(root)) {
       if (seen.has(team) || (opts.keepTeam && !opts.keepTeam(root, team))) continue
       seen.add(team)
-      item(path.join(root, team), path.join(opts.workDir, 'teams', team))
+      item('team', path.join(root, team), path.join(opts.workDir, 'teams', team))
     }
   }
   return items
@@ -112,7 +150,7 @@ export async function copyIntoAgentSpace(items: CopyInItem[]): Promise<CopyInRep
       const staging = `${item.to}${STAGING}`
       await agentRemove(staging)
       await agentMkdir(path.dirname(item.to))
-      await copyTree(item.from, staging, report, item.planned)
+      await copyTree(item.from, staging, report, item.kind, '', item.planned)
       await agentRename(staging, item.to)
       report.copied.push(item.to)
     } catch (err) {
@@ -148,6 +186,9 @@ async function copyTree(
   src: string,
   dst: string,
   report: CopyInReport,
+  kind: CopyInItem['kind'],
+  /** `src` relative to the item's folder ('' at its top). */
+  rel: string,
   planned?: { dev: number; ino: number },
 ): Promise<void> {
   const st = fs.lstatSync(src)
@@ -169,9 +210,15 @@ async function copyTree(
     } catch {
       continue
     }
+    const entryRel = rel === '' ? name : `${rel}/${name}`
     if (e.isDirectory()) {
-      await copyTree(from, to, report)
+      await copyTree(from, to, report, kind, entryRel)
     } else if (e.isFile()) {
+      const why = leftOut(kind, entryRel)
+      if (why) {
+        report.skipped.push({ path: from, reason: why })
+        continue
+      }
       if (e.nlink > 1) {
         report.skipped.push({
           path: from,

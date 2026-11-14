@@ -23,11 +23,17 @@
 // and hard-linked to the name, which fails on anything already there.
 // A write goes to a new file of a random name that is then renamed over the
 // old one, so whatever was at the name is replaced, never written through.
+//
+// That is what runs here (`localWorktreeIo`). An installed `WorktreeIo` may do
+// these operations somewhere else instead, such as through a process running as
+// the OS user that owns the folder (see `io.ts`).
 
 import { randomBytes } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
 import { link, lstat, open, rename, rm, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
+
+import { getWorktreeIo } from './io'
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0
 const NONBLOCK = constants.O_NONBLOCK ?? 0
@@ -96,6 +102,36 @@ export async function readTaskFile(
   name: string,
   maxBytes: number = TASK_FILE_MAX_BYTES,
 ): Promise<string> {
+  fileIn(dir, name)
+  return getWorktreeIo().readTaskFile(dir, name, maxBytes)
+}
+
+/**
+ * Replace `name` directly under `dir` with `content`. Written to a new file
+ * first and renamed into place, so a link or hard link at the name is
+ * replaced rather than written through.
+ */
+export async function replaceTaskFile(dir: string, name: string, content: string): Promise<void> {
+  fileIn(dir, name)
+  return getWorktreeIo().replaceTaskFile(dir, name, content)
+}
+
+/**
+ * Append `content` to `name` directly under `dir`, creating it when missing.
+ * Refuses a link (including one that points nowhere yet), anything but a
+ * regular file, and a file with another name.
+ */
+export async function appendTaskFile(dir: string, name: string, content: string): Promise<void> {
+  fileIn(dir, name)
+  return getWorktreeIo().appendTaskFile(dir, name, content)
+}
+
+/** {@link readTaskFile}, run here. */
+export async function localReadTaskFile(
+  dir: string,
+  name: string,
+  maxBytes: number = TASK_FILE_MAX_BYTES,
+): Promise<string> {
   const filePath = fileIn(dir, name)
   const seen = await plainFileAt(filePath)
   const handle = await open(filePath, constants.O_RDONLY | NOFOLLOW | NONBLOCK)
@@ -119,12 +155,12 @@ export async function readTaskFile(
   }
 }
 
-/**
- * Replace `name` directly under `dir` with `content`. Written to a new file
- * first and renamed into place, so a link or hard link at the name is
- * replaced rather than written through.
- */
-export async function replaceTaskFile(dir: string, name: string, content: string): Promise<void> {
+/** {@link replaceTaskFile}, run here. */
+export async function localReplaceTaskFile(
+  dir: string,
+  name: string,
+  content: string,
+): Promise<void> {
   const target = fileIn(dir, name)
   const temp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}.tmp`)
   const handle = await open(
@@ -146,12 +182,12 @@ export async function replaceTaskFile(dir: string, name: string, content: string
   }
 }
 
-/**
- * Append `content` to `name` directly under `dir`, creating it when missing.
- * Refuses a link (including one that points nowhere yet), anything but a
- * regular file, and a file with another name.
- */
-export async function appendTaskFile(dir: string, name: string, content: string): Promise<void> {
+/** {@link appendTaskFile}, run here. */
+export async function localAppendTaskFile(
+  dir: string,
+  name: string,
+  content: string,
+): Promise<void> {
   const filePath = fileIn(dir, name)
   let seen: BigIntStats
   try {

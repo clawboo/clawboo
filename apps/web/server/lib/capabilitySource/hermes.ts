@@ -1,5 +1,6 @@
 // hermes CapabilitySource — read-only OBSERVE of each Hermes per-identity home
-// under `~/.clawboo/runtimes/hermes/<agentId>/`. Hermes owns its native
+// under `~/.clawboo/runtimes/hermes/<agentId>/` (with agents on their own OS user,
+// under that user's runtime homes instead). Hermes owns its native
 // self-model; the invariant (hermesSkills.ts) is that clawboo NEVER writes a
 // Hermes skills dir — so its SKILL.md skills are surfaced `observe-only` rather
 // than the default `external-write` manageability (the runtime keeps its native
@@ -9,10 +10,8 @@
 // with the seeded user config. Both are `observe-only`, not a durable clawboo
 // surface. Built-ins roll up to one observe-only record. write() is unsupported.
 
-import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
-import { resolveClawbooDir } from '@clawboo/config'
 import {
   unsupported,
   type CapabilityReadResult,
@@ -22,12 +21,23 @@ import {
 } from '@clawboo/capability-registry'
 import { agents, type ClawbooDb } from '@clawboo/db'
 
+import { agentList, agentReadFile } from '../agentUser/agentFs'
 import { listHermesMcpServerNames } from '../runtimes/hermesHome'
 import { listNativeSkills } from '../runtimes/hermesSkills'
+import { runtimeHomesRoot } from '../runtimes/identityHome'
 import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
 
+/** Where the Hermes homes are: the runs' own root, which is under the agent
+ *  user's home when agents run as their own OS user. The homes are agent space,
+ *  so everything below is read through the agent-space file verbs. */
 function hermesHomesRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(resolveClawbooDir(env), 'runtimes', 'hermes')
+  return path.join(runtimeHomesRoot(env), 'hermes')
+}
+
+/** A file in a Hermes home as text, or null when it is not there. */
+async function readHomeFile(file: string): Promise<string | null> {
+  const buf = await agentReadFile(file)
+  return buf === null ? null : buf.toString('utf8')
 }
 
 /** Minimal `--- key: value ---` frontmatter parse (no YAML dep — the repo has none). */
@@ -55,7 +65,8 @@ async function readSkillMeta(
     path.join('skills', `${skillName}.md`),
   ]) {
     try {
-      return parseFrontmatter(await readFile(path.join(home, rel), 'utf8'))
+      const text = await readHomeFile(path.join(home, rel))
+      if (text !== null) return parseFrontmatter(text)
     } catch {
       /* try the next layout */
     }
@@ -69,8 +80,8 @@ interface McpConnector {
 
 async function readMcpConnectors(home: string): Promise<McpConnector[]> {
   try {
-    const raw = await readFile(path.join(home, 'config.yaml'), 'utf8')
-    return listHermesMcpServerNames(raw).map((name) => ({ name }))
+    const raw = await readHomeFile(path.join(home, 'config.yaml'))
+    return raw === null ? [] : listHermesMcpServerNames(raw).map((name) => ({ name }))
   } catch {
     return []
   }
@@ -101,14 +112,15 @@ export class HermesCapabilitySource implements CapabilitySource {
 
   async read(): Promise<CapabilityReadResult> {
     const records: CapabilityRecord[] = []
-    const root = hermesHomesRoot(this.deps.env ?? process.env)
-
+    let root: string
     let homes: string[]
     try {
-      const entries = await readdir(root, { withFileTypes: true })
-      homes = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name)
+      root = hermesHomesRoot(this.deps.env ?? process.env)
+      const { entries } = await agentList(root)
+      homes = entries.filter((e) => e.type === 'dir' && !e.name.startsWith('.')).map((e) => e.name)
     } catch {
-      // No Hermes homes yet (no runs) — not an error; report empty + ok.
+      // No Hermes homes yet (no runs), or with agents on their own OS user no
+      // agent host to read them through: not an error; report empty + ok.
       return { records: [builtinRollup('hermes', 'hermes', 'Hermes')], status: okStatus('hermes') }
     }
 

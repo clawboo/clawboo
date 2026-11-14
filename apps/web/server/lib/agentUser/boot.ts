@@ -13,6 +13,7 @@ import { resolveClawbooDir, resolveSettingsPath, resolveAccessTokenPath } from '
 import { getVaultPaths } from '../secretsVault'
 import { agentMkdir, agentRemove, agentStat, agentWriteFile } from './agentFs'
 import {
+  dataDirProblem,
   narrowDataDir,
   runAgentUserCheck,
   unsafeParents,
@@ -28,8 +29,10 @@ import {
 import { resolveAgentUserConfig, type AgentUserConfig } from './config'
 import { setUnavailableAgentBinaries } from '../runtimes/spawner'
 import type { HelloFrame } from './protocol'
+import { keepRuntimesDirApartFrom } from '../runtimeFolder'
 import { peekAgentHost, setActiveAgentHost } from './state'
 import { currentUserName, killAllAgentProcesses, lookupUser, socketProblem } from './system'
+import { installAgentWorktreeIo } from './worktreeIo'
 
 type Log = {
   info(obj: object | string, msg?: string): void
@@ -70,6 +73,9 @@ export function protectedFiles(env: NodeJS.ProcessEnv = process.env): string[] {
 export function operatorFiles(home: string = os.homedir()): string[] {
   return [
     path.join(home, '.openclaw', '.env'),
+    // The Gateway's own token: with it an agent could drive the OpenClaw Gateway,
+    // which runs as the server's user.
+    path.join(home, '.openclaw', 'openclaw.json'),
     path.join(home, '.codex', 'auth.json'),
     path.join(home, '.hermes', 'auth.json'),
     path.join(home, '.claude', '.credentials.json'),
@@ -85,7 +91,35 @@ export interface StartAgentUserOptions {
 }
 
 let watchStop: (() => void) | null = null
+
+/** Wait (at most 30 s) for the server this one replaces to exit. */
+async function waitForPreviousServer(env: NodeJS.ProcessEnv): Promise<void> {
+  const pid = Number(env['CLAWBOO_AWAIT_PID'])
+  delete env['CLAWBOO_AWAIT_PID']
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return
+  const until = Date.now() + 30_000
+  while (Date.now() < until) {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return
+    }
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
 let restarting = false
+
+/**
+ * On Linux, start the host under `setpriv --no-new-privs` when it is there: no
+ * agent process can then gain another user through a setuid file (one an agent
+ * planted while it still ran as the server's user, say). macOS has no such
+ * switch; there the startup check refuses setuid files in the work folder.
+ */
+function noNewPrivsPrefix(): string[] {
+  if (process.platform !== 'linux') return []
+  const setpriv = ['/usr/bin/setpriv', '/bin/setpriv'].find((p) => fs.existsSync(p))
+  return setpriv ? [setpriv, '--no-new-privs'] : []
+}
 
 async function openHost(config: AgentUserConfig, env: NodeJS.ProcessEnv): Promise<AgentHostClient> {
   let transport: HostTransport
@@ -101,6 +135,7 @@ async function openHost(config: AgentUserConfig, env: NodeJS.ProcessEnv): Promis
       switch: config.switch,
       node: process.execPath,
       script,
+      prefix: noNewPrivsPrefix(),
     }).transport
   }
   return new AgentHostClient(transport)
@@ -149,6 +184,7 @@ export function checkDepsFor(
     runtimeBinaries: opts.runtimeBinaries,
     narrowDataDir,
     unsafeParents,
+    dataDirProblem,
     startHost: (c) => openHost(c, env),
     socketProblem: (p, uid) => socketProblem(p, uid),
     stopHost: (client) => client.close('the startup check failed'),
@@ -164,6 +200,10 @@ export async function startAgentUser(opts: StartAgentUserOptions): Promise<Check
   const env = opts.env ?? process.env
   const config = resolveAgentUserConfig(env)
   if (!config) throw new Error('startAgentUser called with CLAWBOO_AGENT_USER unset')
+
+  // A restart after an update: the previous server stops every agent process as
+  // it exits, and doing that after this one's host started would stop it too.
+  await waitForPreviousServer(env)
 
   // Before the host starts: anything the agent user still runs belongs to a
   // server that is gone (design 4.8). Only for a user the check would accept:
@@ -183,6 +223,10 @@ export async function startAgentUser(opts: StartAgentUserOptions): Promise<Check
   if (!report.ok || !report.client || !report.hello || !report.workDir) return report
 
   setActiveAgentHost({ client: report.client, hello: report.hello, config })
+  keepRuntimesApartFromAgentHome()
+  // Task checkouts and the agent user's copies of repositories: their git and
+  // file access go through the host from here on.
+  installAgentWorktreeIo()
   setUnavailableAgentBinaries(report.unavailableRuntimes)
   lastUnavailable = report.unavailableRuntimes
   // Every resolver of the work folder agrees from here on.
@@ -321,4 +365,19 @@ export function stopAgentUser(): void {
   killAllAgentProcesses(active.config)
   active.client.close('the server is stopping')
   setActiveAgentHost(null)
+}
+
+let apartFromAgentHome: (() => void) | null = null
+
+/**
+ * Keep the runtimes folder apart from the agent user's home, which agents can
+ * write: a runtime there could be changed by an agent. Registered once; the
+ * home is read at each check, so it follows a host that reconnects.
+ */
+export function keepRuntimesApartFromAgentHome(): void {
+  if (apartFromAgentHome) return
+  apartFromAgentHome = keepRuntimesDirApartFrom(
+    "the agent user's home",
+    () => peekAgentHost()?.hello.home ?? null,
+  )
 }

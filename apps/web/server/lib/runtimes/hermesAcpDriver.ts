@@ -31,10 +31,7 @@
 // mode) fails the handshake before any turn starts; the run then FALLS BACK to the
 // quiet driver (injected), which steers by stop-and-resume.
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
-import os from 'node:os'
-import path from 'node:path'
+import type { ChildProcess } from 'node:child_process'
 
 import type { HermesDriver, HermesNativeEvent } from '@clawboo/adapter-hermes'
 import type { StartOpts, SteerOptions, Usage } from '@clawboo/executor'
@@ -55,7 +52,9 @@ import {
   type HermesRunSettings,
 } from './hermesDriver'
 import { provisionHermesHome, type ProvisionedHermesHome } from './hermesHome'
+import { makeThrowawayRuntimeHome, removeThrowawayRuntimeHome } from './identityHome'
 import { killProcessTree } from './killTree'
+import { spawnAgentProcess } from './spawner'
 import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
 import type { RuntimeRunContext } from './types'
 import { resolveWindowsSpawn } from './winSpawn'
@@ -207,7 +206,7 @@ export function createHermesAcpDriver(
   const removeOwnedHome = (): void => {
     const dir = ownedHome
     ownedHome = null
-    if (dir) void rm(dir, { recursive: true, force: true }).catch(() => undefined)
+    if (dir) void removeThrowawayRuntimeHome(dir).catch(() => undefined)
   }
 
   /** A steer in flight. `passive`: an FYI, never worth a turn of its own.
@@ -337,8 +336,13 @@ export function createHermesAcpDriver(
     }
     let spawned: ChildProcess
     try {
-      spawned = spawn(plan.command, plan.args, {
-        cwd: ctx.cwd ?? undefined,
+      // As the agent user when agents run as their own OS user; a refused start
+      // (the agent host is down) reads as "could not start" below.
+      spawned = spawnAgentProcess({
+        kind: 'runtime',
+        command: plan.command,
+        args: plan.args,
+        ...(ctx.cwd != null ? { cwd: ctx.cwd } : {}),
         env: buildChildEnv({
           ...run.env,
           // `--yolo` for ACP: no dangerous-command prompt in a headless run.
@@ -347,7 +351,6 @@ export function createHermesAcpDriver(
           // it does there; a model pins its provider through session/set_model.
           ...(run.providerFlag ? { HERMES_INFERENCE_PROVIDER: run.providerFlag } : {}),
         }),
-        shell: false,
         windowsHide: isWindows,
         detached: !isWindows,
         ...(plan.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
@@ -609,13 +612,15 @@ export function createHermesAcpDriver(
         // otherwise a throwaway home (the conservative one-shot default).
         let homeDir = ctx.homeDir
         if (!homeDir) {
-          homeDir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-'))
+          homeDir = await makeThrowawayRuntimeHome('clawboo-hermes-home-')
           ownedHome = homeDir
         }
         home = await provisionHermesHome(homeDir, {
           mcpServers: ctx.mcpBaseUrl
             ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
             : null,
+          hasApiKey: Object.keys(ctx.apiKeyEnv ?? {}).length > 0,
+          providerHint: ctx.providerHint ?? null,
         })
         run = await resolveHermesRun(opts, ctx, home)
         runModel = run.model

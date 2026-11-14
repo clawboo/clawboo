@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { childEnvFor } from '../../../agentHost/host'
 import { killProcessTree } from '../../runtimes/killTree'
@@ -103,6 +103,24 @@ describe.runIf(posix)('agent host protocol', () => {
     expect(env['PATH']).toBeUndefined()
     // A request's own HOME wins.
     expect(childEnvFor({ HOME: '/elsewhere' })['HOME']).toBe('/elsewhere')
+  })
+
+  it('holds no stream of a process once it has closed', async () => {
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: ['-c', 'sleep 0.3'],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group: true,
+    })
+    await new Promise<void>((resolve) => p.once('spawn', () => resolve()))
+    // The server's buffers for it are full: the host holds both streams.
+    h.client.sendRaw({ t: 'pause', proc: p.id })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(h.host.heldStreams()).toBe(2)
+    await closed(p)
+    // No resume can find a closed process: nothing is kept for it.
+    expect(h.host.heldStreams()).toBe(0)
   })
 
   it('stops a whole process group on killTree', async () => {
@@ -308,6 +326,244 @@ describe.runIf(posix)('agent host protocol', () => {
     expect(res.matches).toEqual([path.join(work, 'notes.txt')])
   })
 
+  it('stops a listing before its reply could exceed a frame, and says it was cut', async () => {
+    const big = path.join(dir, 'big')
+    fs.mkdirSync(big)
+    const stem = 'x'.repeat(180)
+    for (let i = 0; i < 22_000; i++) fs.writeFileSync(path.join(big, `${stem}${i}`), '')
+    const raw: string[] = []
+    h.toServer.on('data', (d: Buffer) => raw.push(d.toString()))
+    const res = await h.client.request(
+      { op: 'fs.list', path: big, max: 100_000 },
+      { timeoutMs: 120_000 },
+    )
+    expect(res.truncated).toBe(true)
+    expect(res.entries.length).toBeGreaterThan(0)
+    expect(res.entries.length).toBeLessThan(22_000)
+    expect(h.client.closed).toBeNull()
+  }, 120_000)
+
+  it('holds a process whose output the server is not reading, and lets it go when it is', async () => {
+    const frames: string[] = []
+    h.toHost.on('data', (d: Buffer) => frames.push(d.toString()))
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: [
+        '-c',
+        'while :; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done',
+      ],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      group: true,
+    })
+    for (let i = 0; i < 200 && !frames.join('').includes('"t":"pause"'); i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(frames.join('')).toContain(`"t":"pause","proc":"${p.id}"`)
+    p.stdout?.resume()
+    for (let i = 0; i < 200 && !frames.join('').includes('"t":"resume"'); i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(frames.join('')).toContain(`"t":"resume","proc":"${p.id}"`)
+    p.killTree(100)
+    await closed(p)
+  })
+
+  it('tries every way to become another user, as the agent user', async () => {
+    const res = await h.client.request(
+      { op: 'privCheck', serverUser: 'nobody' },
+      { timeoutMs: 60_000 },
+    )
+    expect(res.attempts.map((a) => a.what)).toEqual([
+      'sudo',
+      'doas',
+      'sudo -u nobody',
+      'doas -u nobody',
+      'sudo -l',
+    ])
+    expect(['allowed', 'denied', 'absent']).toContain(res.crontab)
+  })
+
+  it('counts a sudo rule for one command, which none of the tries can run', async () => {
+    // A sudo that allows one shell as another user: `true` is refused, the
+    // listing works.
+    const bin = path.join(dir, 'bin')
+    fs.mkdirSync(bin)
+    fs.writeFileSync(
+      path.join(bin, 'sudo'),
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "-n" ] && [ "$2" = "-l" ]; then',
+        '  echo "User agent may run the following commands on host:"',
+        '  echo "    (alice) NOPASSWD: /bin/sh"',
+        '  exit 0',
+        'fi',
+        'echo "sudo: a password is required" >&2',
+        'exit 1',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`)
+    try {
+      const res = await h.client.request(
+        { op: 'privCheck', serverUser: 'alice' },
+        { timeoutMs: 60_000 },
+      )
+      expect(res.attempts.filter((a) => a.succeeded).map((a) => a.what)).toEqual(['sudo -l'])
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('marks a sudo that no_new_privs stops from running as telling nothing', async () => {
+    const bin = path.join(dir, 'bin')
+    fs.mkdirSync(bin)
+    fs.writeFileSync(
+      path.join(bin, 'sudo'),
+      [
+        '#!/bin/sh',
+        'echo \'sudo: The "no new privileges" flag is set, which prevents sudo from running as root.\' >&2',
+        'exit 1',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`)
+    try {
+      const res = await h.client.request(
+        { op: 'privCheck', serverUser: 'alice' },
+        { timeoutMs: 60_000 },
+      )
+      const sudo = res.attempts.filter((a) => a.what.startsWith('sudo'))
+      expect(sudo.map((a) => a.what)).toEqual(['sudo', 'sudo -u alice', 'sudo -l'])
+      expect(sudo.every((a) => !a.succeeded && a.unchecked === true)).toBe(true)
+      expect(typeof res.noNewPrivs).toBe('boolean')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('counts a setgid file for a group the agent user is not in, whoever owns it', async () => {
+    const tree = path.join(dir, 'tree')
+    fs.mkdirSync(tree)
+    const file = path.join(tree, 'tool')
+    fs.writeFileSync(file, '#!/bin/sh\n')
+    fs.chownSync(file, process.getuid?.() ?? 0, process.getgid?.() ?? 0)
+    fs.chmodSync(file, 0o2755)
+    expect(fs.statSync(file).mode & 0o2000).toBe(0o2000)
+    // Its group is this user's: nothing to give.
+    const own = await h.client.request({ op: 'inodes', root: tree, targets: [], maxEntries: 100 })
+    expect(own.privileged).toEqual([])
+    // The same file, for a host whose user is not in that group.
+    // Optional on `process` (POSIX only), so typed here as present.
+    const ids = process as { getgid: () => number; getgroups: () => number[] }
+    const gid = vi.spyOn(ids, 'getgid').mockReturnValue(2_000_000_000)
+    const groups = vi.spyOn(ids, 'getgroups').mockReturnValue([])
+    try {
+      const res = await h.client.request({
+        op: 'inodes',
+        root: tree,
+        targets: [],
+        maxEntries: 100,
+      })
+      expect(res.privileged).toEqual([file])
+    } finally {
+      gid.mockRestore()
+      groups.mockRestore()
+    }
+  })
+
+  it('searches a folder on another filesystem mounted in the tree', async () => {
+    const tree = path.join(dir, 'tree')
+    const mounted = path.join(tree, 'mounted')
+    fs.mkdirSync(mounted, { recursive: true })
+    const file = path.join(mounted, 'tool')
+    fs.writeFileSync(file, '#!/bin/sh\n')
+    fs.chownSync(file, process.getuid?.() ?? 0, process.getgid?.() ?? 0)
+    fs.chmodSync(file, 0o2755)
+    // `mounted` is another filesystem, as a mount point reads.
+    const lstat = fs.promises.lstat.bind(fs.promises)
+    const spy = vi.spyOn(fs.promises, 'lstat').mockImplementation((async (
+      p: fs.PathLike,
+      o?: fs.StatOptions,
+    ) => {
+      const st = await lstat(p, o as never)
+      if (String(p) !== mounted) return st
+      const other = Object.create(Object.getPrototypeOf(st)) as typeof st
+      return Object.assign(other, st, {
+        dev: typeof st.dev === 'bigint' ? st.dev + 1n : st.dev + 1,
+      })
+    }) as never)
+    // A host whose user is not in the file's group.
+    const ids = process as { getgid: () => number; getgroups: () => number[] }
+    const gid = vi.spyOn(ids, 'getgid').mockReturnValue(2_000_000_000)
+    const groups = vi.spyOn(ids, 'getgroups').mockReturnValue([])
+    try {
+      const res = await h.client.request({ op: 'inodes', root: tree, targets: [], maxEntries: 100 })
+      expect(res.privileged).toEqual([file])
+    } finally {
+      spy.mockRestore()
+      gid.mockRestore()
+      groups.mockRestore()
+    }
+  })
+
+  it.runIf(process.getuid?.() !== 0)(
+    'names every folder the search could not enter, rather than call the search complete',
+    async () => {
+      const tree = path.join(dir, 'tree')
+      const closed = path.join(tree, 'closed')
+      const listOnly = path.join(tree, 'list-only')
+      fs.mkdirSync(closed, { recursive: true })
+      fs.mkdirSync(listOnly)
+      fs.writeFileSync(path.join(closed, 'notes.txt'), 'x')
+      fs.writeFileSync(path.join(listOnly, 'notes.txt'), 'x')
+      fs.chmodSync(closed, 0o000)
+      // Listed, but its entries cannot be looked at.
+      fs.chmodSync(listOnly, 0o400)
+      try {
+        const res = await h.client.request({
+          op: 'inodes',
+          root: tree,
+          targets: [],
+          maxEntries: 100,
+        })
+        expect(res.truncated).toBe(false)
+        expect([...(res.unreadable ?? [])].sort()).toEqual([closed, listOnly])
+      } finally {
+        fs.chmodSync(closed, 0o700)
+        fs.chmodSync(listOnly, 0o700)
+      }
+    },
+  )
+
+  it('refuses a private file whose mode cannot be set, and keeps others', async () => {
+    const chmod = vi.spyOn(fs, 'fchmodSync').mockImplementation(() => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    })
+    try {
+      await expect(
+        h.client.request({
+          op: 'fs.write',
+          path: path.join(dir, 'secret'),
+          data: Buffer.from('s').toString('base64'),
+          mode: 0o600,
+        }),
+      ).rejects.toMatchObject({ code: 'EPERM' })
+      expect(fs.readdirSync(dir).filter((n) => n.includes('secret'))).toEqual([])
+      await h.client.request({
+        op: 'fs.write',
+        path: path.join(dir, 'shared'),
+        data: Buffer.from('s').toString('base64'),
+        mode: 0o644,
+      })
+      expect(fs.readFileSync(path.join(dir, 'shared'), 'utf8')).toBe('s')
+    } finally {
+      chmod.mockRestore()
+    }
+  })
+
   it('refuses a signal it does not know', async () => {
     await expect(
       h.client.request({ op: 'signal', proc: 'p0', signal: 'SIGSTOP' }),
@@ -384,6 +640,47 @@ describe.runIf(posix)('agent host client, against a hostile host', () => {
     await closed(p)
     expect(events).toEqual(['spawn:4242', 'exit:0'])
     expect(await out).toBe('hi')
+  })
+
+  it('lets the host go on only when every stream that filled has drained', async () => {
+    const { client, toServer, toHost } = startFakeHost()
+    const p = client.spawn({
+      command: 'x',
+      args: [],
+      env: {},
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group: true,
+    })
+    const req = await new Promise<{ id: number; proc: string }>((resolve) =>
+      toHost.once('data', (d: Buffer) => resolve(JSON.parse(d.toString()))),
+    )
+    const frames: string[] = []
+    toHost.on('data', (d: Buffer) => frames.push(d.toString()))
+    const count = (t: string): number => frames.join('').split(`"t":"${t}"`).length - 1
+    // More than either stream holds (64 KiB by default), on both, with nobody
+    // reading yet.
+    const big = Buffer.alloc(200_000, 120).toString('base64')
+    const ev = (name: string): string =>
+      JSON.stringify({ t: 'ev', proc: req.proc, ev: name, data: big })
+    toServer.write(
+      [JSON.stringify({ t: 'res', id: req.id, ok: true, pid: 4242 }), ev('out'), ev('err')].join(
+        '\n',
+      ) + '\n',
+    )
+    for (let i = 0; i < 100 && count('pause') === 0; i++)
+      await new Promise((r) => setTimeout(r, 10))
+    expect(count('pause')).toBe(1)
+
+    // stdout drains; stderr is still full, so the host must keep holding.
+    p.stdout?.resume()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(count('resume')).toBe(0)
+
+    p.stderr?.resume()
+    for (let i = 0; i < 100 && count('resume') === 0; i++)
+      await new Promise((r) => setTimeout(r, 10))
+    expect(count('resume')).toBe(1)
+    client.close()
   })
 
   it('closes every process it started when the host goes away', async () => {

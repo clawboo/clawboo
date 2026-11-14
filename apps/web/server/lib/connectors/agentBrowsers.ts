@@ -435,7 +435,10 @@ async function spawnReservedBrowser(
     fs.mkdirSync(scratchDir, { recursive: true })
   }
 
-  const plan = planConnectorSpawn({ command: spec.command, args: spec.args })
+  const plan = planConnectorSpawn(
+    { command: spec.command, args: spec.args },
+    { asAgentUser: asAgent !== null },
+  )
   if (plan.unresolved) throw new Error(`cannot resolve ${spec.command}`)
 
   // APPENDED AFTER the plan, and deliberately absent from the hashed spec. The

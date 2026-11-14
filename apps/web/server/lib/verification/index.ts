@@ -35,6 +35,8 @@ import type { RuntimeAdapter } from '@clawboo/executor'
 import type { DiffStat, Worktree } from '@clawboo/worktrees'
 import { commitWorktreeWork } from '@clawboo/worktrees'
 
+import { isAgentUserMode } from '../agentUser/config'
+import { installAgentWorktreeIo } from '../agentUser/worktreeIo'
 import type { RuntimeRunContext } from '../runtimes'
 import { isRiskyDelegation } from '../teamChat/riskyDelegation'
 import { criticErrored, runCritic, type ReviewerGate, type ReviewerSpend } from './critic'
@@ -55,7 +57,15 @@ const CRITIC_NOT_RUN: CriticVerdict = {
 export interface VerifyTaskInput {
   db: ClawbooDb
   taskId: string
+  /** The task's repository. The scaffold commit's init.sh is read here. */
   repoPath: string
+  /**
+   * The repository `worktree` is a checkout of, when that is not `repoPath`:
+   * with agents on their own OS user, the agent's mirror of it. The work is
+   * committed there and the reviewer's detached checkout is made from it, both
+   * as the agent user. Absent, `repoPath`.
+   */
+  checkoutRepoPath?: string
   worktree: Worktree
   diffStat: DiffStat
   reviewRootDir: string
@@ -161,6 +171,10 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
   // `nextCycleDecision` as `maxCycles`). Callers that pass it keep their meaning;
   // absent, the budget comes from the one shared reader.
   const maxAttempts = input.maxFixCycles ?? verifyMaxAttempts()
+  // Git in the checkout and the reviewer's checkout run as the agent user when
+  // agents have their own (the io is installed at boot; made sure of here).
+  if (isAgentUserMode()) installAgentWorktreeIo()
+  const checkoutRepo = input.checkoutRepoPath ?? input.repoPath
 
   const det = await runDeterministicGate({
     worktreePath: input.worktree.worktreePath,
@@ -178,10 +192,9 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
       isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` })
     const handedDown = handedDownFromWork(db, task)
     try {
-      const head =
-        input.reviewSha ?? (await commitWorktreeWork(input.repoPath, input.worktree)).head
+      const head = input.reviewSha ?? (await commitWorktreeWork(checkoutRepo, input.worktree)).head
       critic = await runCritic({
-        repoPath: input.repoPath,
+        repoPath: checkoutRepo,
         reviewSha: head,
         diffStat: input.diffStat,
         hasParent: handedDown,

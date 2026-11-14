@@ -4,9 +4,9 @@
 // these files, it does not exist for the next runtime. Written into the worktree
 // root on provision and committed as the baseline.
 
-import { chmod, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import { getWorktreeIo } from './io'
 import type { TaskScaffoldInput } from './types'
 
 /** Canonical system-of-record filenames at the worktree root. */
@@ -214,10 +214,10 @@ export async function writeScaffold(worktreePath: string, input: TaskScaffoldInp
   // which builds the path from a validated task id.
   const root = path.resolve(worktreePath)
   const at = (leaf: string) => path.join(root, leaf)
-  await writeFile(at(SOR_FILES.task), renderTaskMd(input), 'utf8')
-  await writeFile(at(SOR_FILES.progress), renderProgressMd(input), 'utf8')
-  await writeFile(at(SOR_FILES.decisions), renderDecisionsJson(), 'utf8')
-  await writeFile(at(SOR_FILES.init), renderInitSh(input), 'utf8')
-  await writeFile(at(SOR_FILES.verification), renderVerificationMd(input), 'utf8')
-  await chmod(at(SOR_FILES.init), 0o755)
+  const io = getWorktreeIo()
+  await io.writeFile(at(SOR_FILES.task), renderTaskMd(input))
+  await io.writeFile(at(SOR_FILES.progress), renderProgressMd(input))
+  await io.writeFile(at(SOR_FILES.decisions), renderDecisionsJson())
+  await io.writeFile(at(SOR_FILES.init), renderInitSh(input), 0o755)
+  await io.writeFile(at(SOR_FILES.verification), renderVerificationMd(input))
 }

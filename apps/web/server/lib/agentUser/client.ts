@@ -79,6 +79,9 @@ export class RemoteAgentProcess extends EventEmitter {
   readonly stderr: PassThrough | null
   /** Set by the client when the process is done, so late frames are dropped. */
   closed = false
+  /** @internal Which of this process's streams are full. The host holds all
+   *  of its output while any one is, and is let go once every one has drained. */
+  readonly held = new Set<'out' | 'err'>()
   private readonly client: AgentHostClient
   private readonly group: boolean
 
@@ -328,7 +331,7 @@ export class AgentHostClient {
         proc: proc.id,
         command: opts.command,
         args: [...opts.args],
-        ...(opts.cwd ? { cwd: opts.cwd } : {}),
+        ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
         env: opts.env,
         stdio: [opts.stdio[0], opts.stdio[1], opts.stdio[2]],
         group: opts.group,
@@ -488,11 +491,24 @@ export class AgentHostClient {
         if (!proc || proc.closed) return
         switch (f['ev']) {
           case 'out':
-            if (typeof f['data'] === 'string') proc.stdout?.write(Buffer.from(f['data'], 'base64'))
+          case 'err': {
+            const which = f['ev']
+            const stream = which === 'out' ? proc.stdout : proc.stderr
+            if (!stream || typeof f['data'] !== 'string') return
+            // A full buffer here holds the child on the host, as a full pipe
+            // would: nothing is buffered without limit on either side. The
+            // host holds both streams at once, so it is let go only when every
+            // stream that filled has drained.
+            if (!stream.write(Buffer.from(f['data'], 'base64')) && !proc.held.has(which)) {
+              if (proc.held.size === 0) this.sendRaw({ t: 'pause', proc: proc.id })
+              proc.held.add(which)
+              stream.once('drain', () => {
+                proc.held.delete(which)
+                if (proc.held.size === 0) this.sendRaw({ t: 'resume', proc: proc.id })
+              })
+            }
             return
-          case 'err':
-            if (typeof f['data'] === 'string') proc.stderr?.write(Buffer.from(f['data'], 'base64'))
-            return
+          }
           case 'exit':
             proc._exit(numOrNull(f['code']), strOrNull(f['signal']))
             return
@@ -573,12 +589,15 @@ export function startHostViaSwitch(opts: {
   switch: 'sudo' | 'doas'
   node: string
   script: string
+  /** A command the host is started under, such as `setpriv --no-new-privs`. */
+  prefix?: string[]
   spawnImpl?: typeof spawn
 }): { transport: HostTransport; child: ChildProcess } {
+  const run = [...(opts.prefix ?? []), opts.node, opts.script]
   const args =
     opts.switch === 'sudo'
-      ? ['-n', '-u', opts.user, '-H', '--', opts.node, opts.script]
-      : ['-n', '-u', opts.user, '--', opts.node, opts.script]
+      ? ['-n', '-u', opts.user, '-H', '--', ...run]
+      : ['-n', '-u', opts.user, '--', ...run]
   const child = (opts.spawnImpl ?? spawn)(opts.switch, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {

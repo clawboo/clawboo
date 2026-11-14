@@ -24,7 +24,7 @@ import { getDb } from '../lib/db'
 import { detectOpenClaw } from '../lib/openclawDetect'
 import { enabledRuntimeIds } from '../lib/runtimes'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
-import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import { isAgentHermesCodexAuthPresent, isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { getDescriptor } from '../lib/runtimes/descriptor'
 import { getRuntimeSecret } from '../lib/secretsVault'
 
@@ -63,7 +63,10 @@ export async function onboardingStateGET(_req: Request, res: Response): Promise<
     // of deliberate on-disk credential — without it, a hermes-login-only user is
     // re-trapped in the wizard on every reload.
     const hasConnectedRuntime =
-      hasVaultKey || (await isCodexLoggedIn()) || isHermesCodexAuthPresent()
+      hasVaultKey ||
+      (await isCodexLoggedIn()) ||
+      isHermesCodexAuthPresent() ||
+      (await isAgentHermesCodexAuthPresent())
 
     res.json({ configured, hasNative, hasTeam, hasConnectedRuntime })
   } catch (err) {
