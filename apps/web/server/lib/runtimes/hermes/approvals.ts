@@ -22,9 +22,10 @@
 
 import {
   approvalEvent,
-  resolveApproval,
+  personJson,
   toolCallApprovals,
   type ClawbooDb,
+  type DbToolCallApproval,
   type PersonRecord,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
@@ -228,9 +229,33 @@ export async function resolveHermesApproval(
   }
   answering.delete(id)
   pending.delete(id)
-  // Named with the answer, in the same write (`resolveApproval` records who).
-  const row = resolveApproval(db, id, decision === 'deny' ? 'deny' : 'allow_once', opts)
+  const row = recordHermesAnswer(db, id, decision === 'deny' ? 'deny' : 'allow_once', opts)
   return { status: 200, body: { ok: true, kind: HERMES_APPROVAL_KIND, approval: row } }
+}
+
+/**
+ * Record an answer Hermes took. Hermes holds the deadline: once it accepted the
+ * answer, the command ran (or was refused) whatever the card's own clock says
+ * when the reply comes back, so the card is not checked against its deadline
+ * here, as a local waiter's is (`resolveApproval`). Named with the answer, in
+ * the same write.
+ */
+function recordHermesAnswer(
+  db: ClawbooDb,
+  id: string,
+  decision: 'allow_once' | 'deny',
+  opts: { resolvedBy?: PersonRecord | null },
+): DbToolCallApproval | null {
+  const rows = db
+    .update(toolCallApprovals)
+    .set({ status: decision, resolvedAt: Date.now(), resolvedBy: personJson(opts.resolvedBy) })
+    .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
+    .returning()
+    .all()
+  for (const r of rows) emitEvent(db, approvalEvent(db, 'approval_resolved', r))
+  return (
+    rows[0] ?? db.select().from(toolCallApprovals).where(eq(toolCallApprovals.id, id)).get() ?? null
+  )
 }
 
 /** At start: no card from before can still be answered. */

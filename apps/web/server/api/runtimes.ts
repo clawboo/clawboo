@@ -458,6 +458,8 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
       runtimeKeySlots(d).some((v) => resolveRuntimeKey(v))
     ) {
       setRuntimeDisconnected(id, false)
+      // A Disconnect took the kept key out of Hermes's profiles: it goes back now.
+      void syncHermesProfileKeys()
       res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
       return
     }
@@ -471,12 +473,13 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
   setRuntimeSecret(targetEnvVar, apiKey)
   // A new key may change which provider embeds memory.
   onEmbeddingKeysChanged()
-  // Hermes's profiles keep keys for the jobs it runs on its own: a replaced
-  // key reaches them now, not at their next run.
-  void syncHermesProfileKeys()
   // A reconnect lifts the explicit-disconnect override — ambient key reuse
   // (process env / OpenClaw's .env) applies again for this runtime.
   setRuntimeDisconnected(id, false)
+  // Hermes's profiles keep keys for the jobs it runs on its own: a replaced
+  // key reaches them now, not at their next run. After the reconnect, so a
+  // reconnected Hermes is synced as connected, not as the runtime it was.
+  void syncHermesProfileKeys()
   // Re-derive (never echo the key). With the key now in the vault and the CLI
   // installed, connectionState becomes 'ready'.
   res.json({

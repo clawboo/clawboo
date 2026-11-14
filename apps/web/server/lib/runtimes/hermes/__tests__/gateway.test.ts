@@ -5,7 +5,8 @@
 // refuses for good.
 
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import net, { type AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -97,6 +98,7 @@ describe('HermesGatewaySupervisor', () => {
       home: () => home,
       preferredPort: () => 18642,
       isPortFree: async (p) => p !== 18642,
+      portOwner: async () => 'ours' as const,
       masterKey: () => MASTER,
       fetch: fetchStub,
       spawn: (opts) => {
@@ -251,6 +253,121 @@ describe('HermesGatewaySupervisor', () => {
     expect(gw.status().state).toBe('failed')
     await new Promise((r) => setTimeout(r, 100))
     expect(spawned).toHaveLength(1)
+  })
+
+  it('does not hand out a gateway that a stop took while its health check was out', async () => {
+    let armed = false
+    let stopping: Promise<void> | null = null
+    const gw = make({
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (armed && String(input).endsWith('/health')) {
+          armed = false
+          stopping = gw.stop()
+        }
+        return fetchStub(input, init)
+      }) as typeof fetch,
+    })
+    await gw.ensureRunning()
+    armed = true
+    const conn = await gw.ensureRunning()
+    await stopping
+    // The caller waited the stop out and got the gateway that came up after it.
+    expect(spawned).toHaveLength(2)
+    expect(gw.status()).toMatchObject({ state: 'running', pid: 4242 })
+    expect(conn).toMatchObject({ port: 18643 })
+  })
+
+  it('a caller that stops an unanswering gateway joins the start another made meanwhile', async () => {
+    const gw = make()
+    await gw.ensureRunning()
+    const first = procs[0]!
+    const kill = first.kill.bind(first)
+    let other: Promise<unknown> | null = null
+    first.kill = (signal?: NodeJS.Signals) => {
+      // Another caller arrives while this stop drains.
+      if (!other) queueMicrotask(() => (other = gw.ensureRunning()))
+      return kill(signal)
+    }
+    healthFailures = 3
+    await expect(gw.ensureRunning()).resolves.toMatchObject({ port: 18643 })
+    await other
+    // One replacement, not one per caller.
+    expect(spawned).toHaveLength(2)
+    expect(procs[1]!.signals).toEqual([])
+  }, 10_000)
+
+  it('does not call a gateway running when it exits during its keyed readiness call', async () => {
+    const gw = make({
+      fetch: (async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/health')) {
+          return new Response(JSON.stringify({ status: 'ok', version: '0.23.1' }))
+        }
+        // It dies while the keyed call is on its way back.
+        procs.at(-1)!.exit(1, null)
+        return new Response(JSON.stringify({ jobs: [] }))
+      }) as typeof fetch,
+    })
+    await expect(gw.ensureRunning()).rejects.toThrow(/stopped while starting/)
+    expect(gw.status().state).not.toBe('running')
+    expect(gw.runningConnection()).toBeNull()
+  })
+
+  it('passes over a port another program holds on 127.0.0.1 alone', async () => {
+    const holder = net.createServer()
+    await new Promise<void>((r) => holder.listen(0, '127.0.0.1', r))
+    const held = (holder.address() as AddressInfo).port
+    try {
+      // The real probe, not the stub.
+      const gw = make({ preferredPort: () => held, isPortFree: undefined })
+      const conn = await gw.ensureRunning()
+      expect(conn.port).not.toBe(held)
+    } finally {
+      await new Promise<void>((r) => holder.close(() => r()))
+    }
+  })
+
+  it('sends no key to a listener that is not the gateway it started', async () => {
+    const keyed: string[] = []
+    const gw = make({
+      portOwner: async () => 'other' as const,
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new Headers(init?.headers).get('authorization')) keyed.push(String(input))
+        return fetchStub(input, init)
+      }) as typeof fetch,
+    })
+    await expect(gw.ensureRunning()).rejects.toThrow(/Another program answers on port 18643/)
+    expect(keyed).toEqual([])
+    expect(gw.status().state).toBe('failed')
+  })
+
+  it('hands its key to the step before each start, so profile keys follow it', async () => {
+    const seen: string[] = []
+    const gw = make({
+      beforeStart: async (_home: string, key: string) => {
+        seen.push(key)
+      },
+    })
+    await gw.ensureRunning()
+    expect(seen).toEqual([MASTER])
+  })
+
+  it('never writes its key over a key vault it cannot read', async () => {
+    const data = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-vault-'))
+    const prev = process.env['CLAWBOO_HOME']
+    process.env['CLAWBOO_HOME'] = data
+    try {
+      const vault = path.join(data, 'secrets', 'runtime-keys.json')
+      await mkdir(path.dirname(vault), { recursive: true })
+      await writeFile(vault, '{ not json: every saved key is in here')
+      const gw = make({ masterKey: undefined })
+      await expect(gw.ensureRunning()).rejects.toThrow(/key vault cannot be read/)
+      expect(await readFile(vault, 'utf8')).toBe('{ not json: every saved key is in here')
+      expect(spawned).toHaveLength(0)
+    } finally {
+      if (prev === undefined) delete process.env['CLAWBOO_HOME']
+      else process.env['CLAWBOO_HOME'] = prev
+      await rm(data, { recursive: true, force: true })
+    }
   })
 
   it('stops with SIGINT and does not restart after a planned stop', async () => {

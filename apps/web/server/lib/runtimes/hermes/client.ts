@@ -87,6 +87,11 @@ type FetchLike = typeof fetch
 
 const DEFAULT_TIMEOUT_MS = 15_000
 
+/** How long a run's event stream may send nothing before it is given up and
+ *  read again. Hermes sends a keepalive comment every 10 s on a quiet run, so a
+ *  stream silent this long is stuck, not a long tool call. */
+export const STREAM_IDLE_MS = 60_000
+
 export interface HermesClient {
   readonly endpoint: Pick<HermesEndpoint, 'baseUrl' | 'profile'>
   health(timeoutMs?: number): Promise<{ status: string; version?: string }>
@@ -95,11 +100,12 @@ export interface HermesClient {
   startRun(body: StartRunBody, opts?: { idempotencyKey?: string }): Promise<{ runId: string }>
   getRun(runId: string): Promise<HermesRunStatus>
   /** Stream a run's events until it ends, the signal aborts, or the stream closes.
-   *  Resolves when the stream ends; rejects on a transport or HTTP failure. */
+   *  Resolves when the stream ends; rejects on a transport or HTTP failure, and
+   *  when nothing at all, not even a keepalive, arrives for `idleMs`. */
   streamEvents(
     runId: string,
     onEvent: (ev: HermesRunEvent) => void,
-    opts?: { signal?: AbortSignal; lastSeq?: number },
+    opts?: { signal?: AbortSignal; lastSeq?: number; idleMs?: number },
   ): Promise<void>
   stopRun(runId: string): Promise<void>
   steer(runId: string, text: string): Promise<void>
@@ -150,6 +156,47 @@ async function errorOf(res: Response): Promise<HermesApiError> {
     // Not JSON: keep the status line.
   }
   return new HermesApiError(message.slice(0, 500), res.status, code)
+}
+
+/** Read a run's event stream body to its end, calling `onChunk` as each piece
+ *  of it arrives (a keepalive comment included). */
+async function readEvents(
+  body: AsyncIterable<Uint8Array>,
+  onEvent: (ev: HermesRunEvent) => void,
+  onChunk: () => void,
+): Promise<void> {
+  let overflow = false
+  const reader = createSseReader(
+    (ev) => {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(ev.data)
+      } catch {
+        return
+      }
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        typeof (parsed as HermesRunEvent).event === 'string'
+      ) {
+        const runEv = parsed as HermesRunEvent
+        // v0.23.1 puts the sequence in the JSON too; the frame's id is the
+        // same number, and the one to trust when the JSON leaves it out.
+        if (typeof runEv.seq !== 'number' && ev.id && /^\d{1,15}$/.test(ev.id))
+          runEv.seq = Number(ev.id)
+        onEvent(runEv)
+      }
+    },
+    { onOverflow: () => (overflow = true) },
+  )
+  const decoder = new TextDecoder()
+  for await (const chunk of body) {
+    onChunk()
+    reader.push(decoder.decode(chunk, { stream: true }))
+    if (overflow) throw new HermesApiError('Hermes sent an event too large to read', 502, null)
+  }
+  reader.push(decoder.decode())
+  reader.end()
 }
 
 export function createHermesClient(
@@ -220,47 +267,37 @@ export function createHermesClient(
     },
 
     async streamEvents(runId, onEvent, opts = {}) {
-      const res = await doFetch(url(`/v1/runs/${assertId(RUN_ID_RE, runId, 'run')}/events`), {
-        headers: {
-          ...headers(false),
-          Accept: 'text/event-stream',
-          ...(opts.lastSeq !== undefined ? { 'Last-Event-ID': String(opts.lastSeq) } : {}),
-        },
-        ...(opts.signal ? { signal: opts.signal } : {}),
-      })
-      if (!res.ok) throw await errorOf(res)
-      if (!res.body) return
-      let overflow = false
-      const reader = createSseReader(
-        (ev) => {
-          let parsed: unknown
-          try {
-            parsed = JSON.parse(ev.data)
-          } catch {
-            return
-          }
-          if (
-            parsed &&
-            typeof parsed === 'object' &&
-            typeof (parsed as HermesRunEvent).event === 'string'
-          ) {
-            const runEv = parsed as HermesRunEvent
-            // v0.23.1 puts the sequence in the JSON too; the frame's id is the
-            // same number, and the one to trust when the JSON leaves it out.
-            if (typeof runEv.seq !== 'number' && ev.id && /^\d{1,15}$/.test(ev.id))
-              runEv.seq = Number(ev.id)
-            onEvent(runEv)
-          }
-        },
-        { onOverflow: () => (overflow = true) },
-      )
-      const decoder = new TextDecoder()
-      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-        reader.push(decoder.decode(chunk, { stream: true }))
-        if (overflow) throw new HermesApiError('Hermes sent an event too large to read', 502, null)
+      // A stream that stays open but sends nothing is given up, so the caller
+      // can read the run again. Any bytes count, Hermes's keepalives included,
+      // and the run itself may be quiet for as long as it likes.
+      const quiet = new AbortController()
+      const idleMs = opts.idleMs ?? STREAM_IDLE_MS
+      let idle: ReturnType<typeof setTimeout> | undefined
+      const arm = (): void => {
+        clearTimeout(idle)
+        idle = setTimeout(
+          () => quiet.abort(new HermesApiError('The Hermes event stream went quiet', 504, null)),
+          idleMs,
+        )
+        idle.unref?.()
       }
-      reader.push(decoder.decode())
-      reader.end()
+      const signal = opts.signal ? AbortSignal.any([opts.signal, quiet.signal]) : quiet.signal
+      arm()
+      try {
+        const res = await doFetch(url(`/v1/runs/${assertId(RUN_ID_RE, runId, 'run')}/events`), {
+          headers: {
+            ...headers(false),
+            Accept: 'text/event-stream',
+            ...(opts.lastSeq !== undefined ? { 'Last-Event-ID': String(opts.lastSeq) } : {}),
+          },
+          signal,
+        })
+        if (!res.ok) throw await errorOf(res)
+        if (!res.body) return
+        await readEvents(res.body as unknown as AsyncIterable<Uint8Array>, onEvent, arm)
+      } finally {
+        clearTimeout(idle)
+      }
     },
 
     async stopRun(runId) {

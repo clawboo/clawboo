@@ -38,11 +38,12 @@ export function getApiPortFilePath(): string {
 }
 
 /**
- * Returns true if the given TCP port can be bound on `0.0.0.0`. Uses an
+ * Returns true if the given TCP port can be bound on `host` (`0.0.0.0` unless
+ * named). Uses an
  * ephemeral probe that immediately closes — no side effects. Resolves to
  * false on EADDRINUSE / EACCES / any other listen error.
  */
-export function isPortFree(port: number): Promise<boolean> {
+export function isPortFree(port: number, host = '0.0.0.0'): Promise<boolean> {
   return new Promise((resolve) => {
     const probe = net.createServer()
     let settled = false
@@ -61,11 +62,21 @@ export function isPortFree(port: number): Promise<boolean> {
     probe.once('error', () => settle(false))
     probe.once('listening', () => settle(true))
     try {
-      probe.listen(port, '0.0.0.0')
+      probe.listen(port, host)
     } catch {
       settle(false)
     }
   })
+}
+
+/**
+ * Whether a server that binds 127.0.0.1 (the Hermes gateway) can take `port`.
+ * Probed on 127.0.0.1 and on every address: on macOS a probe on `0.0.0.0`
+ * succeeds while another program listens on 127.0.0.1 alone, and one on
+ * 127.0.0.1 succeeds while another listens on every address.
+ */
+export async function isLoopbackPortFree(port: number): Promise<boolean> {
+  return (await isPortFree(port, '127.0.0.1')) && (await isPortFree(port, '0.0.0.0'))
 }
 
 /**

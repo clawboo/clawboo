@@ -12,13 +12,24 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const connectionState = { value: 'connecting' as string, reads: 0 }
+const connectionState = {
+  value: 'connecting' as string,
+  reads: 0,
+  /** When set, the connection lands at this read, whenever the probe gets to it. */
+  connectAtRead: 0,
+}
 
 vi.mock('../agentSource', () => ({
   getRegistry: () => ({
     source: {
       health: () => {
         connectionState.reads += 1
+        if (
+          connectionState.connectAtRead &&
+          connectionState.reads >= connectionState.connectAtRead
+        ) {
+          connectionState.value = 'connected'
+        }
         return Promise.resolve({
           ok: connectionState.value === 'connected',
           connection: connectionState.value,
@@ -56,6 +67,7 @@ beforeEach(async () => {
   process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
   connectionState.value = 'connecting'
   connectionState.reads = 0
+  connectionState.connectAtRead = 0
 })
 
 afterEach(async () => {
@@ -80,13 +92,14 @@ describe('boot probe: Gateway connection settling', () => {
 
   it('polls rather than sampling once', async () => {
     // A single read is what made this always-wrong. If someone reverts to one
-    // sample, `reads` collapses to 1 and this fails.
-    setTimeout(() => {
-      connectionState.value = 'connected'
-    }, 200).unref()
+    // sample, `reads` collapses to 1 and this fails. The connection lands at the
+    // second read, not after a fixed time: the checks before this one take long
+    // enough on a slow runner that a timer could fire before the first read.
+    connectionState.connectAtRead = 2
 
-    await runBootProbe({ port: 18790 })
+    const report = await runBootProbe({ port: 18790 })
     expect(connectionState.reads).toBeGreaterThan(1)
+    expect(gatewayCheck(report)?.ok).toBe(true)
   })
 
   it('still reports UNREACHABLE when the Gateway never connects', async () => {

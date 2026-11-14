@@ -63,9 +63,12 @@ export interface ToolApproval {
    * not be rendered as one: `ToolApprovalCard` would describe an `echo` with the
    * stored destructive class and offer a button labelled "Delete it".
    *
+   * `'hermes'` is a command Hermes itself is holding: Hermes's own policy asked,
+   * and the card answers Hermes.
+   *
    * Older rows predate the column, so an absent value means `'tool'`.
    */
-  kind?: 'tool' | 'exec' | null
+  kind?: 'tool' | 'exec' | 'hermes' | null
 }
 
 export type ToolDecision = 'allow_once' | 'allow_always' | 'deny'

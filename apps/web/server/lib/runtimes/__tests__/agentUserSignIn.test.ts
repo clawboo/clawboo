@@ -31,7 +31,7 @@ const { isHermesCodexAuthPresent } = await import('../hermesAuth')
 const { HERMES_AGENT_SIGN_IN_MESSAGE, resolveHermesRunSettings } =
   await import('../hermes/runSettings')
 const { createHermesGatewayDriver } = await import('../hermes/gatewayDriver')
-const { provisionProfile } = await import('../hermes/profiles')
+const { provisionProfile, readAsHermes } = await import('../hermes/profiles')
 const { provisionHermesHome, seedHermesAuth } = await import('../hermesHome')
 type Supervisor = import('../hermes/gateway').HermesGatewaySupervisor
 
@@ -162,6 +162,16 @@ describe.runIf(posix)('seeding a run home with agents on their own OS user', () 
     expect(fs.readFileSync(path.join(profile.dir, 'config.yaml'), 'utf8')).not.toContain(
       'sk-person-secret',
     )
+  })
+
+  it("never takes the person's own approval settings: a profile asks before flagged commands", async () => {
+    put(
+      path.join(operatorHome, '.hermes', 'config.yaml'),
+      'approvals:\n  mode: "off"\n  cron_mode: approve\n',
+    )
+    const profile = await provisionProfile(profileOpts())
+    const body = fs.readFileSync(path.join(profile.dir, 'config.yaml'), 'utf8')
+    expect(readAsHermes(body)).toMatchObject({ approvalMode: 'manual', cronMode: 'deny' })
   })
 
   it('copies no login at all into a run that has an API key', async () => {

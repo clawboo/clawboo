@@ -112,6 +112,8 @@ const hermesState = vi.hoisted(() => ({
   gatewayState: 'stopped' as string,
   restarts: 0,
   keySyncs: 0,
+  /** Whether Hermes read as disconnected at each key sync. */
+  syncSawDisconnected: [] as boolean[],
   wantedStarts: 0,
 }))
 vi.mock('../../lib/runtimes/hermes/install', () => ({
@@ -132,31 +134,35 @@ vi.mock('../../lib/runtimes/hermes/install', () => ({
     return { version: '0.23.1', command: platformState.bins['hermes'] }
   },
 }))
-vi.mock('../../lib/runtimes/hermes', () => ({
-  hermesGateway: () => ({
-    status: () => ({
-      state: hermesState.gatewayState,
-      port: hermesState.gatewayState === 'running' ? 8642 : null,
-      pid: null,
-      startedAt: null,
-      restarts: 0,
-      lastError: null,
-      version: null,
+vi.mock('../../lib/runtimes/hermes', async () => {
+  const vault = await import('../../lib/secretsVault')
+  return {
+    hermesGateway: () => ({
+      status: () => ({
+        state: hermesState.gatewayState,
+        port: hermesState.gatewayState === 'running' ? 8642 : null,
+        pid: null,
+        startedAt: null,
+        restarts: 0,
+        lastError: null,
+        version: null,
+      }),
+      restart: async () => {
+        hermesState.restarts += 1
+      },
     }),
-    restart: async () => {
-      hermesState.restarts += 1
+    createHermesRunDriver: () => {
+      throw new Error('no Hermes runs in this suite')
     },
-  }),
-  createHermesRunDriver: () => {
-    throw new Error('no Hermes runs in this suite')
-  },
-  syncHermesProfileKeys: async () => {
-    hermesState.keySyncs += 1
-  },
-  startHermesIfWanted: async () => {
-    hermesState.wantedStarts += 1
-  },
-}))
+    syncHermesProfileKeys: async () => {
+      hermesState.keySyncs += 1
+      hermesState.syncSawDisconnected.push(vault.isRuntimeDisconnected('hermes'))
+    },
+    startHermesIfWanted: async () => {
+      hermesState.wantedStarts += 1
+    },
+  }
+})
 
 // ── Mock the process spawner: record argv + hand back a controllable child. ──
 interface FakeChild {
@@ -358,6 +364,7 @@ describe('runtimes install/connect REST', () => {
     hermesState.gatewayState = 'stopped'
     hermesState.restarts = 0
     hermesState.keySyncs = 0
+    hermesState.syncSawDisconnected = []
     hermesState.wantedStarts = 0
     // Keep the hermes ChatGPT-login probe sandboxed (userHermesHome honours it).
     process.env['HERMES_HOME'] = path.join(home, '.hermes')
@@ -836,6 +843,29 @@ describe('runtimes install/connect REST', () => {
     })
     // Hermes's profiles keep keys for the jobs it runs on its own: they follow.
     expect(hermesState.keySyncs).toBe(2)
+  })
+
+  it("a key pasted to reconnect Hermes reaches its profiles as Hermes's, not as a disconnected runtime's", () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), mockRes().res)
+    hermesState.syncSawDisconnected = []
+    const m = mockRes()
+    runtimesConnectPOST(req({ params: { id: 'hermes' }, body: { apiKey: 'sk-or-back' } }), m.res)
+    expect((m.body() as { connectionState: string }).connectionState).toBe('ready')
+    // Synced after the reconnect, so the profiles get the key, not an empty set.
+    expect(hermesState.syncSawDisconnected).toEqual([false])
+  })
+
+  it('reconnecting Hermes with a kept key brings that key back to its profiles', () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-kept')
+    runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), mockRes().res)
+    hermesState.syncSawDisconnected = []
+    const m = mockRes()
+    runtimesConnectPOST(req({ params: { id: 'hermes' }, body: {} }), m.res)
+    expect(m.statusCode()).toBe(200)
+    expect((m.body() as { connectionState: string }).connectionState).toBe('ready')
+    expect(hermesState.syncSawDisconnected).toEqual([false])
   })
 
   it('disconnect deletes an ALT-slot key no other runtime reads (native connected via Groq)', () => {

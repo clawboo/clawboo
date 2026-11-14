@@ -59,7 +59,7 @@ describe('GET /api/board/:taskId/workspace/detail', () => {
       ok: false,
       reason: 'no_workspace',
       taskFolder: {
-        path: expect.stringMatching(new RegExp(`team1[\\/]tasks[\\/]${task.id}$`)),
+        path: expect.stringMatching(new RegExp(`team1[\\\\/]tasks[\\\\/]${task.id}$`)),
         onDisk: false,
         holdsFiles: false,
       },
