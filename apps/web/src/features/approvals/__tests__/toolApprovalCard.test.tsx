@@ -44,6 +44,23 @@ describe('ToolApprovalCard', () => {
     expect(screen.getByText('Write the launch post')).toBeInTheDocument()
   })
 
+  it("says plainly that a Hermes card is Hermes's own check, not a lock", () => {
+    show({
+      kind: 'hermes',
+      toolName: 'run_command',
+      argsSummary: JSON.stringify({ command: 'rm -rf build' }),
+      reason: 'recursive delete',
+    })
+    expect(screen.getByTestId('approval-hermes-advisory')).toHaveTextContent(
+      /answer for itself, so treat this as a check, not a lock/,
+    )
+  })
+
+  it('says nothing of the kind on a card Clawboo itself holds', () => {
+    show()
+    expect(screen.queryByTestId('approval-hermes-advisory')).not.toBeInTheDocument()
+  })
+
   it('says nothing about a task when there is none', () => {
     show({ taskId: null, taskTitle: null })
     expect(screen.queryByText('Task')).not.toBeInTheDocument()

@@ -181,9 +181,10 @@ export class HermesGatewayJobsScheduleSource implements ScheduleSource {
           for (const job of await client.listJobs())
             records.push(this.toRecord(agentId, profile, job))
         } catch (err) {
-          // A profile the gateway has not picked up yet (or one never run) has no
-          // jobs to show; anything else is a degraded read.
-          if (err instanceof HermesApiError && (err.status === 404 || err.status === 401)) return
+          // Hermes answers 404 for a profile it does not have (an agent never
+          // run): no jobs to show. A 401 is a profile it has, refusing this key:
+          // its jobs still fire, unseen, so that is a degraded read like any other.
+          if (err instanceof HermesApiError && err.status === 404) return
           failures.push(profile)
           void err
         }
@@ -243,8 +244,9 @@ export class HermesGatewayJobsScheduleSource implements ScheduleSource {
         target.client
           .createJob({ name: action.spec.label ?? 'Scheduled job', schedule, prompt })
           .catch((err: unknown) => {
-            // The agent's profile is made on its first run.
-            if (err instanceof HermesApiError && (err.status === 404 || err.status === 401)) {
+            // The agent's profile is made on its first run; until then Hermes
+            // has no such profile (404). A 401 is a key refused, said below.
+            if (err instanceof HermesApiError && err.status === 404) {
               throw new InvalidRoutineTargetError(
                 'Run this agent once before giving it a Hermes job: its Hermes profile is made on its first run.',
               )

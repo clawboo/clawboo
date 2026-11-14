@@ -156,6 +156,15 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
         </p>
       )}
 
+      {/* Said on the card, not only in the docs: a Hermes agent can change what
+          Hermes asks about, and can answer this question itself. */}
+      {approval.kind === 'hermes' && (
+        <p data-testid="approval-hermes-advisory" className="text-[11.5px] text-muted-foreground">
+          Hermes asks this itself. A Hermes agent can change what Hermes asks about, or answer for
+          itself, so treat this as a check, not a lock.
+        </p>
+      )}
+
       {(human.decisive.length > 0 || approval.taskTitle) && (
         <dl className="flex flex-col gap-1">
           {human.decisive.slice(0, compact ? 2 : 3).map((f) => (

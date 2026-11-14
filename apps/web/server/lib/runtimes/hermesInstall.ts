@@ -35,29 +35,37 @@ export function installHermes(
     .then(async ({ version }) => {
       const gw = hermesGateway()
       const state = gw.status().state
+      const warnings: string[] = []
       if (state !== 'stopped' && state !== 'not-installed') {
         sendEvent(res, {
           type: 'progress',
           step: 'restart',
           message: 'Restarting the Hermes gateway on the new install…',
         })
-        await gw.restart().catch(() => undefined)
+        // The install stands either way; a gateway that did not come back is
+        // said here, so the panel does not read as all done.
+        await gw.restart().catch((err: unknown) => {
+          const why = err instanceof Error ? err.message : String(err)
+          warnings.push(
+            `${d.name} ${version} is installed, but its gateway did not start again: ${why} Start it from the Gateway section of the ${d.name} row.`,
+          )
+        })
       } else {
         // Hermes agents waiting on an install get their gateway now.
         await startHermesIfWanted('after an install')
       }
       sendEvent(res, { type: 'output', line: `${d.name} ${version} is installed.` })
       done()
-      sendEvent(
-        res,
-        managedHermesCommand()
-          ? { type: 'complete', success: true }
-          : {
-              type: 'complete',
-              success: true,
-              warning: `${d.name} installed, but Clawboo will not run it from its runtimes folder: check the folder's owner and permissions, or set CLAWBOO_RUNTIMES_DIR to a folder of its own.`,
-            },
-      )
+      if (!managedHermesCommand()) {
+        warnings.push(
+          `${d.name} installed, but Clawboo will not run it from its runtimes folder: check the folder's owner and permissions, or set CLAWBOO_RUNTIMES_DIR to a folder of its own.`,
+        )
+      }
+      sendEvent(res, {
+        type: 'complete',
+        success: true,
+        ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
+      })
       res.end()
     })
     .catch((err: unknown) => {

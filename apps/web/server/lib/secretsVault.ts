@@ -205,6 +205,12 @@ function readVault(): Vault {
   return tryReadVault() ?? {}
 }
 
+/** Whether the vault file can be read: it is missing (nothing saved yet), or it
+ *  parses. A write over one that cannot be read would replace every saved key. */
+export function runtimeVaultReadable(): boolean {
+  return tryReadVault() !== null
+}
+
 function writeVault(vault: Vault): void {
   ensureSecretsDir()
   const file = vaultPath()

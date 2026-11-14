@@ -154,6 +154,32 @@ describe('HermesGatewayJobsScheduleSource', () => {
     expect(out.status).toMatchObject({ degraded: true, reason: 'profile_unreadable' })
   })
 
+  it('names a profile that refuses its key as unreadable, and an unknown one as empty', async () => {
+    const { client } = fakeClient([job()])
+    const answering = (status: number) =>
+      ({
+        listJobs: async () => {
+          throw new HermesApiError('refused', status, null)
+        },
+      }) as unknown as HermesClient
+    const read = (other: HermesClient) =>
+      new HermesGatewayJobsScheduleSource({
+        ...backend(true, client),
+        agentClients: async () => [
+          { agentId: 'agent-1', profile: 'cb-agent-1', client },
+          { agentId: 'agent-2', profile: 'cb-agent-2', client: other },
+        ],
+      }).read()
+    // Hermes serves the profile but not with this key: its jobs still fire, unseen.
+    const refused = await read(answering(401))
+    expect(refused.records).toHaveLength(1)
+    expect(refused.status).toMatchObject({ degraded: true, reason: 'profile_unreadable' })
+    // Hermes has no such profile (the agent never ran): nothing to show.
+    const unknown = await read(answering(404))
+    expect(unknown.records).toHaveLength(1)
+    expect(unknown.status).toMatchObject({ ok: true, degraded: false })
+  })
+
   it('reads as off, not unknown, when Hermes is not in use', async () => {
     const { client } = fakeClient([job()])
     const off = await new HermesGatewayJobsScheduleSource(backend(true, client, false)).read()
@@ -282,14 +308,21 @@ describe('what a Hermes job cannot be', () => {
 
   it('asks for a first run before a job for an agent Hermes has no profile for', async () => {
     const { client } = fakeClient([])
-    const noProfile = {
-      ...client,
-      createJob: async () => {
-        throw new HermesApiError('Invalid API key', 401, 'invalid_api_key')
-      },
-    } as unknown as HermesClient
-    const source = new HermesGatewayJobsScheduleSource(backend(true, noProfile))
-    await expect(source.write(create({}) as never)).rejects.toThrow(/Run this agent once/)
+    const answering = (status: number) =>
+      new HermesGatewayJobsScheduleSource(
+        backend(true, {
+          ...client,
+          createJob: async () => {
+            throw new HermesApiError('refused', status, null)
+          },
+        } as unknown as HermesClient),
+      )
+    // Hermes has no such profile until the agent's first run.
+    await expect(answering(404).write(create({}) as never)).rejects.toThrow(/Run this agent once/)
+    // A profile Hermes has, refusing the key, is not that.
+    await expect(answering(401).write(create({}) as never)).rejects.toBeInstanceOf(
+      ScheduleSourceUnavailableError,
+    )
   })
 })
 
