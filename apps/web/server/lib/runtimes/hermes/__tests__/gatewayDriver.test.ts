@@ -20,8 +20,12 @@ import type { RuntimeRunContext } from '../../types'
 import { clearPendingHermesApprovals, resolveHermesApproval } from '../approvals'
 import { createHermesClient } from '../client'
 import type { HermesGatewaySupervisor } from '../gateway'
-import { createHermesGatewayDriver, type HermesGatewayDriverDeps } from '../gatewayDriver'
-import { derivedHermesKey, hermesJobsFolder } from '../profiles'
+import {
+  clearProfileLocks,
+  createHermesGatewayDriver,
+  type HermesGatewayDriverDeps,
+} from '../gatewayDriver'
+import { derivedHermesKey, envLine, hermesJobsFolder } from '../profiles'
 
 const MASTER = 'm'.repeat(64)
 
@@ -231,6 +235,8 @@ describe('createHermesGatewayDriver', () => {
   let g: FakeGateway
   let db: ClawbooDb
   let prevHome: string | undefined
+  /** Every run a test starts, so one that fails part way is ended after it. */
+  let runs: { driver: { abort(): Promise<void> }; result: () => unknown }[]
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-driver-'))
@@ -239,10 +245,17 @@ describe('createHermesGatewayDriver', () => {
     delete process.env['HERMES_HOME']
     g = await fakeGateway()
     db = createDb(':memory:')
+    runs = []
     clearLiveRunBindings()
     clearPendingHermesApprovals()
+    // A run an earlier test left holding agent-1's profile cannot hold up this one.
+    clearProfileLocks()
   })
   afterEach(async () => {
+    // A test that failed before its run ended: end the run, so it stops polling.
+    for (const r of runs) {
+      if (!r.result()) await r.driver.abort().catch(() => undefined)
+    }
     process.env['HOME'] = prevHome
     await g.close()
     await rm(root, { recursive: true, force: true })
@@ -272,10 +285,13 @@ describe('createHermesGatewayDriver', () => {
       supervisor: supervisorFor(g, path.join(root, 'gw')),
       db: () => db,
       profileReadyMs: 2_000,
+      // A run a test stopped lets go of its profile within seconds, not hours.
+      lingerMaxMs: 5_000,
       ...extra,
     })
     driver.onEvent((ev) => events.push(ev))
     const result = () => events.find((e) => e.type === 'result')
+    runs.push({ driver, result })
     return { driver, events, result }
   }
 
@@ -502,12 +518,66 @@ describe('createHermesGatewayDriver', () => {
     await driver.start()
     await until(() => Boolean(result()))
     // The run worked in its own folder...
-    expect(during).toContain(`TERMINAL_CWD="${path.join(root, 'work')}"`)
+    expect(during).toContain(envLine('TERMINAL_CWD', path.join(root, 'work')))
     // ...and the jobs Hermes runs on its own until the next run work in the agent's.
     const jobs = hermesJobsFolder('agent-1')
     expect(jobs).not.toContain(path.join(root, 'gw'))
-    await until(() => readFileSync(env, 'utf8').includes(`TERMINAL_CWD="${jobs}"`))
+    await until(() => readFileSync(env, 'utf8').includes(envLine('TERMINAL_CWD', jobs)))
     expect(existsSync(jobs)).toBe(true)
+  })
+
+  it('sets the approval settings back when a run lets go, so its jobs do not keep an edit', async () => {
+    const config = path.join(root, 'gw', 'profiles', 'cb-agent-1', 'config.yaml')
+    g.script = [
+      // The agent lets its own jobs run flagged commands, during the run.
+      async () => {
+        const body = await readFile(config, 'utf8')
+        await writeFile(config, body.replace('cron_mode: deny', 'cron_mode: approve'))
+      },
+      { event: 'run.completed', output: 'ok' },
+    ]
+    const { driver, result } = drive(ctx())
+    await driver.start()
+    await until(() => Boolean(result()))
+    await until(() => readFileSync(config, 'utf8').includes('cron_mode: deny'))
+    expect(readFileSync(config, 'utf8')).not.toContain('cron_mode: approve')
+    // Clawboo's tools are still attached.
+    expect(readFileSync(config, 'utf8')).toContain('live=1')
+  })
+
+  it('points the profile at the jobs folder even when a run fails while its profile is written', async () => {
+    const dir = path.join(root, 'gw', 'profiles', 'cb-agent-1')
+    await mkdir(dir, { recursive: true })
+    // A config too large to read whole: the profile's .env is written, then the run fails.
+    await writeFile(path.join(dir, 'config.yaml'), `# ${'x'.repeat(8 * 1024 * 1024)}\n`)
+    const { driver, result } = drive(ctx())
+    await driver.start()
+    await until(() => Boolean(result()))
+    expect(result()).toMatchObject({ ok: false })
+    await until(() =>
+      readFileSync(path.join(dir, '.env'), 'utf8').includes(
+        envLine('TERMINAL_CWD', hermesJobsFolder('agent-1')),
+      ),
+    )
+  })
+
+  it('ends a run whose gateway stopped, rather than reading it from whatever holds the port now', async () => {
+    let pid = 1
+    g.script = [{ event: 'message.delta', delta: 'working' }, () => new Promise(() => undefined)]
+    const { driver, events, result } = drive(ctx(), 'x', {
+      pollMs: 20,
+      streamIdleMs: 80,
+      supervisor: { ...supervisorFor(g, path.join(root, 'gw')), status: () => ({ pid }) } as never,
+    })
+    await driver.start()
+    await until(() => events.some((e) => e.type === 'message'))
+    // The gateway exits (or is replaced) while the run's stream is open.
+    pid = 2
+    await until(() => Boolean(result()), 4_000)
+    expect(result()).toMatchObject({
+      ok: false,
+      errorMessage: expect.stringMatching(/gateway stopped during the run/),
+    })
   })
 
   it('gives a run with no folder of its own the jobs folder, never the gateway home', async () => {
@@ -522,7 +592,7 @@ describe('createHermesGatewayDriver', () => {
     const { driver, result } = drive(ctx({ cwd: null }))
     await driver.start()
     await until(() => Boolean(result()))
-    expect(during).toContain(`TERMINAL_CWD="${hermesJobsFolder('agent-1')}"`)
+    expect(during).toContain(envLine('TERMINAL_CWD', hermesJobsFolder('agent-1')))
   })
 
   it("runs one agent's runs one at a time, whoever starts them", async () => {
@@ -542,7 +612,7 @@ describe('createHermesGatewayDriver', () => {
     await new Promise((r) => setTimeout(r, 150))
     expect(g.runs).toHaveLength(1)
     const env = await readFile(path.join(root, 'gw', 'profiles', 'cb-agent-1', '.env'), 'utf8')
-    expect(env).toContain(`TERMINAL_CWD="${path.join(root, 'work')}"`)
+    expect(env).toContain(envLine('TERMINAL_CWD', path.join(root, 'work')))
     g.script = [{ event: 'run.completed', output: 'second' }]
     release()
     await until(() => Boolean(first.result()))
@@ -569,7 +639,7 @@ describe('createHermesGatewayDriver', () => {
     await new Promise((r) => setTimeout(r, 200))
     expect(g.runs).toHaveLength(1)
     const env = await readFile(path.join(root, 'gw', 'profiles', 'cb-agent-1', '.env'), 'utf8')
-    expect(env).toContain(`TERMINAL_CWD="${path.join(root, 'work')}"`)
+    expect(env).toContain(envLine('TERMINAL_CWD', path.join(root, 'work')))
     // It was asked once more to stop.
     expect(g.stops).toBeGreaterThanOrEqual(2)
     g.status = { run_id: 'run_1', status: 'cancelled' }

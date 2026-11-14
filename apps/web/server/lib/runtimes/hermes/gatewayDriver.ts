@@ -68,7 +68,9 @@ import {
   provisionProfile,
   setProfileTerminalCwd,
   throwawayProfileName,
+  writeProfileConfig,
 } from './profiles'
+import type { HermesMcpServers } from '../hermesHome'
 import { hermesAgentMcpServers, hermesRunMcpServers, resolveHermesRunSettings } from './runSettings'
 
 const log = createLogger('hermes-gateway-driver')
@@ -132,6 +134,13 @@ function lockProfile(profile: string): { acquired: Promise<void>; release: () =>
       release()
     },
   }
+}
+
+/** Tests only: forget every profile's queue, so a run one test left holding its
+ *  agent's profile cannot hold up the next test's. A run still holding its lock
+ *  only ever releases its own. */
+export function clearProfileLocks(): void {
+  profileLocks.clear()
 }
 
 /** The folder each session of a profile was last run in, kept in the profile so
@@ -254,8 +263,11 @@ export function createHermesGatewayDriver(
   let sessionId: string | null = null
   let runModel: string | undefined
   let throwaway: string | null = null
-  /** The agent's own profile, once written, and where its jobs run commands. */
+  /** The agent's own profile (set before it is written, so a start that fails
+   *  part way still tidies it), its MCP servers, and where its jobs run commands. */
   let profileDir: string | null = null
+  let profileName: string | null = null
+  let profileMcp: HermesMcpServers | null = null
   let jobsCwd: string | null = null
   let lastSeq: number | undefined
   /** Hermes said the run ended (an end event, or an ended status). */
@@ -303,14 +315,25 @@ export function createHermesGatewayDriver(
   const letGo = async (unlock: () => void): Promise<void> => {
     const tmp = throwaway
     throwaway = null
+    const tidy = async (step: () => Promise<unknown>): Promise<void> => {
+      try {
+        await step()
+      } catch (err) {
+        log.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'could not tidy the Hermes profile after a run',
+        )
+      }
+    }
     try {
-      if (tmp) await agentRemove(tmp)
-      else if (profileDir && jobsCwd) await setProfileTerminalCwd(profileDir, jobsCwd)
-    } catch (err) {
-      log.debug(
-        { err: err instanceof Error ? err.message : String(err) },
-        'could not tidy the Hermes profile after a run',
-      )
+      if (tmp) {
+        await tidy(() => agentRemove(tmp))
+      } else if (profileDir && profileName) {
+        if (jobsCwd) await tidy(() => setProfileTerminalCwd(profileDir!, jobsCwd!))
+        // The approval and terminal settings again, so what the agent wrote in
+        // its profile during the run does not hold for its jobs until the next.
+        await tidy(() => writeProfileConfig(profileDir!, profileName!, profileMcp))
+      }
     } finally {
       unlock()
     }
@@ -511,10 +534,18 @@ export function createHermesGatewayDriver(
   }
 
   /** The run's status, read by polling, for when its stream cannot be read. */
+  /** The gateway the run started on is no longer the one running: its runs
+   *  ended with it, and whatever answers on its old port now gets no key. */
+  const gatewayGone = (): boolean =>
+    gatewayPid !== null && deps.supervisor.status().pid !== gatewayPid
+
   async function settleByPolling(): Promise<void> {
     const pollMs = deps.pollMs ?? 2_000
     for (;;) {
       if (finished || !client || !runId) return
+      if (gatewayGone()) {
+        return abortRequested ? aborted() : fail('The Hermes gateway stopped during the run.')
+      }
       let status
       try {
         status = await client.getRun(runId)
@@ -535,6 +566,9 @@ export function createHermesGatewayDriver(
   async function drive(): Promise<void> {
     let fruitless = 0
     while (!finished) {
+      if (gatewayGone()) {
+        return abortRequested ? aborted() : fail('The Hermes gateway stopped during the run.')
+      }
       let ended = false
       let progressed = false
       try {
@@ -604,6 +638,11 @@ export function createHermesGatewayDriver(
           : persistent && agentId
             ? hermesAgentMcpServers(ctx.mcpBaseUrl, agentId, ctx.memoryScope?.attachSecret)
             : hermesRunMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
+        if (persistent) {
+          profileDir = hermesProfileDir(conn.home, profile)
+          profileName = profile
+          profileMcp = mcpServers
+        }
         const prov = await provisionProfile({
           gatewayHome: conn.home,
           profile,
@@ -614,7 +653,6 @@ export function createHermesGatewayDriver(
           mcpServers,
           providerHint: ctx.providerHint ?? null,
         })
-        if (persistent) profileDir = prov.dir
         if (prov.migrated) log.info({ profile }, 'moved the agent’s Hermes home into its profile')
         if (ctx.mcpBaseUrl && !prov.mcpAttached) {
           log.warn(
