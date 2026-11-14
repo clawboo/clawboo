@@ -260,6 +260,33 @@ An app can run the server as a child process of its own and show the dashboard i
 
 The server reads `CLAWBOO_STOP_ON_DISCONNECT` once and removes it from its environment, so the agents and programs it starts do not inherit it, and the launcher never passes it to a server it starts.
 
+### Open the dashboard from a notification
+
+An app that raises its own notifications can send the person from one to what it is about. Give the dashboard's page this object, from a preload script for example:
+
+```ts
+window.clawbooDesktop = {
+  isDesktop: true,
+  // Call `listener` with a target each time the person clicks a notification.
+  // Deliver a click made before the dashboard subscribed once, when it does.
+  onOpenTarget(listener) {
+    /* ... */
+    return () => {} // unsubscribe
+  },
+}
+```
+
+The dashboard subscribes once, when it loads, and opens:
+
+| Target                                      | What opens                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ "kind": "task", "taskId": "…" }`         | The task's drawer on the board, on the task's team                                                                                                                                                                                                                                                                               |
+| `{ "kind": "needs-you" }`                   | **Needs you** on the board, for every team                                                                                                                                                                                                                                                                                       |
+| `{ "kind": "approval", "approvalId": "…" }` | **Needs you**, with that approval's card brought into view, given focus and ringed for a moment. A board narrowed to another team switches to the asking agent's team, or to every team for an agent outside one. When the approval has already been answered or has expired: **Needs you** for every team, and a note saying so |
+| `{ "kind": "approvals" }`                   | **Needs you** for every team, where approvals are listed first                                                                                                                                                                                                                                                                   |
+
+Approvals have no page of their own: they are answered under **Needs you** and in the agents' chats, so both approval targets open **Needs you**, as the dashboard's own browser alerts do. Approval ids are the ones `GET /api/tools/approvals?status=pending` lists. A target of any other kind is ignored. While the object is there, the dashboard's [browser alerts](/using/board#get-an-alert-outside-the-tab) stay off, since your app raises its own.
+
 ## Check that it is running
 
 ```bash

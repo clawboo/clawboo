@@ -60,10 +60,13 @@ export interface BoardFocus {
 }
 
 /** A request for the Board to bring Needs you into view (set by a browser alert
- *  about an approval, or about several things at once). `teamId` is the team
- *  to show, `all` for every team, or null to keep the board's team. */
+ *  about an approval, or about several things at once, and by a notification
+ *  deep link from an app that shows the dashboard). `teamId` is the team to
+ *  show, `all` for every team, or null to keep the board's team. */
 export interface BoardNeedsYouFocus {
   teamId: string | null
+  /** One approval whose card to bring into view and give focus, once it shows. */
+  approvalId: string | null
   nonce: number
 }
 
@@ -85,8 +88,9 @@ interface ViewStore {
 
   /** Pending "show Needs you" request for the Board (consumed once). */
   boardNeedsYouFocus: BoardNeedsYouFocus | null
-  /** Switch to the Board and bring Needs you into view. */
-  openBoardNeedsYou: (teamId?: string | null) => void
+  /** Switch to the Board and bring Needs you into view, and with `approvalId`
+   *  that approval's card. */
+  openBoardNeedsYou: (teamId?: string | null, approvalId?: string | null) => void
   /** The Board took the request. */
   clearBoardNeedsYouFocus: () => void
 
@@ -140,18 +144,26 @@ export const useViewStore = create<ViewStore>((set) => ({
   navigateTo: (view) => set({ viewMode: { type: 'nav', view } }),
 
   boardFocus: null,
+  // Each request replaces the other kind still waiting, so when both wait for
+  // the Board to mount, the newer one is what it shows.
   openBoardTask: (taskId, teamId = null) =>
     set((s) => ({
       viewMode: { type: 'nav', view: 'board' },
       boardFocus: { taskId, teamId, nonce: (s.boardFocus?.nonce ?? 0) + 1 },
+      boardNeedsYouFocus: null,
     })),
   clearBoardFocus: () => set({ boardFocus: null }),
 
   boardNeedsYouFocus: null,
-  openBoardNeedsYou: (teamId = null) =>
+  openBoardNeedsYou: (teamId = null, approvalId = null) =>
     set((s) => ({
       viewMode: { type: 'nav', view: 'board' },
-      boardNeedsYouFocus: { teamId, nonce: (s.boardNeedsYouFocus?.nonce ?? 0) + 1 },
+      boardNeedsYouFocus: {
+        teamId,
+        approvalId,
+        nonce: (s.boardNeedsYouFocus?.nonce ?? 0) + 1,
+      },
+      boardFocus: null,
     })),
   clearBoardNeedsYouFocus: () => set({ boardNeedsYouFocus: null }),
 

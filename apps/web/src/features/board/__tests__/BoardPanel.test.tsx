@@ -2,9 +2,9 @@
 // re-fetch (driven by hand: `pollBoard()`). msw's onUnhandledRequest:'error' keeps
 // the test honest about which endpoints are hit.
 
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetInboxStore, useInboxStore } from '@/features/inbox/inboxStore'
@@ -1199,6 +1199,128 @@ describe('BoardPanel', () => {
     await waitFor(() => expect(reads).toContain('?teamId=team-a'))
     expect(screen.getByLabelText('Filter by team')).toHaveTextContent('Alpha')
     expect(useViewStore.getState().boardNeedsYouFocus).toBeNull()
+  })
+
+  // A notification deep link from an app that shows the dashboard: one approval.
+  // Its card shows once the approvals poll has it, then takes focus and an
+  // outline, also when it sits behind the calendar cell's "+N more".
+  describe('an approval a notification asked for', () => {
+    const approval = (id: string, createdAt: number) => ({
+      id,
+      toolName: 'send_email',
+      agentId: null,
+      argsSummary: '{"to":"a@example.com"}',
+      reason: 'sends',
+      createdAt,
+      expiresAt: Date.now() + 60_000,
+    })
+
+    it('takes focus on an empty board, where only the Needs you lane shows', async () => {
+      server.use(
+        http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({ approvals: [approval('ap-1', 1000), approval('ap-2', 2000)] }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-2')
+      render(<BoardPanel />)
+      await waitFor(() => {
+        const card = document.querySelector('[data-approval-id="ap-2"]')
+        expect(card).not.toBeNull()
+        expect(document.activeElement).toBe(card)
+      })
+      // Ringed, as a box shadow: `:focus` turns outlines off.
+      expect(document.querySelector('[data-approval-id="ap-2"]')).toHaveClass('needs-you-revealed')
+      expect(document.querySelector('[data-approval-id="ap-1"]')).not.toHaveClass(
+        'needs-you-revealed',
+      )
+      expect(useViewStore.getState().boardNeedsYouFocus).toBeNull()
+    })
+
+    it("leaves the board's own next request to focus today's cell", async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({ tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }] }),
+        ),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({ approvals: [approval('ap-1', 1000)] }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      await waitFor(() =>
+        expect(document.activeElement).toBe(document.querySelector('[data-approval-id="ap-1"]')),
+      )
+      act(() => useViewStore.getState().openBoardNeedsYou(null))
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByTestId('calendar-needs-you-today')),
+      )
+    })
+
+    // The board's own read is slower than the approvals' here, so the card is first
+    // drawn in the lane shown while the board loads, which the calendar replaces.
+    it("opens today's +N more when the card is behind it, once the calendar is up", async () => {
+      server.use(
+        http.get('/api/board', async () => {
+          await delay(300)
+          return HttpResponse.json({
+            tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }],
+          })
+        }),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({
+            approvals: [1, 2, 3, 4, 5].map((n) => approval(`ap-${n}`, n * 1000)),
+          }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-5')
+      render(<BoardPanel />)
+      await waitFor(() => {
+        const card = document.querySelector('[data-approval-id="ap-5"]')
+        expect(card).not.toBeNull()
+        expect(document.activeElement).toBe(card)
+      })
+      expect(document.activeElement?.closest('[data-testid="board-calendar"]')).not.toBeNull()
+    })
+
+    it('never takes focus from something else the person is in', async () => {
+      server.use(
+        http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+        http.get('/api/tools/approvals', async () => {
+          await delay(300)
+          return HttpResponse.json({ approvals: [approval('ap-1', 1000)] })
+        }),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      const newTask = await screen.findByRole('button', { name: 'New task' })
+      act(() => newTask.focus())
+      await waitFor(() =>
+        expect(document.querySelector('[data-approval-id="ap-1"]')).not.toBeNull(),
+      )
+      await act(() => new Promise((r) => setTimeout(r, 50)))
+      expect(document.activeElement).toBe(newTask)
+    })
+
+    it('stops waiting once the person acts on the board', async () => {
+      server.use(
+        http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+        http.get('/api/tools/approvals', async () => {
+          await delay(300)
+          return HttpResponse.json({ approvals: [approval('ap-1', 1000)] })
+        }),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      fireEvent.pointerDown(await screen.findByTestId('board-header'))
+      await waitFor(() =>
+        expect(document.querySelector('[data-approval-id="ap-1"]')).not.toBeNull(),
+      )
+      await act(() => new Promise((r) => setTimeout(r, 50)))
+      const card = document.querySelector('[data-approval-id="ap-1"]')
+      expect(document.activeElement).not.toBe(card)
+      expect(card).not.toHaveClass('needs-you-revealed')
+    })
   })
 
   it('offers browser alerts once there is work on the board', async () => {

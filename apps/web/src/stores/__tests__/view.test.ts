@@ -98,4 +98,38 @@ describe('useViewStore', () => {
       expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 't1' })
     })
   })
+
+  // ── Board requests ─────────────────────────────────────────────────────────
+
+  describe('board requests', () => {
+    beforeEach(() => {
+      useViewStore.setState({ boardFocus: null, boardNeedsYouFocus: null })
+    })
+
+    it('carries the approval a Needs you request asks for', () => {
+      useViewStore.getState().openBoardNeedsYou('team-a', 'ap-1')
+      expect(useViewStore.getState().boardNeedsYouFocus).toMatchObject({
+        teamId: 'team-a',
+        approvalId: 'ap-1',
+      })
+      useViewStore.getState().openBoardNeedsYou()
+      expect(useViewStore.getState().boardNeedsYouFocus).toMatchObject({
+        teamId: null,
+        approvalId: null,
+      })
+    })
+
+    // Both can wait for the Board to mount (its code loads on first use); the
+    // newer one is what it shows.
+    it('lets the newer request replace the other kind still waiting', () => {
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      useViewStore.getState().openBoardTask('t1', 'team-a')
+      expect(useViewStore.getState().boardNeedsYouFocus).toBeNull()
+      expect(useViewStore.getState().boardFocus).toMatchObject({ taskId: 't1' })
+
+      useViewStore.getState().openBoardNeedsYou('all')
+      expect(useViewStore.getState().boardFocus).toBeNull()
+      expect(useViewStore.getState().boardNeedsYouFocus).toMatchObject({ teamId: 'all' })
+    })
+  })
 })
