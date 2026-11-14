@@ -243,8 +243,8 @@ export function createHermesClient(
     endpoint: { baseUrl: endpoint.baseUrl, profile: endpoint.profile },
 
     async health(timeoutMs = 2_000) {
-      // Unauthenticated on the API server; sent with the key all the same, which
-      // it ignores here.
+      // Unauthenticated on the API server, and sent without the key: the
+      // gateway's start asks before it knows who answers on the port.
       const res = await doFetch(url('/health'), { signal: AbortSignal.timeout(timeoutMs) })
       if (!res.ok) throw await errorOf(res)
       return (await res.json()) as { status: string; version?: string }
