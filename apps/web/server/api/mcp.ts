@@ -430,8 +430,9 @@ function liveRequest(server: McpServerName, req: IncomingMessage, body: unknown)
   // No run in progress (between runs, or a job the runtime runs on its own):
   // the call is the agent's own, as in its one-to-one chat. The signature named
   // the agent, so it is that agent on its own team, with no task and none of a
-  // run's writes (`chatRun`: reads and comments, which wake no one). An agent
-  // Clawboo no longer has is no one: served unbound.
+  // run's writes: on Tasks, reads and comments that wake no one (`chatRun`); on
+  // Tools, the agent's own connector grants, as in its chat. An agent Clawboo no
+  // longer has is no one: served unbound.
   if (!run) {
     const row = getDb()
       .select({ teamId: agents.teamId })

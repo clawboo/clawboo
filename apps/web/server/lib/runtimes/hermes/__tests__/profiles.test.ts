@@ -413,7 +413,7 @@ describe('provisionProfile', () => {
       'remember me',
     )
     const env = await readFile(path.join(again.dir, '.env'), 'utf8')
-    expect(env).toContain(`TERMINAL_CWD="${path.join(root, 'elsewhere')}"`)
+    expect(env).toContain(envLine('TERMINAL_CWD', path.join(root, 'elsewhere')))
   })
 
   it('writes the .env and the MCP block for a new agent, owner-only', async () => {
@@ -511,8 +511,10 @@ describe('provisionProfile', () => {
     await expect(stat(path.join(aside, 'auth.json'))).rejects.toThrow()
     // One set aside before this, keys and all, loses them at the next refresh.
     await writeFile(path.join(aside, '.env'), 'OPENROUTER_API_KEY="sk-or-old"\n')
+    await writeFile(path.join(aside, 'auth.json'), '{"providers":{}}')
     await refreshProfileProviderKeys(gw, () => ({ OPENROUTER_API_KEY: 'sk-or-now' }))
     expect(await readFile(path.join(aside, '.env'), 'utf8')).not.toContain('sk-or')
+    await expect(stat(path.join(aside, 'auth.json'))).rejects.toThrow()
   })
 
   it("pins approvals to the person's own choice before every run, whatever the agent wrote", async () => {

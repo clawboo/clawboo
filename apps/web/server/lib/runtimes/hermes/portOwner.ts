@@ -9,16 +9,18 @@
 // against the process Clawboo started:
 //
 // - macOS: `netstat -anv` names the process behind every listener, other users'
-//   included; the listener must be the gateway or a process it started.
-// - Linux: `/proc/net/tcp` names each listener's user, readable by everyone; it
-//   must be the gateway's user (a process of that user can read the keys from
-//   the gateway's home anyway, so the user is the boundary that matters).
+//   included; the listener must be the gateway or a process it started, and
+//   one that cannot be traced to it is another program's.
+// - Linux: `/proc/net/tcp` and `tcp6` name each listener's user, readable by
+//   everyone; it must be the gateway's user (a process of that user can read
+//   the keys from the gateway's home anyway, so the user is the boundary that
+//   matters).
 // - Windows: `netstat -ano` names the listener's process.
 //
-// When the owner cannot be read (a tool missing or an output not understood),
-// the answer is `unknown` and the start goes on: the check guards against a
-// listener it can see is someone else's, and never stops Hermes for a format it
-// does not know.
+// When no listener can be read at all (a tool missing, an output not
+// understood, or, on Windows, a parent that cannot be looked up), the answer is
+// `unknown` and the start goes on: the check refuses a listener it can see is
+// not the gateway, and never stops Hermes for a format it does not know.
 
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
@@ -70,24 +72,32 @@ export function parseDarwinListeners(stdout: string, port: number): number[] {
   return loopback.length > 0 ? loopback : wildcard
 }
 
+/** Addresses that take 127.0.0.1's traffic, as `/proc/net/tcp` and `tcp6`
+ *  print them (four 32-bit words in host order, so little-endian here). */
+const LOOPBACK_ADDRS = new Set(['0100007F', '0000000000000000FFFF00000100007F'])
+const WILDCARD_ADDRS = new Set(['00000000', '00000000000000000000000000000000'])
+
 /**
- * The users listening on `port` in `/proc/net/tcp` (Linux): the ones on
- * 127.0.0.1 when there are any, else the ones on every address.
+ * The users listening on `port` in `/proc/net/tcp` and `/proc/net/tcp6`
+ * (Linux; pass either, or both joined): the ones on 127.0.0.1 when there are
+ * any, else the ones on every address. A dual-stack listener on `::` shows only
+ * in `tcp6`, and takes 127.0.0.1's traffic.
  */
 export function parseProcNetTcpListeners(text: string, port: number): number[] {
   const hexPort = port.toString(16).toUpperCase().padStart(4, '0')
   const loopback: number[] = []
   const wildcard: number[] = []
-  for (const line of text.split(/\r?\n/).slice(1)) {
+  for (const line of text.split(/\r?\n/)) {
     const cols = line.trim().split(/\s+/)
-    // sl local_address rem_address st tx:rx tr:when retrnsmt uid ...
+    // sl local_address rem_address st tx:rx tr:when retrnsmt uid ... (a header
+    // line has `st` there, and is passed over)
     if (cols.length < 8 || cols[3] !== '0A') continue
-    const [addr, p] = (cols[1] ?? '').split(':')
-    if ((p ?? '').toUpperCase() !== hexPort) continue
+    const [addr, p] = (cols[1] ?? '').toUpperCase().split(':')
+    if (p !== hexPort) continue
     const uid = Number(cols[7])
     if (!Number.isInteger(uid) || uid < 0) continue
-    if (addr === '0100007F') loopback.push(uid)
-    else if (addr === '00000000') wildcard.push(uid)
+    if (LOOPBACK_ADDRS.has(addr ?? '')) loopback.push(uid)
+    else if (WILDCARD_ADDRS.has(addr ?? '')) wildcard.push(uid)
   }
   return loopback.length > 0 ? loopback : wildcard
 }
@@ -150,7 +160,10 @@ export async function gatewayPortOwner(
   const read = deps.readFile ?? ((f: string) => readFile(f, 'utf8'))
   try {
     if (platform === 'linux') {
-      const uids = parseProcNetTcpListeners(await read('/proc/net/tcp'), port)
+      const tables = await Promise.all(
+        ['/proc/net/tcp', '/proc/net/tcp6'].map((f) => read(f).catch(() => '')),
+      )
+      const uids = parseProcNetTcpListeners(tables.join('\n'), port)
       if (uids.length === 0) return 'unknown'
       const uid = parseStatusUid(await read(`/proc/${pid}/status`))
       if (uid === null) return 'unknown'
@@ -172,7 +185,11 @@ export async function gatewayPortOwner(
       if (ours === true) return 'ours'
       if (ours === null) unreadable = true
     }
-    return unreadable ? 'unknown' : 'other'
+    // The gateway itself is alive, so on macOS `ps` answers for it: a listener
+    // it cannot trace is not the gateway (a program whose process exited after
+    // a child took over its socket, as a server that forks into the background
+    // does). Only on Windows can the parent lookup itself be what failed.
+    return unreadable && platform === 'win32' ? 'unknown' : 'other'
   } catch {
     return 'unknown'
   }

@@ -635,6 +635,30 @@ export async function provisionProfile(opts: {
     await agentWriteFile(envPath, renderProfileEnv({ ...opts, previous: previousEnv }))
   })
 
+  const config = await writeProfileConfig(dir, opts.profile, opts.mcpServers)
+  const agentMode = isAgentUserMode()
+  // The ChatGPT sign-in (seedHermesAuth copies only the agent user's own with
+  // agents on their own OS user, never the person's). A run with a provider key
+  // gets none copied in then, unless it picked the subscription: then the key
+  // is not what it runs on.
+  const keyRun =
+    Object.values(opts.providerEnv).some(Boolean) && opts.providerHint !== 'openai-codex'
+  if (!(agentMode && keyRun)) await seedHermesAuth(dir)
+  return { profile: opts.profile, dir, created, migrated, mcpAttached: config.attached }
+}
+
+/**
+ * A profile's `config.yaml` written with Clawboo's settings in force: its MCP
+ * block, the pinned `terminal:` keys and the approval settings. Before every
+ * run, and again when a run lets go of the profile, so a setting an agent
+ * wrote there during the run does not carry into the jobs Hermes runs on its
+ * own until the next one.
+ */
+export async function writeProfileConfig(
+  dir: string,
+  profile: string,
+  mcpServers: HermesMcpServers | null,
+): Promise<{ attached: boolean }> {
   // config.yaml: seeded once from the person's own Hermes config while it holds
   // nothing of its own, then only the marked MCP block and the pinned terminal
   // keys change.
@@ -672,7 +696,7 @@ export async function provisionProfile(opts: {
   }
   const pins = await personsApprovalPins()
   const build = (from: string) =>
-    mergeClawbooMcpServers(pinApprovals(pinTerminalBlock(from), pins), opts.mcpServers)
+    mergeClawbooMcpServers(pinApprovals(pinTerminalBlock(from), pins), mcpServers)
   let merged = build(base)
   // The pins are line edits; what counts is what Hermes reads. A config that
   // does not read back with them in force (a second `approvals:` key, a quoted
@@ -689,7 +713,7 @@ export async function provisionProfile(opts: {
     merged = build(fresh)
     if (!holdsPins(merged.body, pins)) merged = build('')
     log.warn(
-      { profile: opts.profile },
+      { profile },
       "the agent's Hermes config.yaml did not keep Clawboo's settings; it was rebuilt",
     )
   }
@@ -701,14 +725,7 @@ export async function provisionProfile(opts: {
   } else if (!onDiskBytes || !onDiskBytes.equals(want)) {
     await agentWriteFile(configPath, want)
   }
-  // The ChatGPT sign-in (seedHermesAuth copies only the agent user's own with
-  // agents on their own OS user, never the person's). A run with a provider key
-  // gets none copied in then, unless it picked the subscription: then the key
-  // is not what it runs on.
-  const keyRun =
-    Object.values(opts.providerEnv).some(Boolean) && opts.providerHint !== 'openai-codex'
-  if (!(agentMode && keyRun)) await seedHermesAuth(dir)
-  return { profile: opts.profile, dir, created, migrated, mcpAttached: merged.attached }
+  return { attached: merged.attached }
 }
 
 /** The provider keys Clawboo writes into a profile's `.env`. */
@@ -803,8 +820,11 @@ export async function refreshProfileProviderKeys(
       opts.keyFor?.(profile) ?? null,
     )
   }
+  // One set aside by an earlier Clawboo, keys and sign-in copy and all, loses them.
   for (const profile of await listSetAsideProfiles(gatewayHome)) {
-    await refreshProfileEnv(path.join(setAsideProfilesDir(gatewayHome), profile), () => ({}), null)
+    const aside = path.join(setAsideProfilesDir(gatewayHome), profile)
+    await refreshProfileEnv(aside, () => ({}), null)
+    await agentRemove(path.join(aside, 'auth.json')).catch(() => undefined)
   }
 }
 
