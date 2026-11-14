@@ -14,7 +14,12 @@ function sendBeat(body: PresenceBeatBody): void {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
     keepalive: true,
-  }).catch(() => undefined)
+  })
+    // Read to the end: a response left unread keeps its request open, and a
+    // page that always has one open never reads as idle to anything waiting
+    // for its network to settle.
+    .then((res) => res.text())
+    .catch(() => undefined)
 }
 
 function newTabId(): string {

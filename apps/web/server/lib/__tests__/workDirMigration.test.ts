@@ -580,7 +580,10 @@ describe.skipIf(isWindows)('a kill at every step of a team folder move', () => {
       bootPreviousVersion()
       const dir = teamWorkdirPath('T1')
       expect(dir).toBe(team)
-      await ensureTeamWorkdir(dir)
+      // What the version before does with its team folder: a plain mkdir, which
+      // goes through the link the move leaves at the old path. This version
+      // refuses a link there; it never uses the old path once the move is done.
+      await mkdir(dir, { recursive: true, mode: 0o700 })
       if (stop === 'renamed') {
         // The one gap, two system calls wide: the old path is missing, so the
         // version before makes it again, empty. The files are at the new path.
