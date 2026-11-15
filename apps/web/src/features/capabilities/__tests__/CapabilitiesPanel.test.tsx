@@ -246,6 +246,25 @@ describe('CapabilitiesPanel', () => {
     expect(screen.queryByText('No capabilities found')).toBeNull()
   })
 
+  it('warns about a degraded source, but not about an OpenClaw Gateway nothing uses yet', async () => {
+    const at = Date.now()
+    server.use(
+      http.get('/api/capabilities', () =>
+        HttpResponse.json({
+          records: FIXTURE,
+          sources: [
+            { sourceId: 'openclaw', ok: false, degraded: false, reason: 'not_in_use', at },
+            { sourceId: 'hermes', ok: false, degraded: true, reason: 'profile_unreadable', at },
+          ],
+        }),
+      ),
+      http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+    )
+    render(<CapabilitiesPanel />)
+    expect(await screen.findByText(/profile_unreadable/)).toBeInTheDocument()
+    expect(screen.queryByText(/not_in_use/)).toBeNull()
+  })
+
   it('an UNAVAILABLE (greyed) managed capability renders NO action button', async () => {
     server.use(
       http.get('/api/capabilities', () =>

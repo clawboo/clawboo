@@ -23,6 +23,7 @@ import {
 
 import { RuntimeConnectList } from './RuntimeConnectList'
 import { OpenClawInlineSetup } from './OpenClawInlineSetup'
+import { openOpenClaw } from './openClawOnDemand'
 import { RuntimeDiagnosticsDrawer, type RuntimeDiagnosticsTarget } from './RuntimeDiagnosticsDrawer'
 import { useRuntimeProbeStore } from './runtimeProbeStore'
 import { RUNTIME_CATALOG, RUNTIME_ORDER, type RuntimeId } from './runtimeCatalog'
@@ -141,13 +142,18 @@ export function RuntimesPanel() {
   // (its `.source` IS the OpenClawAgentSource) so a thin client reads OpenClaw's
   // real reachability. Additive — the current web app (client present) is unchanged.
   const [serverOpenclawConnected, setServerOpenclawConnected] = useState(false)
+  // False while nothing has needed the Gateway, so the server has not connected
+  // to it (it connects on demand). Opening OpenClaw's row is what connects.
+  const [serverOpenclawInUse, setServerOpenclawInUse] = useState(true)
   const openclawConnected =
     (connStatus === 'connected' && client !== null) || serverOpenclawConnected
   const openclawMessage = openclawConnected
     ? 'connected'
-    : connStatus === 'connected'
-      ? 'not connected'
-      : connStatus
+    : !serverOpenclawInUse
+      ? 'not in use'
+      : connStatus === 'connected'
+        ? 'not connected'
+        : connStatus
   const [statuses, setStatuses] = useState<RuntimeStatus[]>([])
   const [loaded, setLoaded] = useState(false)
   const [diagId, setDiagId] = useState<string | null>(null)
@@ -199,6 +205,9 @@ export function RuntimesPanel() {
     if (!read.isCurrent()) return // re-checked per hop: each await is its own staleness window
     const srvConn = health.connection === 'connected'
     setServerOpenclawConnected(srvConn)
+    // "Not in use" only for a Gateway this install set up (settings name one or
+    // openclaw.json exists): one never set up reads "Set up", as before.
+    setServerOpenclawInUse(!(health.inUse === false && health.configured))
     // OpenClaw's own ChatGPT-subscription oauth profile (defensive: false on any
     // error). `codexAuth.profile` is the ACTUAL profile, distinct from a bare
     // codex-CLI login (which only OFFERS the path).
@@ -215,7 +224,13 @@ export function RuntimesPanel() {
     record('openclaw', {
       ts,
       ok: ocOk,
-      message: ocOk ? 'connected' : conn.status === 'connected' ? 'not connected' : conn.status,
+      message: ocOk
+        ? 'connected'
+        : health.inUse === false && health.configured
+          ? 'not in use'
+          : conn.status === 'connected'
+            ? 'not connected'
+            : conn.status,
     })
   }, [reads])
 
@@ -233,6 +248,16 @@ export function RuntimesPanel() {
   const handleChanged = useCallback(async () => {
     await Promise.all([refresh(), refreshFleetFromRegistry().catch(() => undefined)])
   }, [refresh])
+
+  // OpenClaw's row was opened while nothing used the Gateway: opening OpenClaw's
+  // view is a need, so the server connects now. Then re-read, the fleet too: the
+  // connect syncs the Gateway's agents into the registry.
+  const handleOpenClawOpened = useCallback(async () => {
+    // Also gives this page its own Gateway client once the server is connected,
+    // even after this panel closes (see openClawOnDemand).
+    await openOpenClaw()
+    await handleChanged()
+  }, [handleChanged])
 
   const openclawCaps: Capabilities = {
     streaming: true,
@@ -253,8 +278,8 @@ export function RuntimesPanel() {
         id: 'openclaw',
         name: 'OpenClaw',
         runtimeClass: 'connected-substrate',
-        statusTone: ok ? 'success' : 'warning',
-        statusLabel: ok ? 'Connected' : 'Offline',
+        statusTone: ok ? 'success' : serverOpenclawInUse ? 'warning' : 'idle',
+        statusLabel: ok ? 'Connected' : serverOpenclawInUse ? 'Offline' : 'Not in use',
         health: { ok, message: openclawMessage },
         caps: openclawCaps,
         gatewayUrl,
@@ -359,6 +384,8 @@ export function RuntimesPanel() {
               subscriptionConnected: openclawSubConnected,
               codexReady: statuses.some((s) => s.id === 'codex' && s.connectionState === 'ready'),
               configured: openclawConfigured,
+              inUse: serverOpenclawInUse,
+              onOpen: handleOpenClawOpened,
               extra: <McpAttach runtimeId="openclaw" />,
               setupOpen,
               setupContent: (

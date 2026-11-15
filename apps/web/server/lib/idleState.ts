@@ -33,6 +33,7 @@ import type {
 import type { ClawbooDb } from '@clawboo/db'
 import {
   SCHEDULE_SOURCE_NOT_CONFIGURED,
+  SCHEDULE_SOURCE_NOT_IN_USE,
   decodeCronSpec,
   type ScheduleReadResult,
   type ScheduleSource,
@@ -178,7 +179,13 @@ async function readSource(
     }
   }
   if (result.status.ok) return { id: source.id, state: 'ok', ...earliest(result) }
-  if (result.status.reason === SCHEDULE_SOURCE_NOT_CONFIGURED) {
+  // Not set up, or set up and not used yet. The second must not fall through to
+  // the listening probe below: connecting to the Gateway's port would start a
+  // Gateway that a service manager starts on its first connection.
+  if (
+    result.status.reason === SCHEDULE_SOURCE_NOT_CONFIGURED ||
+    result.status.reason === SCHEDULE_SOURCE_NOT_IN_USE
+  ) {
     return {
       id: source.id,
       state: 'off',

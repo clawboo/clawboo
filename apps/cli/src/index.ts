@@ -389,16 +389,12 @@ async function run(opts: LaunchOptions): Promise<void> {
 
   p.intro(chalk.bold.white('Clawboo') + chalk.gray(' v' + VERSION))
 
-  // ── 2. Informational gateway probe ─────────────────────────────────────────
-
-  const gatewayUp = await probePort('localhost', 18789)
-  if (gatewayUp) {
-    p.log.success(chalk.green('OpenClaw Gateway detected') + chalk.gray(' at localhost:18789'))
-  } else {
-    p.log.info(chalk.gray('No Gateway detected — the dashboard will guide you through setup.'))
-  }
-
-  // ── 3. Find or start the dashboard server ──────────────────────────────────
+  // ── 2. Find or start the dashboard server ──────────────────────────────────
+  //
+  // No look at the OpenClaw Gateway's port here. Connecting to it, even to see
+  // whether it answers, starts a Gateway that a service manager starts on its
+  // first connection, and the server connects to the Gateway only once something
+  // needs it. The dashboard shows OpenClaw's state and guides its setup.
 
   // The server picks its own port via the shared port resolver (default 18790
   // with auto-fallback up to 18809), so the CLI doesn't hardcode anything — it
@@ -431,11 +427,11 @@ async function run(opts: LaunchOptions): Promise<void> {
 
   const plainUrl = dashboardUrl(dashboardPort)
 
-  // ── 4. Open browser ────────────────────────────────────────────────────────
+  // ── 3. Open browser ────────────────────────────────────────────────────────
 
   await openDashboard(dashboardPort)
 
-  // ── 5. Success ─────────────────────────────────────────────────────────────
+  // ── 4. Success ─────────────────────────────────────────────────────────────
 
   console.log()
   p.outro(

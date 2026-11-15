@@ -130,7 +130,9 @@ If the result says the vault is unreadable instead, the details give the reason,
 
 **What it means:** Clawboo's server was not connected to the OpenClaw Gateway when the checks ran. The result reads "OpenClaw Gateway not reachable", followed by the connection state, and the details give the Gateway's address. Your OpenClaw agents still show as they were at the last sync but cannot take work. Your other runtimes are not affected.
 
-The check runs only when OpenClaw is set up on this computer: Clawboo's settings name a Gateway, or OpenClaw's own `openclaw.json` exists. Otherwise it passes as "OpenClaw Gateway not set up on this machine (skipped)". If OpenClaw is installed but you don't use it, this check reads **Degraded** whenever its Gateway is not running, and that is harmless.
+The check runs only when OpenClaw is set up on this computer: Clawboo's settings name a Gateway, or OpenClaw's own `openclaw.json` exists. Otherwise it passes as "OpenClaw Gateway not set up on this machine (skipped)".
+
+Clawboo connects to the Gateway only once something needs it: an OpenClaw agent, opening OpenClaw in **Settings** > **Runtimes**, or a routine for an OpenClaw agent falling due (see [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects)). If OpenClaw is set up and nothing uses it yet, the check passes as "OpenClaw Gateway not in use yet (skipped)". Clawboo has not tried to connect, so a Gateway that starts on its first connection stays asleep.
 
 **Fix:** if you use OpenClaw, start or reconnect the Gateway in **Settings** > **Runtimes** > **OpenClaw** (**Reconnect**, or **Manage** > **Restart**), then click **Re-run probe**. The check reflects the moment the checks ran, so a Gateway that started afterwards reads **Degraded** until you run them again. [OpenClaw](/runtimes/openclaw) covers the Gateway's own errors.
 

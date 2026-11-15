@@ -19,6 +19,10 @@
 // ticker keeps that start time in memory, so a fire queued long ago (a pause, a
 // restart) still gets its full wait now. With no Gateway configured there is
 // nothing to wait for, and the fire fails at once.
+//
+// A fire that waits is also what has the server connect to a Gateway nothing
+// used before (the server connects on demand, see openClawAgentSource.ts): the
+// ticker marks the Gateway in use, and the connection it opens ends the wait.
 
 import { agents, type ClawbooDb, type DbScheduledRun } from '@clawboo/db'
 import { parseTaskTemplate, routineTargetOf } from '@clawboo/scheduler'
@@ -35,6 +39,9 @@ export interface GatewayState {
   configured(): boolean
   /** The server's connection to it is up. */
   connected(): boolean
+  /** A due fire needs it: connect to a Gateway nothing used yet. The ticker
+   *  calls this, never a read such as the idle state. */
+  markInUse?(): void
 }
 
 /** The agent a fire runs on: the routine's agent, or the one a team routine's message goes to. */

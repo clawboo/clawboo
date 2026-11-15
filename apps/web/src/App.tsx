@@ -3,6 +3,7 @@ import { ToastContainer } from '@/features/ui/ToastContainer'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
 import { RunStatusBridge } from '@/features/obs/RunStatusBridge'
 import { NeedsYouAlerts } from '@/features/alerts/NeedsYouAlerts'
+import { EmbedderLinks } from '@/features/embedder/EmbedderLinks'
 import { InboxBridge } from '@/features/inbox/InboxBridge'
 import { PresenceBeat } from '@/features/presence/PresenceBeat'
 import { AppSidebar } from '@/features/layout/AppSidebar'
@@ -48,6 +49,9 @@ export function App() {
       {/* Browser notifications for what needs the person, while the tab is in
           the background. Opt-in, and quiet inside the desktop app. */}
       <NeedsYouAlerts />
+      {/* In an app that shows the dashboard in its own window, a click on one of
+          the app's notifications opens the task or approval it was about. */}
+      <EmbedderLinks />
       {/* The person's inbox and its badge, woken by the same event tail. */}
       <InboxBridge />
       {/* Tells the engine a person is at this tab, so a host that stops an idle

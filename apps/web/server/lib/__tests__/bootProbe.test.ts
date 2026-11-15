@@ -1,18 +1,22 @@
 // Boot probe: each check in isolation against a sandboxed fresh ~/.clawboo, the
 // master-key boot-sentinel write-on-first / decrypt-on-subsequent round-trip, the
 // rotated-key degrade, and the api-port-file match. No Gateway runs: the gateway
-// check skips on a sandbox with no OpenClaw set up, and degrades (stale) once an
-// OpenClaw config exists. The report stays ok either way (no fatal checks).
+// check skips on a sandbox with no OpenClaw set up, passes as not in use with an
+// OpenClaw config and no OpenClaw agent (the server connects on demand), and
+// degrades (stale) once an OpenClaw agent needs it. The report stays ok either
+// way (no fatal checks).
 
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+import { agents } from '@clawboo/db'
 import { getProxyDeviceIdentityPath } from '@clawboo/gateway-proxy'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { runBootProbe } from '../bootProbe'
+import { getDb, getDbPath, resetDb } from '../db'
 import { writeApiPortFile } from '../portUtils'
 
 const itPosix = process.platform === 'win32' ? it.skip : it
@@ -30,6 +34,9 @@ beforeEach(async () => {
   delete process.env['CLAWBOO_SECRETS_MASTER_KEY']
 })
 afterEach(async () => {
+  // Close the process-wide connection a test opened before its folder goes:
+  // Windows cannot delete a database file that is still open.
+  resetDb()
   if (prevHome === undefined) delete process.env['HOME']
   else process.env['HOME'] = prevHome
   delete process.env['CLAWBOO_HOME']
@@ -124,11 +131,29 @@ describe('runBootProbe (fresh install)', () => {
     expect(report.degraded).not.toContain('openclawGatewayReachable')
   })
 
-  it('degrades the OpenClaw Gateway check (stale) when OpenClaw is set up but unreachable, but stays ok', async () => {
+  // These two share the registry singleton, whose "in use" is sticky by design,
+  // so the one with nothing using the Gateway runs first.
+  it('passes the OpenClaw Gateway check as not in use when OpenClaw is set up with no OpenClaw agent', async () => {
     mkdirSync(path.join(home, '.openclaw'), { recursive: true })
     writeFileSync(path.join(home, '.openclaw', 'openclaw.json'), '{}')
     const report = await runBootProbe({ port: 18790 })
-    // OpenClaw's config exists but nothing is listening → degraded, not fatal.
+    // The server has not tried to connect, so this is not "unreachable".
+    expect(checkById(report, 'openclawGatewayReachable')).toMatchObject({ ok: true })
+    expect(checkById(report, 'openclawGatewayReachable')?.message).toMatch(/not in use/)
+    expect(report.degraded).not.toContain('openclawGatewayReachable')
+  })
+
+  it('degrades the OpenClaw Gateway check (stale) when an OpenClaw agent needs an unreachable Gateway, but stays ok', async () => {
+    mkdirSync(path.join(home, '.openclaw'), { recursive: true })
+    writeFileSync(path.join(home, '.openclaw', 'openclaw.json'), '{}')
+    expect(getDbPath().startsWith(home)).toBe(true)
+    const now = Date.now()
+    getDb()
+      .insert(agents)
+      .values({ id: 'main', name: 'Main', gatewayId: 'main', createdAt: now, updatedAt: now })
+      .run()
+    const report = await runBootProbe({ port: 18790 })
+    // An OpenClaw agent needs the Gateway but nothing is listening → degraded, not fatal.
     expect(checkById(report, 'openclawGatewayReachable')?.ok).toBe(false)
     expect(report.degraded).toContain('openclawGatewayReachable')
     expect(report.fatal).toEqual([])

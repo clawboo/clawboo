@@ -117,6 +117,11 @@ export type ApprovalItem =
   | { key: string; ts: number; kind: 'exec'; exec: ApprovalRequest }
   | { key: string; ts: number; kind: 'tool'; tool: ToolApproval }
 
+/** The approval's own id, the one its system and a notification know it by. */
+export function approvalIdOf(item: ApprovalItem): string {
+  return item.kind === 'exec' ? item.exec.id : item.tool.id
+}
+
 /** Which agent a stuck task belongs to: the one working it, else the one it is
  *  bound to (a released task keeps its binding but loses its assignee). */
 function agentOf(task: BoardTask): string | null {
@@ -963,12 +968,21 @@ function Leaving({
 }
 
 /** An approval's place in its list. The card animates itself; this only hands
- *  focus on when the approval is answered and its card goes. */
-function ApprovalSlot({ children }: { children: ReactNode }) {
+ *  focus on when the approval is answered and its card goes. A notification can
+ *  ask for one approval: the board then gives this slot focus (from script only,
+ *  so it is not a Tab stop) and outlines it while it keeps it. */
+function ApprovalSlot({ approvalId, children }: { approvalId: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const present = useFocusHandOff(ref)
   return (
-    <div ref={ref} data-needs-you-entry="" data-leaving={present ? undefined : ''}>
+    <div
+      ref={ref}
+      tabIndex={-1}
+      data-needs-you-entry=""
+      data-approval-id={approvalId}
+      data-leaving={present ? undefined : ''}
+      className="rounded-xl"
+    >
       {children}
     </div>
   )
@@ -1027,6 +1041,7 @@ export function NeedsYouItems({
   layout = 'lane',
   cap,
   show,
+  showApproval,
 }: {
   model: NeedsYouModel
   teamFilter: string
@@ -1039,6 +1054,8 @@ export function NeedsYouItems({
   cap?: number
   /** A task being brought into view: past the cap, it opens the rest. */
   show?: string | null
+  /** An approval being brought into view: past the cap, it opens the rest. */
+  showApproval?: string | null
 }) {
   const { approvals, stuck, total, resolveTool } = model
   const [expanded, setExpanded] = useState(false)
@@ -1066,6 +1083,18 @@ export function NeedsYouItems({
   const [shownFor, setShownFor] = useState<string | null>(null)
   if (show && show !== shownFor && hiddenIds.has(show)) {
     setShownFor(show)
+    setExpanded(true)
+  }
+  const [approvalShownFor, setApprovalShownFor] = useState<string | null>(null)
+  // A request that has ended is forgotten, so the next one for the same approval
+  // (after Show less, say) opens the rest again.
+  if (!showApproval && approvalShownFor !== null) setApprovalShownFor(null)
+  if (
+    showApproval &&
+    showApproval !== approvalShownFor &&
+    approvals.slice(shownApprovals.length).some((a) => approvalIdOf(a) === showApproval)
+  ) {
+    setApprovalShownFor(showApproval)
     setExpanded(true)
   }
   // Each card's gap is padding under it, so the gap closes with a card that leaves.
@@ -1123,7 +1152,7 @@ export function NeedsYouItems({
               its red is the consent warning, so it stays. */}
           <AnimatePresence mode="popLayout">
             {shownApprovals.map((it) => (
-              <ApprovalSlot key={it.key}>
+              <ApprovalSlot key={it.key} approvalId={approvalIdOf(it)}>
                 {it.kind === 'exec' ? (
                   <InlineApprovalCard approval={it.exec} showAgentName variant="board" />
                 ) : (
@@ -1193,6 +1222,7 @@ export function NeedsYouLane({
   onOpenTask,
   onTasksChanged,
   loading = false,
+  showApproval,
 }: {
   model: NeedsYouModel
   teamFilter: string
@@ -1201,6 +1231,8 @@ export function NeedsYouLane({
   /** The board's tasks have not arrived: an empty lane cannot yet say that
    *  nothing needs you. Approvals, read on their own, still show. */
   loading?: boolean
+  /** An approval being brought into view (see NeedsYouItems). */
+  showApproval?: string | null
 }) {
   const { total } = model
   const titleId = useId()
@@ -1241,6 +1273,7 @@ export function NeedsYouLane({
             teamFilter={teamFilter}
             onOpenTask={onOpenTask}
             onTasksChanged={onTasksChanged}
+            showApproval={showApproval}
           />
         )}
       </div>

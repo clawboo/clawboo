@@ -425,7 +425,11 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
     const port = resolvePort(stateDir)
     const pidInfo = readGatewayPid()
     const pidAlive = pidInfo ? isProcessAlive(pidInfo.pid) : false
-    const reachable = await probeGatewayPort(port)
+    // A probe of the port would itself start a Gateway that a service manager
+    // starts on its first connection. While nothing uses the Gateway, only a
+    // Gateway Clawboo launched (its recorded pid) is known to be running.
+    const inUse = getRegistry().source.isInUse()
+    const reachable = inUse ? await probeGatewayPort(port) : false
     const running = pidAlive || reachable
 
     // Clean up stale PID file
@@ -471,6 +475,9 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
       },
       gateway: {
         running,
+        // False while nothing has needed the Gateway: `running` is then only
+        // what the pid file says, and the dashboard does not connect.
+        inUse,
         port,
         pid: pidAlive ? pidInfo!.pid : null,
         managedByClawboo: pidAlive,
@@ -978,16 +985,23 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
     if (action === 'status') {
       const pidInfo = readGatewayPid()
       const alive = pidInfo ? isProcessAlive(pidInfo.pid) : false
-      const reachable = await probeGatewayPort(port)
+      // As in GET /api/system/status: no probe while nothing uses the Gateway.
+      const inUse = getRegistry().source.isInUse()
+      const reachable = inUse ? await probeGatewayPort(port) : false
       if (pidInfo && !alive) removeGatewayPid()
       res.json({
         running: alive || reachable,
+        inUse,
         pid: alive ? pidInfo!.pid : null,
         port,
         uptimeMs: alive && pidInfo ? Date.now() - pidInfo.startedAt : null,
       })
       return
     }
+
+    // A person starting the Gateway from Clawboo needs it, also when it turns
+    // out to be running already (no reconnect follows that answer).
+    if (action !== 'stop') getRegistry().source.markInUse('a person started the Gateway')
 
     // ── stop ──
     if (action === 'stop') {
@@ -1571,9 +1585,13 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
       saveSettings({ gatewayUrl: `ws://localhost:${gatewayPort}` })
     }
 
-    // Check if gateway is running for hot reload hint
+    // Check if gateway is running for hot reload hint. Not while nothing uses
+    // it: the probe would start a Gateway that starts on its first connection.
+    // Read from memory: this route has no other use for the database, and
+    // opening it just for a hint would hold it open (on Windows a test's
+    // throwaway folder could then not be deleted).
     const port = resolvePort(stateDir)
-    const reachable = await probeGatewayPort(port)
+    const reachable = getRegistry().source.wasMarkedInUse() ? await probeGatewayPort(port) : false
 
     res.json({ ok: true, ...(reachable ? { hotReloadHint: true } : {}) })
   } catch (err) {

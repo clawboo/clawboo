@@ -18,6 +18,7 @@ import {
 } from '@clawboo/db'
 import {
   SCHEDULE_SOURCE_NOT_CONFIGURED,
+  SCHEDULE_SOURCE_NOT_IN_USE,
   type ScheduleReadResult,
   type ScheduleRecord,
   type ScheduleSource,
@@ -244,6 +245,32 @@ describe('idle answer: next due', () => {
       { place: here, listening: 'closed' },
     )
     expect(state.nextDue.sources[1]).toMatchObject({ state: 'off', reason: 'gateway_stopped' })
+    expect(state.nextDue.complete).toBe(true)
+  })
+
+  it('a Gateway set up here that nothing uses yet is off, and is never probed', async () => {
+    // The server connects on demand. A probe of the Gateway's port is itself a
+    // connection, and would start a Gateway that a service manager starts on its
+    // first one, for every host that polls this read.
+    const probe = vi.fn(async () => 'open' as const)
+    const state = await buildIdleState({
+      db,
+      now: () => NOW,
+      sources: () => [source(async () => disconnected(SCHEDULE_SOURCE_NOT_IN_USE))],
+      gatewayPlace: () => here,
+      probe,
+      gateway: null,
+    })
+    expect(engineIdleStateSchema.safeParse(state).success).toBe(true)
+    expect(probe).not.toHaveBeenCalled()
+    expect(state.nextDue.sources[1]).toEqual({
+      id: 'openclaw-gateway-cron',
+      state: 'off',
+      at: null,
+      count: 0,
+      timeZone: null,
+      reason: 'not_in_use',
+    })
     expect(state.nextDue.complete).toBe(true)
   })
 

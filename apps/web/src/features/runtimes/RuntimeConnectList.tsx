@@ -81,6 +81,14 @@ export interface OpenClawTabConfig {
   /** OpenClaw was set up before (openclaw.json exists) but is not currently
    *  connected → the row reads "Disconnected · Reconnect", not a fresh "Set up". */
   configured?: boolean
+  /** False when a Gateway is set up (on the server's reading, which also counts
+   *  one named only in settings) and nothing has needed it yet, so the server has
+   *  not connected (it connects on demand). The row then reads "Not in use"
+   *  rather than "Disconnected" or "Set up", and opening it calls `onOpen`. */
+  inUse?: boolean
+  /** Panel host: the row was opened while OpenClaw is not in use. Opening
+   *  OpenClaw's view is a need, so the host asks the server to connect. */
+  onOpen?: () => void | Promise<void>
 }
 
 // Concise one-liners for the row summary (the catalog blurbs are longer, sized
@@ -422,6 +430,26 @@ function OpenClawRow({
   const testId = 'runtime-list-row-openclaw'
   const openRow = useCallback(() => setUserExpanded(true), [])
   useFocusedRow('openclaw', testId, openRow)
+  // Set up, and nothing has needed the Gateway yet: the server has not tried, so
+  // it is asleep on purpose rather than offline.
+  const notInUse = !config.connected && config.inUse === false
+  // Opening the row then is a need: the host asks the server to connect. Once
+  // per stretch of not being in use, however often the row is toggled.
+  const [connectingOnOpen, setConnectingOnOpen] = useState(false)
+  const askedRef = useRef(false)
+  const onOpen = config.onOpen
+  useEffect(() => {
+    if (!notInUse) {
+      askedRef.current = false
+      return
+    }
+    if (!userExpanded || askedRef.current || !onOpen) return
+    askedRef.current = true
+    setConnectingOnOpen(true)
+    void Promise.resolve(onOpen())
+      .catch(() => undefined)
+      .finally(() => setConnectingOnOpen(false))
+  }, [notInUse, userExpanded, onOpen])
   const rowProps = {
     testId,
     icon: <OpenClawIcon size={36} />,
@@ -492,15 +520,24 @@ function OpenClawRow({
     <span className="inline-flex shrink-0 items-center text-[12px]" style={{ color: muted(0.55) }}>
       In setup
     </span>
+  ) : connectingOnOpen ? (
+    <span
+      className="inline-flex shrink-0 items-center gap-1.5 text-[12px]"
+      style={{ color: muted(0.55) }}
+    >
+      <Spinner size={12} /> Connecting…
+    </span>
   ) : (
     <CtaToggle
       expanded={expanded}
       onToggle={() => setUserExpanded((v) => !v)}
       bodyId={`${testId}-body`}
       cta={
-        wasConfigured
-          ? { label: 'Reconnect', icon: <RefreshCw size={13} /> }
-          : { label: 'Set up', icon: <ArrowRight size={13} /> }
+        notInUse
+          ? { label: 'Connect', icon: <Plug2 size={13} /> }
+          : wasConfigured
+            ? { label: 'Reconnect', icon: <RefreshCw size={13} /> }
+            : { label: 'Set up', icon: <ArrowRight size={13} /> }
       }
       name="OpenClaw"
       testId={testId}
@@ -511,7 +548,15 @@ function OpenClawRow({
     <AccordionRow
       {...rowProps}
       status={
-        wasConfigured ? <AmberStatusChip label="Disconnected" /> : <StatusChip state="unknown" />
+        notInUse ? (
+          <span className="text-[11px] font-medium" style={{ color: muted(0.42) }}>
+            Not in use
+          </span>
+        ) : wasConfigured ? (
+          <AmberStatusChip label="Disconnected" />
+        ) : (
+          <StatusChip state="unknown" />
+        )
       }
       footer={footer}
       expanded={expanded}
@@ -521,9 +566,11 @@ function OpenClawRow({
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-[12px] leading-relaxed" style={{ color: muted(0.55) }}>
-            {wasConfigured
-              ? 'OpenClaw is set up, but its local Gateway is offline. Reconnect to bring your OpenClaw agents back online — your existing configuration is reused.'
-              : 'The pro path: Clawboo detects, installs, and starts a local OpenClaw Gateway, reusing the provider key or local Ollama you already connected.'}
+            {notInUse
+              ? 'OpenClaw is set up. Clawboo connects to its Gateway once something needs it: an OpenClaw agent, a routine for one, or opening OpenClaw here. Until then a Gateway that starts on its first connection stays asleep.'
+              : wasConfigured
+                ? 'OpenClaw is set up, but its local Gateway is offline. Reconnect to bring your OpenClaw agents back online. Your existing configuration is reused.'
+                : 'The pro path: Clawboo detects, installs, and starts a local OpenClaw Gateway, reusing the provider key or local Ollama you already connected.'}
           </p>
           {config.onSetup && (
             <div>
@@ -533,7 +580,11 @@ function OpenClawRow({
                 data-testid={config.setupTestId}
                 onClick={config.onSetup}
               >
-                {wasConfigured ? 'Reconnect OpenClaw' : 'Set up OpenClaw'}
+                {notInUse
+                  ? 'Connect OpenClaw'
+                  : wasConfigured
+                    ? 'Reconnect OpenClaw'
+                    : 'Set up OpenClaw'}
               </Button>
             </div>
           )}

@@ -794,6 +794,13 @@ samp {
     opacity: 0;
   }
 }
+/* The approval a notification brought into view keeps an outline while it holds
+   the focus it was given. A focus from script need not match `:focus-visible`,
+   and `:focus` turns outlines off, so this rule (more specific) puts one back. */
+[data-revealed-focus]:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 
 /* An upcoming routine run: a dashed outline of a card, so it never reads as a
    task that exists. The next run on screen, and the run whose details are open,

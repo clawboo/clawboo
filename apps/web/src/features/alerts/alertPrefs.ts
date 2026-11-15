@@ -6,6 +6,7 @@
 
 import { create } from 'zustand'
 
+import { embedderBridge } from '@/features/embedder/bridge'
 import { scopedLocalStorage } from '@/lib/clientStorage'
 
 export type AlertChoice = 'on' | 'off'
@@ -73,9 +74,7 @@ export const useAlertPrefs = create<AlertPrefsState>((set) => ({
  * cover it, so the browser alerts stay on there.
  */
 export function isDesktopShell(): boolean {
-  if (typeof window === 'undefined') return false
-  const bridge = (window as { clawbooDesktop?: { isDesktop?: unknown } }).clawbooDesktop
-  return bridge?.isDesktop === true
+  return embedderBridge() !== null
 }
 
 export function alertAvailability(permission: NotificationPermission | null): AlertAvailability {

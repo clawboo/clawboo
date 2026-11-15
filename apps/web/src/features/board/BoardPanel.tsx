@@ -167,6 +167,9 @@ type TodayDirection = 'up' | 'down' | 'left' | 'right' | null
 const SETTLE_MS = 400
 /** How long the cards an agent just moved stay marked, and how many at once. */
 const ARRIVAL_MS = 1600
+/** How long an approval a notification asked to see may take to show on the
+ *  board (its poll runs every 3 seconds) before the board stops waiting. */
+const APPROVAL_WAIT_MS = 10_000
 const ARRIVAL_CAP = 6
 /** A read this soon after the person acted shows their own change, not an agent's. */
 const ARRIVAL_QUIET_MS = 6000
@@ -373,6 +376,19 @@ interface ViewTarget {
   pingAfterMs?: number
   /** Give the card focus and flash it once it is in view, so the eye finds it. */
   flash?: boolean
+  /** With `needsYou`: an approval whose card takes focus instead of today's cell. */
+  approvalId?: string
+}
+
+/** Needs you's own places: today's cell and the lane. Focus there may move on to
+ *  the approval a notification asked for. */
+const NEEDS_YOU_HOME = '[data-testid="calendar-needs-you-today"], [data-needs-you-home]'
+
+/** Focus is on nothing, or in Needs you itself: a notification's approval may take
+ *  it. Anywhere else (a field, a dialog, New task) it is the person's. */
+function focusIsFree(): boolean {
+  const active = document.activeElement
+  return !active || active === document.body || !!active.closest(NEEDS_YOU_HOME)
 }
 
 /** A value made safe for a quoted attribute selector. */
@@ -626,6 +642,72 @@ export function BoardPanel() {
     fx.arrived = window.setTimeout(() => setArrivedIds(EMPTY_SET), ARRIVAL_MS)
   }, [])
 
+  // An approval a notification asked to see (an app's deep link). Its card shows
+  // once the approvals poll has it and the board has its final layout (the lane
+  // drawn while the board loads gives way to the calendar, which draws the card
+  // anew), so the request waits for both, a while at most. Then the card is
+  // brought into view and given focus, outlined until focus moves on; a card drawn
+  // anew within that while (a team switch reloads the board) is shown again. It
+  // never takes focus from anything else, and the person acting on the board, or
+  // a task opening, calls it off. `approvalShow` also opens "+N more" when the
+  // card is behind it.
+  const [approvalShow, setApprovalShow] = useState<string | null>(null)
+  const approvalRef = useRef<{ id: string | null; card: HTMLElement | null }>({
+    id: null,
+    card: null,
+  })
+  const approvalTimerRef = useRef(0)
+  const askForApproval = useCallback((approvalId: string | null) => {
+    window.clearTimeout(approvalTimerRef.current)
+    approvalRef.current = { id: approvalId, card: null }
+    setApprovalShow(approvalId)
+    if (!approvalId) return
+    approvalTimerRef.current = window.setTimeout(() => {
+      if (approvalRef.current.id === approvalId) approvalRef.current = { id: null, card: null }
+      setApprovalShow((id) => (id === approvalId ? null : id))
+    }, APPROVAL_WAIT_MS)
+  }, [])
+  // The card asked for, when it is on the board in its final layout, not shown
+  // yet, and focus is free to go to it (on nothing, or in Needs you itself).
+  const wantedApprovalCard = useCallback((): HTMLElement | null => {
+    const { id, card } = approvalRef.current
+    const root = rootRef.current
+    if (!id || !root || card?.isConnected) return null
+    if (root.querySelector('[data-testid="board-skeleton"]')) return null
+    if (!focusIsFree()) return null
+    // Compared as data, not put into a selector: the id came from outside.
+    for (const el of root.querySelectorAll<HTMLElement>('[data-approval-id]')) {
+      if (el.dataset['approvalId'] === id) return el
+    }
+    return null
+  }, [])
+  const revealApprovalCard = useCallback((card: HTMLElement) => {
+    approvalRef.current = { ...approvalRef.current, card }
+    card.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    // Outlined while it holds the focus it was given (see globals.css): a focus
+    // from script need not show as `:focus-visible`.
+    card.setAttribute('data-revealed-focus', '')
+    card.addEventListener('focusout', () => card.removeAttribute('data-revealed-focus'), {
+      once: true,
+    })
+    card.focus({ preventScroll: true })
+  }, [])
+  useEffect(() => () => window.clearTimeout(approvalTimerRef.current), [])
+  // The person's own input on the board ends the wait: from then on, where focus
+  // goes is theirs.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const callOff = (): void => {
+      if (approvalRef.current.id) askForApproval(null)
+    }
+    const kinds = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const
+    for (const kind of kinds) root.addEventListener(kind, callOff, { capture: true, passive: true })
+    return () => {
+      for (const kind of kinds) root.removeEventListener(kind, callOff, { capture: true })
+    }
+  }, [askForApproval])
+
   // Compares a read with the one before it and marks the cards an agent put
   // somewhere new: a task the board had not seen, or one whose column changed. It
   // marks nothing on the first read, after the team or range changed, soon after
@@ -742,10 +824,22 @@ export function BoardPanel() {
     // `moving`: a smooth scroll is still on its way there.
     const done = (moving = false) => {
       pendingViewRef.current = null
-      if (want.needsYou)
-        el.querySelector<HTMLElement>('[data-testid="calendar-needs-you-today"]')?.focus({
-          preventScroll: true,
-        })
+      if (want.needsYou) {
+        const approval = want.approvalId ? wantedApprovalCard() : null
+        // Shown already, when the approvals poll drew the card before the view
+        // settled: focus stays on it.
+        const shown =
+          want.approvalId != null &&
+          approvalRef.current.id === want.approvalId &&
+          !!approvalRef.current.card?.isConnected
+        // For an approval, today's cell takes focus only when it is free: the
+        // person may have moved it on (to New task, say) while the board loaded.
+        if (approval) revealApprovalCard(approval)
+        else if (!shown && (want.approvalId == null || focusIsFree()))
+          el.querySelector<HTMLElement>('[data-testid="calendar-needs-you-today"]')?.focus({
+            preventScroll: true,
+          })
+      }
       if (want.pingAfterMs != null) pingToday(el, moving, want.pingAfterMs)
     }
     if (want.cardId) {
@@ -789,7 +883,7 @@ export function BoardPanel() {
       pingToday(el, moving, want.pingAfterMs)
       pendingViewRef.current = { ...want, pingAfterMs: undefined }
     }
-  }, [pingToday, flashCard])
+  }, [pingToday, flashCard, wantedApprovalCard, revealApprovalCard])
 
   // Today (the button, T, or a toast's "Go to today") pings today's date once its
   // row is in view. A range that does not hold today slides in first, and the
@@ -879,6 +973,7 @@ export function BoardPanel() {
   // calendar then shows the card's day, so closing the drawer lands on the card.
   useEffect(() => {
     if (!boardFocus) return
+    askForApproval(null)
     setTeamFilter((f) =>
       f !== 'all' && boardFocus.teamId && boardFocus.teamId !== f ? boardFocus.teamId : f,
     )
@@ -886,7 +981,7 @@ export function BoardPanel() {
     setRevealId(boardFocus.taskId)
     revealMissesRef.current = 0
     useViewStore.getState().clearBoardFocus()
-  }, [boardFocus])
+  }, [boardFocus, askForApproval])
 
   // A manually-created task: show it instantly (optimistic prepend) unless the
   // active team filter would exclude it, then reconcile against the server. The
@@ -1844,15 +1939,21 @@ export function BoardPanel() {
     if (runPopover && !runPopover.anchor.isConnected) setRunPopover(null)
   })
 
-  const revealNeedsYou = useCallback(() => {
-    // The All view keeps Needs you in its one row, at the top.
-    if (!rangeRef.current) {
-      requestView({ day: null, align: 'top', smooth: true, needsYou: true })
-      return
-    }
-    setFocusDay(startOfDay(Date.now()))
-    requestView({ day: Date.now(), align: 'nearest', smooth: true, needsYou: true })
-  }, [requestView])
+  // `approvalId`: an approval whose card takes focus once there, not today's cell.
+  const showNeedsYou = useCallback(
+    (approvalId?: string) => {
+      const approval = approvalId ? { approvalId } : {}
+      // The All view keeps Needs you in its one row, at the top.
+      if (!rangeRef.current) {
+        requestView({ day: null, align: 'top', smooth: true, needsYou: true, ...approval })
+        return
+      }
+      setFocusDay(startOfDay(Date.now()))
+      requestView({ day: Date.now(), align: 'nearest', smooth: true, needsYou: true, ...approval })
+    },
+    [requestView],
+  )
+  const revealNeedsYou = useCallback(() => showNeedsYou(), [showNeedsYou])
 
   // A browser alert about an approval, or about several things at once: show
   // Needs you, on the alert's team when the board is narrowed to another one,
@@ -1860,14 +1961,32 @@ export function BoardPanel() {
   const needsYouFocus = useViewStore((s) => s.boardNeedsYouFocus)
   useEffect(() => {
     if (!needsYouFocus) return
-    const { teamId } = needsYouFocus
+    const { teamId, approvalId } = needsYouFocus
     if (teamId === 'all') setTeamFilter('all')
     else if (teamId) setTeamFilter((f) => (f !== 'all' && f !== teamId ? teamId : f))
     setBoardFilter(NO_FILTER)
     setOpenTaskId(null)
-    revealNeedsYou()
+    askForApproval(approvalId ?? null)
+    showNeedsYou(approvalId ?? undefined)
     useViewStore.getState().clearBoardNeedsYouFocus()
-  }, [needsYouFocus, revealNeedsYou])
+  }, [needsYouFocus, showNeedsYou, askForApproval])
+
+  // The approval asked for, once its card is drawn in the final layout: the
+  // approvals have their own poll, which a fresh board has not read yet, and an
+  // empty board never settles a view request at all.
+  useEffect(() => {
+    if (!approvalShow) return
+    const card = wantedApprovalCard()
+    if (card) revealApprovalCard(card)
+  }, [
+    approvalShow,
+    needsYou.approvals,
+    loaded,
+    showCalendar,
+    teamFilter,
+    wantedApprovalCard,
+    revealApprovalCard,
+  ])
 
   // ── Since you last looked ──
   // Show steps through what changed, oldest first. Changes in Needs you are only
@@ -2240,6 +2359,7 @@ export function BoardPanel() {
                           // Today and All show every card in a cell, Needs you too.
                           cap={range && range.mode !== 'day' ? NEEDS_YOU_CAP : undefined}
                           show={needsYouShow}
+                          showApproval={approvalShow}
                         />
                       ),
                       onGoToday: revealNeedsYou,
@@ -2285,6 +2405,7 @@ export function BoardPanel() {
                     onOpenTask={openTask}
                     onTasksChanged={onTasksChanged}
                     loading={!loaded}
+                    showApproval={approvalShow}
                   />
                   {!loaded || waitingForRuns ? (
                     // Skeleton columns until the first fetch resolves (mirrors the

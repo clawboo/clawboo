@@ -85,7 +85,9 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
       defaultId: resolveBooZero(db)?.id ?? '',
       mainKey: (getSetting(db, 'agent-source:openclaw:mainKey') ?? '').trim() || 'main',
       agents: lists.flat(),
-      stale: health.connection !== 'connected',
+      // Not stale while nothing uses the Gateway: there are no OpenClaw agents to
+      // have gone out of date, and the source is not trying to connect.
+      stale: health.inUse !== false && health.connection !== 'connected',
       lastSyncedAt: health.lastSyncedAt,
       // Gateway ids of OpenClaw agents deleted here while the Gateway was down. A
       // browser that reads the Gateway's own list leaves these out until the
@@ -98,11 +100,24 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
 }
 
 // ─── GET /api/agents/registry/health ─────────────────────────────────────────
-// Always 200 — reports the server-side Gateway connection state. (Registered
-// BEFORE /api/agents/:agentId so ':agentId' doesn't swallow 'registry'.)
+// Always 200: reports the server-side Gateway connection state, with `inUse:
+// false` while nothing has needed the Gateway yet. (Registered BEFORE
+// /api/agents/:agentId so ':agentId' doesn't swallow 'registry'.)
 export async function agentsRegistryHealthGET(_req: Request, res: Response): Promise<void> {
   try {
     res.json(await getRegistry().source.health())
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/agents/registry/connect ───────────────────────────────────────
+// A person opened OpenClaw's views: the Gateway is needed, so the server connects
+// to it (and stays connected until it stops). Answers with the health once the
+// first attempt settles, or after a few seconds while a Gateway is still starting.
+export async function agentsRegistryConnectPOST(_req: Request, res: Response): Promise<void> {
+  try {
+    res.json(await getRegistry().source.markInUseAndWait('a person opened OpenClaw'))
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -217,6 +232,17 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
     rejectBlockedContent(res, scan, { agentId: null, teamId: body.teamId ?? null })
     return
   }
+  // An OpenClaw agent asked for is a need, so a Gateway set up that nothing used
+  // yet is connected now, waiting a few seconds for it. One already in use and
+  // down answers 503 at once, as before, and so does one never set up.
+  if (
+    source === reg.source &&
+    !reg.source.isConnected() &&
+    reg.source.isConfigured() &&
+    !reg.source.isInUse()
+  ) {
+    await reg.source.markInUseAndWait('an OpenClaw agent was asked for')
+  }
   try {
     const agent = await source.createAgent({
       name,
@@ -278,6 +304,11 @@ export async function agentsSyncPOST(req: Request, res: Response): Promise<void>
       })
       res.json({ result: { ...result, durationMs: 0, at: Date.now() } })
       return
+    }
+    // A sync asked for needs the Gateway, so a Gateway set up that nothing used
+    // yet is connected now, waiting a few seconds for it. 503 if it is not up.
+    if (!source.isConnected() && source.isConfigured() && !source.isInUse()) {
+      await source.markInUseAndWait('a sync was asked for')
     }
     const result = await source.sync()
     res.json({ result })

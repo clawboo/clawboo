@@ -12,7 +12,7 @@
 // These tests drive the real handler against a sandboxed state dir and read the
 // file back, because the bug was never in the intent, only in the key written.
 
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -81,6 +81,12 @@ describe('PATCH /api/openclaw/config: agent roster shape', () => {
       else process.env[k] = v
     }
     rmSync(home, { recursive: true, force: true })
+  })
+
+  it('never opens the database (a held file would keep the cleanup from deleting it on Windows)', async () => {
+    writeConfig({ ownership: 'explicit', entries: { main: {} } })
+    await patchModel('main', 'openrouter/some/model')
+    expect(existsSync(path.join(home, 'clawboo.db'))).toBe(false)
   })
 
   it('writes the override under agents.entries, keyed by id', async () => {

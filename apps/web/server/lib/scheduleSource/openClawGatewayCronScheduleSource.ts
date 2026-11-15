@@ -21,6 +21,7 @@
 import {
   InvalidRoutineTargetError,
   SCHEDULE_SOURCE_NOT_CONFIGURED as NOT_CONFIGURED_REASON,
+  SCHEDULE_SOURCE_NOT_IN_USE as NOT_IN_USE_REASON,
   ScheduleSourceUnavailableError,
   TeamTaskDomainViolationError,
   UnknownScheduleError,
@@ -74,6 +75,9 @@ export interface OperatorCronClientLike {
   isConnected(): boolean
   /** False when settings name no Gateway at all. Absent = assume one is configured. */
   isConfigured?(): boolean
+  /** False while nothing has needed the Gateway, so the server has not connected
+   *  (it connects on demand). Absent = assume it is in use. */
+  isInUse?(): boolean
   operatorCall<T>(method: string, params?: unknown): Promise<T>
   onGatewayBroadcast(cb: (frame: { event: string; payload?: unknown }) => void): () => void
 }
@@ -172,18 +176,23 @@ export class OpenClawGatewayCronScheduleSource implements ScheduleSource {
       // reason says so: a reader deciding when to wake this engine counts this
       // source as not in use rather than unreadable.
       const notConfigured = this.client.isConfigured?.() === false
+      // Set up and not used yet: nothing has been read, and reading would mean
+      // connecting, so the source is not in use rather than disconnected.
+      const notInUse = !notConfigured && this.client.isInUse?.() === false
       return {
         // A list from a Gateway that is no longer set up is no one's jobs.
-        records: notConfigured ? [] : (this.cache ?? []),
+        records: notConfigured || notInUse ? [] : (this.cache ?? []),
         status: {
           sourceId: this.id,
           ok: false,
           degraded: true,
           reason: notConfigured
             ? NOT_CONFIGURED_REASON
-            : this.cache
-              ? 'stale_cache'
-              : 'gateway_disconnected',
+            : notInUse
+              ? NOT_IN_USE_REASON
+              : this.cache
+                ? 'stale_cache'
+                : 'gateway_disconnected',
           at,
         },
       }

@@ -290,7 +290,9 @@ export function CapabilitiesPanel() {
     }))
   }, [records])
 
-  const degraded = sources.filter((s) => !s.ok)
+  // A source that is not ok but not degraded either is one nothing uses yet (an
+  // OpenClaw Gateway the server has not needed): not a fault worth a warning.
+  const degraded = sources.filter((s) => !s.ok && s.degraded)
   const visibleGroups = runtimeFilter ? groups.filter((g) => g.runtime === runtimeFilter) : groups
 
   return (

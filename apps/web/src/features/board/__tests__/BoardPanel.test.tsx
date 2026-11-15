@@ -2,9 +2,12 @@
 // re-fetch (driven by hand: `pollBoard()`). msw's onUnhandledRequest:'error' keeps
 // the test honest about which endpoints are hit.
 
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import fs from 'node:fs'
+import path from 'node:path'
+
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { resetInboxStore, useInboxStore } from '@/features/inbox/inboxStore'
@@ -1199,6 +1202,201 @@ describe('BoardPanel', () => {
     await waitFor(() => expect(reads).toContain('?teamId=team-a'))
     expect(screen.getByLabelText('Filter by team')).toHaveTextContent('Alpha')
     expect(useViewStore.getState().boardNeedsYouFocus).toBeNull()
+  })
+
+  // A notification deep link from an app that shows the dashboard: one approval.
+  // Its card shows once the approvals poll has it, then takes focus and an
+  // outline, also when it sits behind the calendar cell's "+N more".
+  describe('an approval a notification asked for', () => {
+    const approval = (id: string, createdAt: number) => ({
+      id,
+      toolName: 'send_email',
+      agentId: null,
+      argsSummary: '{"to":"a@example.com"}',
+      reason: 'sends',
+      createdAt,
+      expiresAt: Date.now() + 60_000,
+    })
+
+    it('takes focus on an empty board, where only the Needs you lane shows', async () => {
+      server.use(
+        http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({ approvals: [approval('ap-1', 1000), approval('ap-2', 2000)] }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-2')
+      render(<BoardPanel />)
+      await waitFor(() => {
+        const card = document.querySelector('[data-approval-id="ap-2"]')
+        expect(card).not.toBeNull()
+        expect(document.activeElement).toBe(card)
+      })
+      // Outlined while it keeps the focus it was given, and not after.
+      const card = document.querySelector<HTMLElement>('[data-approval-id="ap-2"]')!
+      expect(card).toHaveAttribute('data-revealed-focus')
+      expect(document.querySelector('[data-approval-id="ap-1"]')).not.toHaveAttribute(
+        'data-revealed-focus',
+      )
+      act(() =>
+        within(screen.getByTestId('board-header'))
+          .getByRole('button', { name: 'New task' })
+          .focus(),
+      )
+      expect(card).not.toHaveAttribute('data-revealed-focus')
+      expect(useViewStore.getState().boardNeedsYouFocus).toBeNull()
+    })
+
+    // A focus from script need not match `:focus-visible`, and `:focus` turns
+    // outlines off; jsdom loads no stylesheet, so the rule is read from the file.
+    it('keeps an outline on the focused card that does not hang on :focus-visible', () => {
+      const css = fs.readFileSync(path.resolve(__dirname, '../../../app/globals.css'), 'utf8')
+      const rule = /\[data-revealed-focus\]:focus\s*\{([^}]*)\}/.exec(css)
+      expect(rule?.[1]).toMatch(/outline:\s*2px solid var\(--primary\)/)
+    })
+
+    it("leaves the board's own next request to focus today's cell", async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({ tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }] }),
+        ),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({ approvals: [approval('ap-1', 1000)] }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      await waitFor(() =>
+        expect(document.activeElement).toBe(document.querySelector('[data-approval-id="ap-1"]')),
+      )
+      act(() => useViewStore.getState().openBoardNeedsYou(null))
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByTestId('calendar-needs-you-today')),
+      )
+    })
+
+    // The board's own read is slower than the approvals' here, so the card is first
+    // drawn in the lane shown while the board loads, which the calendar replaces.
+    it("opens today's +N more when the card is behind it, once the calendar is up", async () => {
+      server.use(
+        http.get('/api/board', async () => {
+          await delay(300)
+          return HttpResponse.json({
+            tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }],
+          })
+        }),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({
+            approvals: [1, 2, 3, 4, 5].map((n) => approval(`ap-${n}`, n * 1000)),
+          }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-5')
+      render(<BoardPanel />)
+      await waitFor(() => {
+        const card = document.querySelector('[data-approval-id="ap-5"]')
+        expect(card).not.toBeNull()
+        expect(document.activeElement).toBe(card)
+      })
+      expect(document.activeElement?.closest('[data-testid="board-calendar"]')).not.toBeNull()
+    })
+
+    it('never takes focus from something else the person is in', async () => {
+      server.use(
+        http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+        http.get('/api/tools/approvals', async () => {
+          await delay(300)
+          return HttpResponse.json({ approvals: [approval('ap-1', 1000)] })
+        }),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      const newTask = await screen.findByRole('button', { name: 'New task' })
+      act(() => newTask.focus())
+      await waitFor(() =>
+        expect(document.querySelector('[data-approval-id="ap-1"]')).not.toBeNull(),
+      )
+      await act(() => new Promise((r) => setTimeout(r, 50)))
+      expect(document.activeElement).toBe(newTask)
+    })
+
+    it('stops waiting once the person acts on the board', async () => {
+      server.use(
+        http.get('/api/board', () => HttpResponse.json({ tasks: [] })),
+        http.get('/api/tools/approvals', async () => {
+          await delay(300)
+          return HttpResponse.json({ approvals: [approval('ap-1', 1000)] })
+        }),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      fireEvent.pointerDown(await screen.findByTestId('board-header'))
+      await waitFor(() =>
+        expect(document.querySelector('[data-approval-id="ap-1"]')).not.toBeNull(),
+      )
+      await act(() => new Promise((r) => setTimeout(r, 50)))
+      const card = document.querySelector('[data-approval-id="ap-1"]')
+      expect(document.activeElement).not.toBe(card)
+      expect(card).not.toHaveAttribute('data-revealed-focus')
+    })
+
+    // The person moves focus on while a dated board is still loading: neither the
+    // card nor today's cell takes it back once the calendar is up.
+    it('keeps focus where the person put it while a dated board loads', async () => {
+      server.use(
+        http.get('/api/board', async () => {
+          await delay(300)
+          return HttpResponse.json({
+            tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }],
+          })
+        }),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({ approvals: [approval('ap-1', 1000)] }),
+        ),
+      )
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-1')
+      render(<BoardPanel />)
+      const newTask = await screen.findByRole('button', { name: 'New task' })
+      act(() => newTask.focus())
+      await screen.findByTestId('board-calendar')
+      await waitFor(() =>
+        expect(
+          screen.getByTestId('board-calendar').querySelector('[data-approval-id="ap-1"]'),
+        ).not.toBeNull(),
+      )
+      await act(() => new Promise((r) => setTimeout(r, 50)))
+      expect(document.activeElement).toBe(newTask)
+    })
+
+    it('opens +N more again for a second request after Show less', async () => {
+      server.use(
+        http.get('/api/board', () =>
+          HttpResponse.json({ tasks: [{ id: 't1', title: 'Wire the widget', status: 'todo' }] }),
+        ),
+        http.get('/api/tools/approvals', () =>
+          HttpResponse.json({
+            approvals: [1, 2, 3, 4, 5].map((n) => approval(`ap-${n}`, n * 1000)),
+          }),
+        ),
+      )
+      const user = userEvent.setup()
+      useViewStore.getState().openBoardNeedsYou('all', 'ap-5')
+      render(<BoardPanel />)
+      await waitFor(() =>
+        expect(document.activeElement).toBe(document.querySelector('[data-approval-id="ap-5"]')),
+      )
+      // Show less is the person's own act: it ends the request, and the card goes
+      // back behind the cap.
+      await user.click(screen.getByRole('button', { name: 'Show less' }))
+      await waitFor(() => expect(document.querySelector('[data-approval-id="ap-5"]')).toBeNull())
+
+      act(() => useViewStore.getState().openBoardNeedsYou('all', 'ap-5'))
+      await waitFor(() => {
+        const card = document.querySelector('[data-approval-id="ap-5"]')
+        expect(card).not.toBeNull()
+        expect(document.activeElement).toBe(card)
+      })
+    })
   })
 
   it('offers browser alerts once there is work on the board', async () => {

@@ -246,6 +246,47 @@ A computer or service manager can stop Clawboo when it is idle and start it agai
 - **It says when it is idle.** `GET /api/system/idle` answers whether a person is at a dashboard (counted from the dashboard's presence beat, never from its polling) or has taken over an agent's screen, whether an agent run is going, and when the next routine or OpenClaw cron job is due. A stop script stops it once nobody has been there and nothing has run for a few minutes, after a [drain](/reference/rest-api/system#drain-and-hold), and starts it again a minute before the next due time. See [Sleep and wake](/reference/rest-api/system#sleep-and-wake).
 - **It starts quickly.** The startup checks run SQLite's quick integrity check in a background thread, so the server answers while they read the database; the full check runs the same way once a day, and on **Re-run probe** in **System Health**. Right after a start, `/api/health` answers once those checks finish, while other routes, `/api/system/idle` among them, answer at once. Node keeps its compiled copy of the server between starts (see [Start the server directly](#start-the-server-directly)).
 - **It catches up once.** A routine whose time passed while Clawboo was stopped runs once when it starts again; missed times are not made up. A due OpenClaw routine waits up to 5 minutes for the Gateway to connect rather than failing on it, and while it waits it counts as work, so the server is not stopped in the middle of the wait.
+- **It leaves an unused OpenClaw Gateway asleep.** Clawboo connects to the OpenClaw Gateway only once something needs it: an OpenClaw agent, opening OpenClaw in **Settings** > **Runtimes**, or a routine for an OpenClaw agent falling due. Until then neither the server, the dashboard nor `clawboo` connects to the Gateway or probes its port, so a Gateway that a service manager starts on its first connection, such as a systemd socket unit, does not start at every boot. See [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects).
+
+## Start it from your own app
+
+An app can run the server as a child process of its own and show the dashboard in its own window. Start `dist/server.js` with an IPC channel: Node's `fork()`, or `spawn()` with `'ipc'` in its `stdio`.
+
+### Stop it over the channel
+
+- **With a message.** Send `{ "type": "shutdown" }` on the channel. The server stops as it does on Ctrl+C or SIGTERM: it stops the agent processes it started, waits up to 5 seconds for them, closes the database and exits with code `0`. This works on every platform, and on Windows it is the only clean stop, because a signal from another process ends the server at once there. To let the agent runs finish first, [drain](/reference/rest-api/system#drain-and-hold) before you send it.
+- **When the channel closes.** Set `CLAWBOO_STOP_ON_DISCONNECT=1` in the server's environment, and it also stops this way when the channel closes: your app quit, crashed or called `disconnect()`. Without it, the server keeps running when the channel closes. The `clawboo` launcher relies on that: it starts the server with `fork()`, lets go of the channel and exits.
+- A shutdown message sent while the server is still starting is kept, and the server stops once it has started. A server that fails to start exits with code `1`, whether or not your app still holds the channel. Once it is running, asking more than one way (the message, then a SIGTERM) stops it once. Other messages are ignored.
+- **Turn off the in-app update** with `CLAWBOO_DISABLE_SELF_UPDATE=1`, and update the server with your app instead. The in-app update replaces the server with a new process your app did not start: it has no channel, so your app can neither stop it over one nor have it stop with the app.
+
+The server reads `CLAWBOO_STOP_ON_DISCONNECT` once and removes it from its environment, so the agents and programs it starts do not inherit it, and the launcher never passes it to a server it starts.
+
+### Open the dashboard from a notification
+
+An app that raises its own notifications can send the person from one to what it is about. Give the dashboard's page this object, from a preload script for example:
+
+```ts
+window.clawbooDesktop = {
+  isDesktop: true,
+  // Call `listener` with a target each time the person clicks a notification.
+  // Deliver a click made before the dashboard subscribed once, when it does.
+  onOpenTarget(listener) {
+    /* ... */
+    return () => {} // unsubscribe
+  },
+}
+```
+
+The dashboard subscribes once, when it loads, and opens:
+
+| Target                                      | What opens                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `{ "kind": "task", "taskId": "…" }`         | The task's drawer on the board, on the task's team                                                                                                                                                                                                                                                                                         |
+| `{ "kind": "needs-you" }`                   | **Needs you** on the board, for every team                                                                                                                                                                                                                                                                                                 |
+| `{ "kind": "approval", "approvalId": "…" }` | **Needs you**, with that approval's card brought into view and given focus, outlined until focus moves on. A board narrowed to another team switches to the asking agent's team, or to every team for an agent outside one. When the approval has already been answered or has expired: **Needs you** for every team, and a note saying so |
+| `{ "kind": "approvals" }`                   | **Needs you** for every team, where approvals are listed first                                                                                                                                                                                                                                                                             |
+
+Approvals have no page of their own: they are answered under **Needs you** and in the agents' chats, so both approval targets open **Needs you**, as the dashboard's own browser alerts do. Approval ids are the ones `GET /api/tools/approvals?status=pending` lists. A target of any other kind is ignored. While the object is there, the dashboard's [browser alerts](/using/board#get-an-alert-outside-the-tab) stay off, since your app raises its own.
 
 ## Check that it is running
 

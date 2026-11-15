@@ -40,7 +40,8 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
     }
   }, [])
 
-  if (isConnected || !systemInfo) return null
+  // A Gateway nothing uses is asleep on purpose, not offline.
+  if (isConnected || !systemInfo || systemInfo.gateway.inUse === false) return null
 
   const handleStartGateway = () => {
     setStartingGw(true)
@@ -115,6 +116,54 @@ function SystemHint({ isConnected }: { isConnected: boolean }) {
   return (
     <div className="mt-2 text-[11px] leading-relaxed text-[rgba(30,37,64,0.62)]">
       Gateway is running. Connecting...
+    </div>
+  )
+}
+
+// ─── An OpenClaw nothing uses yet ────────────────────────────────────────────
+
+/**
+ * OpenClaw is set up on this computer and nothing has needed its Gateway, so
+ * Clawboo has not connected to it (it connects on demand) and none of its
+ * agents are here yet: on a new Clawboo next to an OpenClaw already in use, an
+ * empty dashboard would otherwise look like they were lost. Opening OpenClaw in
+ * Runtimes is what connects and brings them in.
+ */
+function OpenClawNotInUseHint({ isConnected }: { isConnected: boolean }) {
+  const [show, setShow] = useState(false)
+
+  useEffect(() => {
+    if (!isConnected) return
+    let cancelled = false
+    apiFetch('/api/system/status')
+      .then((r) => (r.ok ? (r.json() as Promise<SystemInfo>) : null))
+      .then((info) => {
+        if (cancelled || !info) return
+        setShow(
+          info.openclaw.installed && info.openclaw.configExists && info.gateway.inUse === false,
+        )
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [isConnected])
+
+  if (!show) return null
+  return (
+    <div
+      className="mt-2 text-[11px] leading-relaxed text-[rgba(30,37,64,0.62)]"
+      data-testid="welcome-openclaw-hint"
+    >
+      OpenClaw is set up on this computer. Open it to bring in its agents.{' '}
+      <button
+        onClick={() =>
+          useSettingsModalStore.getState().openSettings('runtimes', { focusRuntime: 'openclaw' })
+        }
+        className="cursor-pointer border-none bg-transparent p-0 text-[11px] font-semibold text-[rgb(30,37,64)] underline underline-offset-2"
+      >
+        Open OpenClaw
+      </button>
     </div>
   )
 }
@@ -209,6 +258,7 @@ export function WelcomeState() {
         </p>
 
         <SystemHint isConnected={isConnected} />
+        <OpenClawNotInUseHint isConnected={isConnected} />
       </motion.div>
 
       {/* Quick-start steps */}

@@ -84,6 +84,7 @@ import {
   agentsCleanupPOST,
   agentMovePOST,
   agentsListGET,
+  agentsRegistryConnectPOST,
   agentsRegistryHealthGET,
   agentsCreatePOST,
   agentsSyncPOST,
@@ -440,6 +441,7 @@ router.get('/api/agents', agentsListGET)
 router.post('/api/agents', agentsCreatePOST)
 router.post('/api/agents/sync', agentsSyncPOST)
 router.get('/api/agents/registry/health', agentsRegistryHealthGET)
+router.post('/api/agents/registry/connect', agentsRegistryConnectPOST)
 router.post('/api/agents/cleanup-ghosts', agentsCleanupPOST)
 router.get('/api/agents/:agentId', agentGET)
 router.patch('/api/agents/:agentId/model', agentModelPATCH)
