@@ -9,6 +9,8 @@ These routes manage agents (each one appears as a Boo in the dashboard). SQLite 
 
 The agent list and single-agent reads serve SQLite, so they answer with the Gateway down (the list then reports `stale: true`). For an OpenClaw agent, creating it, a sync without a body, reading or writing its files, and listing its sessions need the Gateway, and answer `503 { "error": "gateway_disconnected" }` without it. Agents on the other runtimes need no Gateway.
 
+The server connects to the Gateway only once something needs it (see [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects)). Until then `GET /api/agents/registry/health` reports `inUse: false` and the list reports `stale: false`. With a Gateway set up that nothing used yet, asking to create an OpenClaw agent, or for a sync without a body, is itself a need: the server starts connecting and the request waits up to about 5 seconds for it, then answers `503` if the connection is still not up. A retry a few seconds later lands. With no Gateway set up, or one already in use and down, these answer `503` at once.
+
 <Note>
 
 These routes return Clawboo's `AgentRecord` shape, not OpenClaw protocol shapes. See [Agent model](/concepts/agent-model) for the concept and [Agent sources](/internals/agent-source) for how the Gateway is synced in.
@@ -25,6 +27,7 @@ A per-agent route goes to the source that owns the agent; an unknown id goes to 
 | POST   | `/api/agents`                             | Create an agent through its source                            | No      |
 | POST   | `/api/agents/sync`                        | Sync OpenClaw agents into SQLite (server-side or from a list) | No      |
 | GET    | `/api/agents/registry/health`             | The server's OpenClaw Gateway connection state                | No      |
+| POST   | `/api/agents/registry/connect`            | Connect to the OpenClaw Gateway now (it is needed)            | No      |
 | POST   | `/api/agents/cleanup-ghosts`              | Delete local OpenClaw rows the Gateway no longer has          | No      |
 | GET    | `/api/agents/:agentId`                    | One agent record                                              | No      |
 | DELETE | `/api/agents/:agentId`                    | Delete an agent and its local rows                            | No      |
@@ -106,7 +109,8 @@ Lists the agents of all five sources from SQLite, so the list answers even when 
   defaultId: string   // the runtime-neutral Boo Zero (resolveBooZero); '' if unset
   mainKey: string     // OpenClaw main session key; 'main' if unset
   agents: AgentRecord[]
-  stale: boolean      // true when the server-side OpenClaw connection !== 'connected'
+  stale: boolean      // true when the server-side OpenClaw connection !== 'connected',
+                      // except while nothing uses the Gateway (inUse: false)
   lastSyncedAt: number | null
   pendingDeleteIds: string[] // Gateway ids of OpenClaw agents deleted while the Gateway was down
 }
@@ -191,7 +195,7 @@ Side effects of a successful create:
 { "error": "unknown sourceId '<sourceId>'" }
 ```
 
-**`503 Service Unavailable`**: an OpenClaw create while the Gateway connection is down:
+**`503 Service Unavailable`**: an OpenClaw create while the Gateway connection is down, or not up yet (the create starts it, so a retry can land):
 
 ```json
 { "error": "gateway_disconnected" }
@@ -256,7 +260,7 @@ Without an `agents` array the body is ignored and the server syncs from the Gate
 
 `archived` counts agents present in SQLite but gone upstream (their `archivedAt` is set; the tombstone is reversible and cleared if the agent reappears).
 
-**`503 Service Unavailable`**: a sync without a list while the Gateway connection is down:
+**`503 Service Unavailable`**: a sync without a list while the Gateway connection is down, or not up yet (the sync starts it, so a retry can land):
 
 ```json
 { "error": "gateway_disconnected" }
@@ -299,9 +303,13 @@ Reports the state of the server's own OpenClaw Gateway connection. It answers **
   ok: boolean
   connection: 'connected' | 'connecting' | 'reconnecting' | 'disconnected'
   lastSyncedAt: number | null
-  message?: string
+  inUse: boolean      // false while nothing has needed the Gateway
+  configured: boolean // a Gateway is set up: settings name one, or openclaw.json exists
+  message?: string    // 'not in use' while inUse is false
 }
 ```
+
+`inUse: false` with `connection: 'disconnected'` means the server has not tried to connect, because nothing needs the Gateway yet: read it as "not in use", not as "unreachable". It turns `true` once something needs the Gateway (an OpenClaw agent exists, or a delete of one is owed to a Gateway still set up, a person opens OpenClaw's views, a routine for an OpenClaw agent falls due) and stays `true` until the server stops. A read that finds an OpenClaw agent created since the last one turns it `true` and starts the connection.
 
 **`500 Internal Server Error`**: a failure reading health:
 
@@ -313,6 +321,33 @@ Reports the state of the server's own OpenClaw Gateway connection. It answers **
 
 ```bash
 curl http://localhost:18790/api/agents/registry/health
+```
+
+---
+
+## `POST /api/agents/registry/connect`
+
+Something needs the OpenClaw Gateway now: the server connects to it, and stays connected (retrying as usual) until it stops. The dashboard sends it when a person opens OpenClaw's row in **Settings** > **Runtimes**. It does not count as a person acting for [`GET /api/system/idle`](/reference/rest-api/system#sleep-and-wake).
+
+The server answers once its first connect attempt settles, or after about five seconds while a Gateway is still starting, so `connection` may still be `connecting`. Read `GET /api/agents/registry/health` again for the outcome. Sending it again changes nothing.
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: the health, as in `GET /api/agents/registry/health`, with `inUse: true`.
+
+**`500 Internal Server Error`**: any failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/agents/registry/connect
 ```
 
 ---

@@ -17,7 +17,7 @@ import {
   createOriginGuard,
   isRuntimeControlRequest,
 } from '@clawboo/gateway-proxy'
-import { loadSettings, resolveBasePath } from '@clawboo/config'
+import { resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
   listAgentsWithUndeliveredInbox,
@@ -93,7 +93,7 @@ import { startTask } from './lib/startBoardTask'
 import { jsonBodyErrors } from './lib/jsonBodyErrors'
 import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
-import { getRegistry } from './lib/agentSource'
+import { gatewayProxyUpstreamSettings, getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
 import { startHermesAtBoot } from './lib/runtimes/hermes'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
@@ -446,10 +446,8 @@ async function main() {
   // ── Gateway proxy ─────────────────────────────────────────────────────────
 
   const proxy = createGatewayProxy({
-    loadUpstreamSettings: async () => {
-      const settings = loadSettings(process.env)
-      return { url: settings.gatewayUrl, token: settings.gatewayToken }
-    },
+    // Opening the proxy is a need: the server connects to the Gateway beside it.
+    loadUpstreamSettings: async () => gatewayProxyUpstreamSettings(),
     allowWs: (req) => {
       if (!isGatewayWsPath(resolvePathname(req.url), basePath)) return false
       // Same-origin guard first (CSWSH), then the optional token gate.
@@ -1069,9 +1067,12 @@ async function main() {
   })
 
   // ── Agent registry (AgentSource) ────────────────────────────────────────────
-  // Open the server-side Gateway connection + sync the OpenClaw agents INTO
-  // SQLite (the registry-of-record). Best-effort: gated on settings being present,
-  // retries with backoff, degrades to SQLite-only reads when the Gateway is down.
+  // Start the sources. The OpenClaw one opens its Gateway connection now only when
+  // an OpenClaw agent exists; otherwise it waits until something needs the Gateway
+  // (see "On demand" in openClawAgentSource.ts), so a Gateway started on its first
+  // connection stays asleep. Once connected it syncs the OpenClaw agents INTO
+  // SQLite (the registry-of-record), retries with backoff, and degrades to
+  // SQLite-only reads when the Gateway is down.
   void getRegistry()
     // Pass the resolved server base URL so the source can register clawboo's
     // shared Memory/Tasks MCP servers in the Gateway config after connect.

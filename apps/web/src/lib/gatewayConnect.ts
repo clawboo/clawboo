@@ -39,11 +39,19 @@ export async function connectGatewayFromSettings(): Promise<{
   }
 
   const client = new GatewayClient()
-  await client.connect(resolveProxyGatewayUrl(), {
-    clientName: GATEWAY_BROWSER_CLIENT_ID,
-    clientVersion: '0.1.0',
-    disableDeviceAuth: true,
-  })
+  // A failed connect also arms the client's own reconnect loop, and nobody else
+  // holds this client to stop it: it would redial the proxy for good, each try a
+  // failed sign-in towards the Gateway's lockout.
+  try {
+    await client.connect(resolveProxyGatewayUrl(), {
+      clientName: GATEWAY_BROWSER_CLIENT_ID,
+      clientVersion: '0.1.0',
+      disableDeviceAuth: true,
+    })
+  } catch (err) {
+    client.disconnect()
+    throw err
+  }
 
   return { client, gatewayUrl }
 }

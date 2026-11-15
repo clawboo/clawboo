@@ -1,4 +1,4 @@
-export { getRegistry } from './registry'
+export { gatewayProxyUpstreamSettings, getRegistry } from './registry'
 export {
   OpenClawAgentSource,
   type OpenClawAgentSourceDeps,

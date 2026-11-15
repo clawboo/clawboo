@@ -36,6 +36,10 @@ export interface OpenClawInfo {
 
 export interface GatewayInfo {
   running: boolean
+  /** False while nothing has needed the Gateway. The server then neither probes
+   *  its port nor connects (it connects on demand), so `running` is only what
+   *  Clawboo's own pid file says, and the dashboard does not connect either. */
+  inUse?: boolean
   port: number
   pid: number | null
   managedByClawboo: boolean

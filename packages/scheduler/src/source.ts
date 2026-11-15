@@ -73,6 +73,15 @@ export interface ScheduleSourceReadStatus {
  */
 export const SCHEDULE_SOURCE_NOT_CONFIGURED = 'not_configured'
 
+/**
+ * The `reason` a source gives when the system it reads is set up but nothing in
+ * this install uses it yet, so it has not been connected to (an OpenClaw Gateway
+ * that the server connects to on demand). Like SCHEDULE_SOURCE_NOT_CONFIGURED, a
+ * reader treats the source as not in use: reading it would mean connecting, and
+ * connecting would start a Gateway that starts on its first connection.
+ */
+export const SCHEDULE_SOURCE_NOT_IN_USE = 'not_in_use'
+
 export interface ScheduleReadResult {
   records: ScheduleRecord[]
   status: ScheduleSourceReadStatus

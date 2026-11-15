@@ -208,6 +208,50 @@ describe('a due OpenClaw routine waits for the Gateway', () => {
     expect((await noGateway.ticker.tick()).fired).toBe(2)
   })
 
+  it('a due OpenClaw routine is a need: the ticker has the server connect to the Gateway', async () => {
+    // The server connects on demand, so a Gateway nothing used before has no
+    // connection coming up for this wait to end on. The wait must ask for one.
+    insertAgent('oc', 'openclaw')
+    insertAgent('native', 'clawboo-native')
+    register({ agentId: 'native', teamId: null, nextRunAt: MON_9AM })
+    const state = { configured: true, connected: false }
+    const markInUse = vi.fn()
+    const { ticker } = makeTicker({
+      now: () => MON_9AM + HOUR,
+      gateway: { ...gateway(state), markInUse },
+    })
+
+    // A native routine alone asks for nothing.
+    expect((await ticker.tick()).fired).toBe(1)
+    expect(markInUse).not.toHaveBeenCalled()
+
+    const oc = register({ agentId: 'oc', teamId: null, nextRunAt: MON_9AM })
+    expect((await ticker.tick()).fired).toBe(0)
+    expect(markInUse).toHaveBeenCalled()
+    expect(getScheduledRun(db, oc.id)?.status).toBe('queued')
+
+    // The connection it asked for ends the wait.
+    state.connected = true
+    expect((await ticker.tick()).fired).toBe(1)
+  })
+
+  it('reading what is due never asks for the Gateway', () => {
+    // The idle read (GET /api/system/idle) is polled by a host deciding whether
+    // to stop the server. A read that connected would wake the Gateway for it.
+    insertAgent('oc', 'openclaw')
+    const run = register({ agentId: 'oc', teamId: null, nextRunAt: MON_9AM })
+    expect(queueRunNow(db, run.id, MON_9AM)).toBe(true)
+    const markInUse = vi.fn()
+    const due = routinesDue(db, MON_9AM + HOUR, {
+      configured: () => true,
+      connected: () => false,
+      markInUse,
+    })
+    // Waiting for the Gateway: counted as under way, and nothing asked for.
+    expect(due.inFlight).toBe(1)
+    expect(markInUse).not.toHaveBeenCalled()
+  })
+
   it('a native routine fires while an OpenClaw one waits', async () => {
     insertAgent('oc', 'openclaw')
     insertAgent('native', 'clawboo-native')

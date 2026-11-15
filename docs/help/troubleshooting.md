@@ -177,14 +177,6 @@ When the data folder is inside the work folder, the message reads `Clawboo's dat
 
 </Accordion>
 
-<Accordion title="No Gateway detected">
-
-**What it means:** this line is information only. On every start, `clawboo` checks whether an OpenClaw Gateway answers on its default port, 18789.
-
-**Fix:** nothing to fix. You need a Gateway only for OpenClaw agents; see [OpenClaw](/runtimes/openclaw).
-
-</Accordion>
-
 <Accordion title="Work folder: could not be created">
 
 **What it means:** `CLAWBOO_WORK_DIR` is not set, and Clawboo could not create the default work folder, for example in a container whose data folder is a volume under a root-owned `/`. Clawboo keeps the old layout: new team folders and checkouts stay in the data folder, and nothing moves.
@@ -330,6 +322,12 @@ Clawboo checks a key before it saves one, with a single request to the provider'
 **What it means:** the OpenClaw Gateway stopped, or Clawboo cannot reach it ("OpenClaw Gateway is unreachable"). Your OpenClaw agents are paused; agents on other runtimes keep working.
 
 **Fix:** click **Reconnect** on the banner, or **Reconnect OpenClaw** in **Settings > Runtimes**. If the banner offers **Restart Gateway** instead, the Gateway turned down Clawboo's token, which it reads only when it starts; click it.
+
+### OpenClaw reads Not in use
+
+**What it means:** OpenClaw is set up, and nothing has needed its Gateway since Clawboo started: no OpenClaw agent, no routine for one, and nobody opened OpenClaw in **Settings > Runtimes**. Clawboo has not tried to connect, so a Gateway that starts on its first connection stays asleep. Nothing is wrong.
+
+**Fix:** none needed. To use OpenClaw, open its row in **Settings > Runtimes**, or click **Open OpenClaw** on the welcome screen; Clawboo connects then and brings in its agents. See [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects).
 
 ### Could not reach your OpenClaw agents
 

@@ -1,9 +1,11 @@
-// What GET /api/system/status says about the Node it runs on.
+// What GET /api/system/status says about the Node it runs on, and about the
+// Gateway while nothing uses it.
 //
 // The SPA prints `node.required` and decides on `node.sufficient`, so both must
 // come from @clawboo/protocol's OpenClaw range, never from a major-version
-// check. OpenClaw detection and the Gateway probe are stubbed, and the state
-// dir is a fresh temp dir, so nothing here touches a real install.
+// check. OpenClaw detection, the Gateway probe and the agent registry are
+// stubbed, and the state dir is a fresh temp dir, so nothing here touches a real
+// install or its database.
 
 import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
@@ -21,10 +23,23 @@ vi.mock('../../lib/openclawDetect', async (orig) => ({
   detectOpenClaw: async () => ({ installed: false, version: null, path: null }),
 }))
 
+const probe = vi.hoisted(() => ({
+  inUse: true,
+  reachable: false,
+  calls: 0,
+}))
+
 vi.mock('../../lib/processManager', async (orig) => ({
   ...(await orig<typeof import('../../lib/processManager')>()),
   readGatewayPid: () => null,
-  probeGatewayPort: async () => false,
+  probeGatewayPort: async () => {
+    probe.calls += 1
+    return probe.reachable
+  },
+}))
+
+vi.mock('../../lib/agentSource', () => ({
+  getRegistry: () => ({ source: { isInUse: () => probe.inUse } }),
 }))
 
 function mockRes(): { res: Response; status: () => number; body: () => unknown } {
@@ -74,5 +89,41 @@ describe('GET /api/system/status: node', () => {
     expect(body()).toMatchObject({
       node: { version, sufficient, required: OPENCLAW_NODE_REQUIREMENT },
     })
+  })
+})
+
+describe('GET /api/system/status: a Gateway nothing uses', () => {
+  const savedStateDir = process.env['OPENCLAW_STATE_DIR']
+  let stateDir: string
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-system-status-'))
+    process.env['OPENCLAW_STATE_DIR'] = stateDir
+    probe.inUse = true
+    probe.reachable = true
+    probe.calls = 0
+  })
+
+  afterEach(() => {
+    if (savedStateDir === undefined) delete process.env['OPENCLAW_STATE_DIR']
+    else process.env['OPENCLAW_STATE_DIR'] = savedStateDir
+    rmSync(stateDir, { recursive: true, force: true })
+  })
+
+  it('does not probe the port, and says not in use', async () => {
+    // A probe is a connection, and a connection starts a Gateway that a service
+    // manager starts on its first one. The dashboard reads this on every load.
+    probe.inUse = false
+    const { res, body } = mockRes()
+    await systemStatusGET({} as Request, res)
+    expect(probe.calls).toBe(0)
+    expect(body()).toMatchObject({ gateway: { inUse: false, running: false } })
+  })
+
+  it('probes the port once something uses the Gateway', async () => {
+    const { res, body } = mockRes()
+    await systemStatusGET({} as Request, res)
+    expect(probe.calls).toBe(1)
+    expect(body()).toMatchObject({ gateway: { inUse: true, running: true } })
   })
 })

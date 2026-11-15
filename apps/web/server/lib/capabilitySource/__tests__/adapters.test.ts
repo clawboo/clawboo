@@ -360,6 +360,19 @@ describe('OpenClawCapabilitySource', () => {
     expect(status).toMatchObject({ ok: false, degraded: true, reason: 'gateway_disconnected' })
   })
 
+  it('read() says not_in_use, not degraded, while nothing uses the Gateway, and calls nothing', async () => {
+    // The server connects on demand. A Gateway it has not needed yet is not a
+    // fault, so the Capabilities panel must not warn that OpenClaw is unavailable.
+    const { client, calls } = fakeClient(false, config)
+    const { records, status } = await new OpenClawCapabilitySource({
+      client: { ...client, isInUse: () => false },
+      getDb: () => db,
+    }).read()
+    expect(records).toEqual([])
+    expect(status).toMatchObject({ ok: false, degraded: false, reason: 'not_in_use' })
+    expect(calls).toEqual([])
+  })
+
   it('enable drives config.patch (runtime-of-record) with the tool moved into tools.allow', async () => {
     const { client, calls } = fakeClient(true, config)
     const src = new OpenClawCapabilitySource({ client, getDb: () => db })

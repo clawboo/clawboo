@@ -52,6 +52,13 @@ export interface HealthResult {
   connection: 'connected' | 'connecting' | 'reconnecting' | 'disconnected'
   lastSyncedAt: number | null
   message?: string
+  /** False when a source that connects on demand holds no connection because
+   *  nothing has needed one yet: read 'disconnected' then as "not in use", not
+   *  as "unreachable". Absent for a source that is always in use. */
+  inUse?: boolean
+  /** For a source with a remote upstream: whether this install set it up at all
+   *  (OpenClaw: settings name a Gateway, or OpenClaw's own config exists). */
+  configured?: boolean
 }
 
 export interface SyncResult {

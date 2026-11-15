@@ -141,7 +141,7 @@ Gateway tools are changed through the OpenClaw Gateway, so it must be connected.
 
 <Accordion title="A warning says a runtime is unavailable and shows its last-known capabilities">
 
-Clawboo could not read that runtime just now, for example because the OpenClaw Gateway is disconnected, so it shows the rows it read last time. Fix the connection, then press **Refresh**.
+Clawboo could not read that runtime just now, for example because the OpenClaw Gateway is disconnected, so it shows the rows it read last time. Fix the connection, then press **Refresh**. An OpenClaw Gateway that nothing uses yet gets no warning: Clawboo has not connected to it (see [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects)), and shows the rows it read last time, if any.
 
 </Accordion>
 

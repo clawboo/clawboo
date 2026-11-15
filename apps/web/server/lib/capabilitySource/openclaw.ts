@@ -26,6 +26,9 @@ import { buildRecord, builtinRollup, degradedStatus, isSourceWritable, okStatus 
 /** The operator slice OpenClawAgentSource satisfies as-is (no second connection). */
 export interface OperatorConfigClientLike {
   isConnected(): boolean
+  /** False while nothing has needed the Gateway, so the server has not connected
+   *  (it connects on demand). Absent = assume it is in use. */
+  isInUse?(): boolean
   operatorCall<T>(method: string, params?: unknown): Promise<T>
 }
 
@@ -77,6 +80,20 @@ export class OpenClawCapabilitySource implements CapabilitySource {
 
   async read(): Promise<CapabilityReadResult> {
     if (!this.deps.client.isConnected()) {
+      // Set up and not used yet is not a fault: nothing to warn about, and
+      // reading would mean connecting to a Gateway nobody asked for.
+      if (this.deps.client.isInUse?.() === false) {
+        return {
+          records: [],
+          status: {
+            sourceId: 'openclaw',
+            ok: false,
+            degraded: false,
+            reason: 'not_in_use',
+            at: Date.now(),
+          },
+        }
+      }
       return { records: [], status: degradedStatus('openclaw', 'gateway_disconnected') }
     }
 

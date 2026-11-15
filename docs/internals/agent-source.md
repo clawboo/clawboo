@@ -85,7 +85,7 @@ The contracts worth pinning down:
 - **`listSessions` is the one read that can fail on a disconnect.** Sessions change too fast to cache, so the OpenClaw source asks the Gateway live and throws `gateway_disconnected` when it is down. The SQLite-backed sources read the `sessions` table.
 - **`AgentFileName` is a local literal.** The package keeps its own copy of the seven names (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`) so it stays dependency-free. Which files each runtime actually consumes is `AGENT_FILE_RUNTIME_SUPPORT` in `@clawboo/protocol`.
 - **`events()` is consumer-terminated**, like `RuntimeAdapter.events()`. The `AgentEvent` union is `agent-upserted`, `agent-status`, `agent-archived`, `sync-complete` and `connection`.
-- **`health()` reports a connection state** (`connected`, `connecting`, `reconnecting`, `disconnected`) plus the last sync time. The SQLite-backed sources always report `connected`.
+- **`health()` reports a connection state** (`connected`, `connecting`, `reconnecting`, `disconnected`) plus the last sync time. The SQLite-backed sources always report `connected`. The OpenClaw source also reports `inUse`, `false` while it holds no connection because nothing has needed one yet (see [Connection lifecycle](#connection-lifecycle)).
 - **`sync()` is idempotent** and must preserve every column Clawboo owns. That rule is the core of the OpenClaw source.
 
 ## The record types
@@ -189,7 +189,17 @@ flowchart LR
 
 ### Connection lifecycle
 
-`start()` opens the connection. With no Gateway URL configured, the source stays `disconnected` and reads still serve SQLite. On a successful connect it:
+The source connects on demand. `start()` opens the connection only when the install needs the Gateway by itself: the registry's `hasStandingNeed` dep (`hasStandingGatewayNeed`) answers whether an `agents` row with `sourceId = 'openclaw'` exists that is not archived, or a delete of one is still owed to the Gateway (a `pendingDelete` row) while a Gateway is still set up. Otherwise the source stays `disconnected` with `inUse: false`, until one of these calls `markInUse(reason)`:
+
+- `POST /api/agents/registry/connect`, which the dashboard sends when a person opens OpenClaw's row in Runtimes, and `markInUseAndWait` behind it, which answers once the first attempt settles or after 5 seconds. The dashboard then reads the registry health every 2 seconds for up to 90 (`openClawOnDemand.ts`, outside the panel so closing Settings does not end it) and opens its own Gateway client once the server is connected;
+- the Gateway proxy, as it dials the Gateway for a browser connection (`gatewayProxyUpstreamSettings`);
+- the routines ticker, for a due OpenClaw routine that waits for the connection (`GatewayState.markInUse`; the idle read's `routinesDue` never calls it);
+- `POST /api/system/gateway` with `start` or `restart`, and, when a Gateway is set up and not yet in use, `POST /api/agents` aimed at the OpenClaw source and `POST /api/agents/sync` without a body, which wait for the connection through `markInUseAndWait`;
+- `isInUse()`, which every `health()` calls: it reads the standing need again while the source is not in use, so an OpenClaw row written some other way later is noticed on the next read.
+
+`reconnect()` (a settings change, a Gateway start, an OpenClaw delivery) marks the source in use too. A `stop()` while a connect is in flight clears the in-flight flag and leaves that connect to the torn-down client, whose late answer is ignored: a disconnected `GatewayClient` never settles its pending connect, so otherwise the next `start()` would never connect. In use is sticky: the connection is then held and retried as below until the process stops. A need noted before `start()` connects at `start()`, once the MCP base URL is known. A standing need that cannot be read is assumed, which is what every server did before. While the source is not in use, `GET /api/system/status` and the `status` action of `POST /api/system/gateway` skip their port probe, the `openclaw-gateway-cron` schedule source and the OpenClaw capability source read `not_in_use`, and the idle read skips its listening probe: each of those is a connection, and would start a Gateway that a service manager starts on its first connection.
+
+With no Gateway URL configured, a connect attempt leaves the source `disconnected`, and reads still serve SQLite. On a successful connect it:
 
 1. registers Clawboo's MCP servers in the Gateway config, at the top-level `mcp.servers` key: `clawboo-memory`, `clawboo-tasks` and `clawboo-tools`, all unbound (one process-wide config cannot carry a per-agent identity). TeamChat is deliberately not registered, and a stale `clawboo-teamchat` entry is pruned;
 2. in the same `config.patch`, unions `sessions_spawn` and `sessions_yield` (plus any ids the operator listed) into the Gateway's top-level `tools.deny`, so a team agent cannot launch its own throwaway sub-agents. Clawboo records the ids it wrote so it can later take back only its own;
