@@ -40,7 +40,12 @@ import { setDashboardPort } from './lib/connectors/dashboardGuard'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
-import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
+import { installServerStop, startOnceListening, watchEmbedderChannel } from './lib/serverStop'
+import {
+  isSubprocessShutdown,
+  killLiveSubprocesses,
+  shutdownLiveSubprocesses,
+} from './lib/runtimes/subprocess'
 import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
@@ -193,6 +198,11 @@ async function main() {
     const { runAgentUserCommand } = await import('./lib/agentUser/cli')
     process.exit(await runAgentUserCommand(process.argv.slice(3)))
   }
+  // An app that started this server with an IPC channel can stop it over that
+  // channel, as SIGTERM does (see ./lib/serverStop). Listening starts here,
+  // before anything waits, so a stop asked for while the server starts is held
+  // and runs as soon as the stop below exists.
+  const embedder = watchEmbedderChannel(process, process.env)
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
 
@@ -1141,7 +1151,8 @@ async function main() {
 
   // ── Listen ────────────────────────────────────────────────────────────────
 
-  const onListening = (): void => {
+  // Not once a stop has begun: see startOnceListening.
+  const onListening = startOnceListening(isSubprocessShutdown, (): void => {
     const hostForBrowser = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname
     // Trailing slash under a mount so the shell's relative assets resolve without
     // relying on the redirect (which is there for hand-typed URLs).
@@ -1272,7 +1283,7 @@ async function main() {
         }
       })
       .catch((err: unknown) => log.error({ err }, 'Boot probe failed (non-fatal)'))
-  }
+  })
   // Already listening when the work folder move ran.
   if (server.listening) onListening()
   else server.listen(port, hostname, onListening)
@@ -1288,8 +1299,9 @@ async function main() {
   // recovered on the next open — so a checkpoint failure is logged and
   // never blocks shutdown or changes the exit code.
   //
-  // This runs TWICE by construction: the signal handlers below call it and then
-  // call `process.exit(0)`, which fires the `'exit'` hook that calls it again.
+  // This runs TWICE by construction: the stop below (a signal, or a shutdown
+  // message from the app that started this server) calls it and then calls
+  // `process.exit(0)`, which fires the `'exit'` hook that calls it again.
   // `closeDb()` is idempotent, and the flag keeps the port-file removal and the
   // log from repeating.
   let shutDown = false
@@ -1323,7 +1335,7 @@ async function main() {
       log.warn({ err }, 'WAL checkpoint on shutdown failed (non-fatal)')
     }
   }
-  // A signal shutdown WAITS for the children to actually die before exiting.
+  // A requested stop WAITS for the children to actually die before exiting.
   // `cleanup()`'s reap only sends SIGTERM; killTree then schedules a SIGKILL
   // escalation on a timer, and `process.exit(0)` would kill that timer with the
   // process — so a child ignoring SIGTERM used to outlive the server. The wait is
@@ -1340,11 +1352,14 @@ async function main() {
     }
     cleanup()
   }
-  process.once('SIGINT', () => {
-    void gracefulExit().finally(() => process.exit(0))
-  })
-  process.once('SIGTERM', () => {
-    void gracefulExit().finally(() => process.exit(0))
+  // One stop, however it is asked for: Ctrl+C, SIGTERM, or the app that started
+  // this server, over its IPC channel. Asked twice, it runs once.
+  installServerStop({
+    proc: process,
+    channel: embedder,
+    gracefulExit,
+    exit: (code) => process.exit(code),
+    onStopping: (why) => log.info({ why }, 'Stopping the server'),
   })
   // Last-resort synchronous path (a `process.exit` from anywhere else): it cannot
   // await, so it falls back to signalling without waiting.
