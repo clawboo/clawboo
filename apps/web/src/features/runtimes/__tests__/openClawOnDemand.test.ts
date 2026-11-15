@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GatewayClient } from '@clawboo/gateway-client'
 
 import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
 
 const h = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock('@/features/connection/GatewayBootstrap', () => ({ enterGatewayMode: h.e
 import {
   OPENCLAW_WATCH_MS,
   OPENCLAW_WATCH_POLL_MS,
+  PAGE_CLIENT_FAILED,
   cancelOpenClawWatch,
   openOpenClaw,
 } from '../openClawOnDemand'
@@ -46,6 +48,7 @@ beforeEach(() => {
   h.pageConnect.mockResolvedValue({ client: live, gatewayUrl: 'ws://localhost:18789' })
   h.enter.mockResolvedValue(undefined)
   useConnectionStore.setState({ status: 'connected', client: null })
+  useToastStore.setState({ toasts: [] })
 })
 afterEach(() => {
   cancelOpenClawWatch()
@@ -96,12 +99,30 @@ describe('openOpenClaw', () => {
     expect(h.pageConnect).not.toHaveBeenCalled()
   })
 
-  it('a failed page connect is swallowed: the server connection stands', async () => {
+  it('a failed page connect says to reload, since the connected row offers nothing for it', async () => {
     h.connect.mockResolvedValue(health('connected'))
     h.pageConnect.mockRejectedValue(new Error('NOT_PAIRED'))
     await openOpenClaw()
-    await vi.waitFor(() => expect(h.pageConnect).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() =>
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([PAGE_CLIENT_FAILED]),
+    )
     expect(h.enter).not.toHaveBeenCalled()
+  })
+
+  it('a second open while the page dial is in flight shares it rather than dialing again', async () => {
+    h.connect.mockResolvedValue(health('connected'))
+    let land: (v: { client: GatewayClient; gatewayUrl: string }) => void = () => {}
+    h.pageConnect.mockImplementation(() => new Promise((resolve) => (land = resolve)))
+    await openOpenClaw()
+    await vi.waitFor(() => expect(h.pageConnect).toHaveBeenCalledTimes(1))
+    await openOpenClaw()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.pageConnect).toHaveBeenCalledTimes(1)
+
+    land({ client: live, gatewayUrl: 'ws://localhost:18789' })
+    await vi.waitFor(() => expect(h.enter).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.enter).toHaveBeenCalledTimes(1)
   })
 
   it('a second open replaces the first watch rather than running two', async () => {

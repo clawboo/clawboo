@@ -21,6 +21,7 @@ import {
 import { enterGatewayMode } from '@/features/connection/GatewayBootstrap'
 import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
 import { useConnectionStore } from '@/stores/connection'
+import { useToastStore } from '@/stores/toast'
 
 /** How often the watch reads the server's health. */
 export const OPENCLAW_WATCH_POLL_MS = 2_000
@@ -62,11 +63,31 @@ async function watchForServer(watch: { cancelled: boolean }, first: RegistryHeal
   if (current === watch) current = null
   // Already has one (the setup flow, or a reconnect banner, got there first).
   if (useConnectionStore.getState().client !== null) return
-  try {
-    const { client, gatewayUrl } = await connectGatewayFromSettings()
-    await enterGatewayMode(client, gatewayUrl)
-  } catch {
-    // A device to approve, say. The server's connection stands either way, and
-    // the row's own Reconnect flow is there for the page's.
-  }
+  await attachPageClient()
 }
+
+// The page's dial in flight, shared: a second open while it runs waits for it
+// rather than dialing too, since whichever enterGatewayMode came last would
+// disconnect the other's client.
+let attaching: Promise<void> | null = null
+
+function attachPageClient(): Promise<void> {
+  attaching ??= (async () => {
+    try {
+      const { client, gatewayUrl } = await connectGatewayFromSettings()
+      await enterGatewayMode(client, gatewayUrl)
+    } catch {
+      // A device to approve, say. The server's connection stands either way,
+      // and a reload of the page connects it as a returning page does. Said
+      // out loud: the connected row offers nothing for the page's connection.
+      useToastStore.getState().addToast({ message: PAGE_CLIENT_FAILED, type: 'error' })
+    }
+  })().finally(() => {
+    attaching = null
+  })
+  return attaching
+}
+
+/** What a person is told when this page could not open its own connection. */
+export const PAGE_CLIENT_FAILED =
+  'OpenClaw is connected, but this page could not connect to it. Reload the page to chat with OpenClaw agents.'

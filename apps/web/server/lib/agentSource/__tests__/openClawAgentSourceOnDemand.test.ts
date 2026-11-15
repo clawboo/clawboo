@@ -362,4 +362,25 @@ describe('OpenClawAgentSource on demand', () => {
     await reconnecting
     expect((await answer).connection).toBe('connected')
   })
+
+  it('reconnectAndWait answers within its deadline though a later reconnect superseded its connect', async () => {
+    // Two deliveries each recover the operator. The second reconnect tears down
+    // the first one's client, whose connect then never settles: the first
+    // delivery must still answer, and with the second's connection.
+    const hung = () => new Promise<void>(() => {})
+    const clients = [new CountingGateway(), new CountingGateway(), new CountingGateway()]
+    clients[0]!.connectWith = hung
+    clients[1]!.connectWith = hung
+    const src = track(makeSource(clients[0]!, { makeClient: () => clients.shift()! }))
+    await src.start()
+    src.markInUse('a delivery')
+    await settle()
+
+    const first = src.reconnectAndWait(2_000)
+    await settle()
+    const second = src.reconnectAndWait(2_000)
+    const late = new Promise<string>((r) => setTimeout(() => r('still waiting'), 1_500))
+    expect(await Promise.race([second, late])).toBe(true)
+    expect(await Promise.race([first, late])).toBe(true)
+  })
 })

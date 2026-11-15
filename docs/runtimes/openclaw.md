@@ -185,7 +185,7 @@ Once OpenClaw is connected, its row reads **Connected** and offers **Manage**:
 
 When OpenClaw is set up but its Gateway is offline, the row shows that and offers **Reconnect**. **Reconnect OpenClaw** runs the same setup as above: it reuses your configuration and starts the Gateway. For OpenClaw's own service commands, see [the gateway command](https://docs.openclaw.ai/cli/gateway).
 
-When OpenClaw is set up and nothing uses it yet, the row reads **Not in use** and offers **Connect**. Opening the row has the server connect to the Gateway (see [How Clawboo connects](#how-clawboo-connects)); it then reads **Connected**, or **Disconnected** with **Reconnect** if the Gateway does not answer. Once the server is connected, within about 90 seconds of opening the row, the dashboard opens its own Gateway connection too, which OpenClaw 1:1 chats use, even if you have left the page by then.
+When OpenClaw is set up and nothing uses it yet, the row reads **Not in use** and offers **Connect**. Opening the row has the server connect to the Gateway (see [How Clawboo connects](#how-clawboo-connects)); it then reads **Connected**, or **Disconnected** with **Reconnect** if the Gateway does not answer. Once the server is connected, within about 90 seconds of opening the row, the dashboard opens its own Gateway connection too, which OpenClaw 1:1 chats use, even if you have left the page by then. If it cannot, it says so: reload the page, which connects it as on any return to the dashboard. The same reload brings a page its connection when something else connected the server while the page was open, such as a routine.
 
 ## What Clawboo writes to OpenClaw
 

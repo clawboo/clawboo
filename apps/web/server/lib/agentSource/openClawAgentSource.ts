@@ -783,11 +783,20 @@ export class OpenClawAgentSource implements AgentSource {
     // unusable; recovery comes from the slow auth backoff or an explicit reconnect()
     // (a settings change / gateway restart), never from this hot path.
     if (this.authBlocked) return false
-    await this.reconnect().catch(() => undefined)
-    if (this.operatorClient()) return true
+    // The deadline covers the reconnect itself, which goes on in the background
+    // past it. Awaiting it could take forever: a connect a later reconnect()
+    // supersedes never settles (a disconnected GatewayClient drops it), and a
+    // GatewayClient connect has no timeout of its own.
     const deadline = Date.now() + timeoutMs
+    let settled = false
+    const reconnecting = this.reconnect()
+      .catch(() => undefined)
+      .then(() => {
+        settled = true
+      })
     while (Date.now() < deadline && !this.operatorClient()) {
-      await new Promise((r) => setTimeout(r, 300))
+      const tick = new Promise((r) => setTimeout(r, 300))
+      await (settled ? tick : Promise.race([reconnecting, tick]))
     }
     return this.operatorClient() != null
   }
