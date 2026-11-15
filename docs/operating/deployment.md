@@ -249,7 +249,7 @@ A computer or service manager can stop Clawboo when it is idle and start it agai
 
 ## Start it from your own app
 
-An app can run the server as a child process of its own and show the dashboard in its own window, as the Clawboo desktop app does. Start `dist/server.js` with an IPC channel: Node's `fork()`, or `spawn()` with `'ipc'` in its `stdio`.
+An app can run the server as a child process of its own and show the dashboard in its own window. Start `dist/server.js` with an IPC channel: Node's `fork()`, or `spawn()` with `'ipc'` in its `stdio`.
 
 ### Stop it over the channel
 
