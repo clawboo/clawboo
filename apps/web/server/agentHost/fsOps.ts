@@ -6,7 +6,12 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { MAX_READ_BYTES, type FsEntry, type FsStat } from '../lib/agentUser/protocol'
+import {
+  MAX_LIST_REPLY_CHARS,
+  MAX_READ_BYTES,
+  type FsEntry,
+  type FsStat,
+} from '../lib/agentUser/protocol'
 
 export function statType(st: fs.Stats | fs.BigIntStats): FsStat['type'] {
   if (st.isSymbolicLink()) return 'link'
@@ -164,6 +169,36 @@ export function listDir(dir: string, max: number): { entries: FsEntry[]; truncat
       entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
     } catch {
       /* gone between the listing and the stat */
+    }
+  }
+  return { entries, truncated: names.length > max }
+}
+
+/**
+ * A folder's entries from its sorted names, at most `max`, looked up with
+ * `look` (which must not follow links). Two limits keep the agent host
+ * answering. The reply is one line, so past `MAX_LIST_REPLY_CHARS` it stops
+ * and says the list is cut, rather than send a line the server would refuse
+ * (and drop the connection). And it yields every 512 names, because a long
+ * synchronous job keeps the host from answering its pings.
+ */
+export async function collectEntries(
+  names: readonly string[],
+  max: number,
+  look: (name: string) => Promise<fs.Stats>,
+  yieldNow: () => Promise<void> = () => new Promise((r) => setImmediate(r)),
+): Promise<{ entries: FsEntry[]; truncated: boolean }> {
+  const entries: FsEntry[] = []
+  let chars = 0
+  for (const [i, name] of names.slice(0, max).entries()) {
+    if (i % 512 === 511) await yieldNow()
+    chars += name.length * 2 + 96
+    if (chars > MAX_LIST_REPLY_CHARS) return { entries, truncated: true }
+    try {
+      const st = await look(name)
+      entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
+    } catch {
+      /* gone between the listing and the look */
     }
   }
   return { entries, truncated: names.length > max }

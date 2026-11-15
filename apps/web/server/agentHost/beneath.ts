@@ -17,7 +17,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 
 import { MAX_READ_BYTES, type FsEntry, type FsStat } from '../lib/agentUser/protocol'
-import { O_NONBLOCK, O_NOFOLLOW, chmodBestEffort, statType, toStat } from './fsOps'
+import { O_NONBLOCK, O_NOFOLLOW, chmodBestEffort, collectEntries, toStat } from './fsOps'
 
 const DIR = fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY ?? 0) | O_NOFOLLOW
 
@@ -305,24 +305,16 @@ export function beneathStat(realRoot: string, parts: readonly string[]): FsStat 
   }
 }
 
-export function beneathList(
+export async function beneathList(
   realRoot: string,
   parts: readonly string[],
   max: number,
-): { entries: FsEntry[]; truncated: boolean } {
+): Promise<{ entries: FsEntry[]; truncated: boolean }> {
   const fd = openDirBeneath(realRoot, parts, null)
   try {
-    const names = fs.readdirSync(at(fd)).sort()
-    const entries: FsEntry[] = []
-    for (const name of names.slice(0, max)) {
-      try {
-        const st = fs.lstatSync(at(fd, name))
-        entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
-      } catch {
-        /* gone between the listing and the look */
-      }
-    }
-    return { entries, truncated: names.length > max }
+    const names = (await fs.promises.readdir(at(fd))).sort()
+    // The same reply budget and yielding as any other listing: see collectEntries.
+    return await collectEntries(names, max, (name) => fs.promises.lstat(at(fd, name)))
   } finally {
     fs.closeSync(fd)
   }

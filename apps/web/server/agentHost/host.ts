@@ -22,9 +22,9 @@ import type { Readable, Writable } from 'node:stream'
 import {
   O_NONBLOCK,
   appendNoFollow,
+  collectEntries,
   mkdirMode,
   readBounded,
-  statType,
   toStat,
   writeAtomic,
 } from './fsOps'
@@ -43,7 +43,6 @@ import {
 } from './beneath'
 import {
   AGENT_HOST_PROTOCOL_VERSION,
-  MAX_LIST_REPLY_CHARS,
   MAX_READ_BYTES,
   MAX_SEARCH_MATCHES,
   MAX_WRITE_BYTES,
@@ -203,7 +202,7 @@ async function beneathOp(
       return { path: beneathRealpath(realRoot, parts('path')) }
     case 'fs.list': {
       const max = Math.max(0, Math.min(Number(f['max']) || 0, 100_000))
-      return beneathList(realRoot, parts('path'), max)
+      return await beneathList(realRoot, parts('path'), max)
     }
     default:
       throw Object.assign(new Error(`${String(f['op'])} is not a share's file operation`), {
@@ -489,22 +488,7 @@ async function listDirAsync(
   max: number,
 ): Promise<{ entries: FsEntry[]; truncated: boolean }> {
   const names = (await fs.promises.readdir(dir)).sort()
-  const entries: FsEntry[] = []
-  let chars = 0
-  for (const [i, name] of names.slice(0, max).entries()) {
-    if (i % 512 === 511) await yieldNow()
-    // The reply is one line; past the budget, stop and say so rather than send
-    // a line the server would refuse as too long (and drop the connection).
-    chars += name.length * 2 + 96
-    if (chars > MAX_LIST_REPLY_CHARS) return { entries, truncated: true }
-    try {
-      const st = await fs.promises.lstat(path.join(dir, name))
-      entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
-    } catch {
-      /* gone between the listing and the stat */
-    }
-  }
-  return { entries, truncated: names.length > max }
+  return collectEntries(names, max, (name) => fs.promises.lstat(path.join(dir, name)))
 }
 
 export interface HostConnection {
