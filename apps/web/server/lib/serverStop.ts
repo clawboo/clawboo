@@ -160,3 +160,19 @@ export function installServerStop(deps: ServerStopDeps): void {
     stop(why)
   })
 }
+
+/**
+ * What the server starts once it listens (the routines ticker, connector restore,
+ * the boot probe), wrapped so it starts only while no stop has begun. A stop
+ * asked for while the server was starting runs as soon as `installServerStop`
+ * does, and it may still be waiting for the agent runs to end when the listen
+ * completes. By then it has raised SIGTERM, which those parts listen for to end
+ * their own work: started after it, the routines ticker would claim due routines
+ * on a server that is going away.
+ */
+export function startOnceListening(stopping: () => boolean, start: () => void): () => void {
+  return () => {
+    if (stopping()) return
+    start()
+  }
+}

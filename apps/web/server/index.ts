@@ -40,8 +40,12 @@ import { setDashboardPort } from './lib/connectors/dashboardGuard'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
-import { installServerStop, watchEmbedderChannel } from './lib/serverStop'
-import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
+import { installServerStop, startOnceListening, watchEmbedderChannel } from './lib/serverStop'
+import {
+  isSubprocessShutdown,
+  killLiveSubprocesses,
+  shutdownLiveSubprocesses,
+} from './lib/runtimes/subprocess'
 import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
@@ -1147,7 +1151,8 @@ async function main() {
 
   // ── Listen ────────────────────────────────────────────────────────────────
 
-  const onListening = (): void => {
+  // Not once a stop has begun: see startOnceListening.
+  const onListening = startOnceListening(isSubprocessShutdown, (): void => {
     const hostForBrowser = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname
     // Trailing slash under a mount so the shell's relative assets resolve without
     // relying on the redirect (which is there for hand-typed URLs).
@@ -1278,7 +1283,7 @@ async function main() {
         }
       })
       .catch((err: unknown) => log.error({ err }, 'Boot probe failed (non-fatal)'))
-  }
+  })
   // Already listening when the work folder move ran.
   if (server.listening) onListening()
   else server.listen(port, hostname, onListening)
