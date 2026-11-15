@@ -15,6 +15,7 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { killProcessTreeByPid } from '../runtimes/killTree'
 import {
   STOP_ON_DISCONNECT_ENV,
   installServerStop,
@@ -26,6 +27,11 @@ import {
 const MODULE_TS = path.resolve(__dirname, '../serverStop.ts')
 // tsx loads the TypeScript module into the plain Node processes below.
 const TSX_API = createRequire(import.meta.url).resolve('tsx/esm/api')
+// Where the real processes below run: never inside a folder a test removes. On
+// Windows a process's working directory is an open handle that blocks removing
+// the folder, held for as long as any process started there lives, tsx's own
+// helper processes included, and a pid can read as gone before it is released.
+const RUN_DIR = fs.realpathSync(os.tmpdir())
 
 /** A process with an IPC channel, or without one when `send` is left out. */
 function fakeProcess(opts: { channel?: boolean; connected?: boolean } = {}) {
@@ -279,6 +285,13 @@ async function waitForLine(file: string, event: string, timeoutMs = 30_000): Pro
   }
 }
 
+/** The process runs outside the test's folder, so it never blocks removing it. */
+function expectOutside(root: string, ready: Line): void {
+  const rel = path.relative(root, String(ready['cwd']))
+  const inside = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+  expect(inside, `runs in ${String(ready['cwd'])}`).toBe(false)
+}
+
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -305,9 +318,10 @@ describe('real processes', () => {
           }),
       ),
     )
+    // A detached server is no child of this process: its whole tree goes.
     for (const pid of pids.splice(0)) {
       if (!alive(pid)) continue
-      process.kill(pid, 'SIGKILL')
+      killProcessTreeByPid(pid, { graceMs: 0 })
       await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000 })
     }
     for (const dir of made.splice(0)) {
@@ -349,6 +363,7 @@ write({
   pid: process.pid,
   stopOnDisconnect: channel.stopOnDisconnect,
   inherited: process.env.${STOP_ON_DISCONNECT_ENV} ?? null,
+  cwd: process.cwd(),
 })
 // With a callback: a send to a launcher that has already gone reports to it
 // instead of raising an 'error' event that would end this process.
@@ -393,7 +408,7 @@ console.log(child.pid)
     )
     const mode = opts.strip ? 'strip' : 'keep'
     const run = spawnSync(process.execPath, [launcher, mode, s.child, TSX_API, MODULE_TS, s.out], {
-      cwd: s.root,
+      cwd: RUN_DIR,
       env,
       encoding: 'utf8',
       timeout: 30_000,
@@ -410,7 +425,7 @@ console.log(child.pid)
   /** Starts the stand-in the way an app does: it keeps the channel. */
   function start(s: ReturnType<typeof setup>, env: NodeJS.ProcessEnv): ChildProcess {
     const child = fork(s.child, [TSX_API, MODULE_TS, s.out], {
-      cwd: s.root,
+      cwd: RUN_DIR,
       env,
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     })
@@ -433,6 +448,7 @@ console.log(child.pid)
     const line = await waitForLine(s.out, 'ready')
     expect(line['pid']).toBe(pid)
     expect(line['stopOnDisconnect']).toBe(false)
+    expectOutside(s.root, line)
     // Its channel closed when the launcher exited; give a stop time to show.
     await new Promise((r) => setTimeout(r, 1500))
     expect(alive(pid)).toBe(true)
@@ -444,6 +460,7 @@ console.log(child.pid)
     const pid = launch(s, { ...s.env, [STOP_ON_DISCONNECT_ENV]: '1' }, { strip: true })
     const line = await waitForLine(s.out, 'ready')
     expect(line['stopOnDisconnect']).toBe(false)
+    expectOutside(s.root, line)
     await new Promise((r) => setTimeout(r, 1500))
     expect(alive(pid)).toBe(true)
     expect(readLines(s.out).map((l) => l.event)).toEqual(['ready'])
@@ -519,7 +536,7 @@ process.exitCode = 1
 `,
     )
     const child = fork(failing, [TSX_API, MODULE_TS], {
-      cwd: s.root,
+      cwd: RUN_DIR,
       env: s.env,
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     })
