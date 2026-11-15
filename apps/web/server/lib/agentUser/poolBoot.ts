@@ -12,7 +12,9 @@
 
 import fs from 'node:fs'
 import os from 'node:os'
-import path from 'node:path'
+// POSIX path rules on every host: a user per agent runs on Linux only, so its
+// paths must not change meaning under another platform's rules (in tests too).
+import { posix as path } from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import {

@@ -16,7 +16,9 @@
 // Everything that starts or stops a process is passed in, so the registry is
 // tested with fake hosts.
 
-import path from 'node:path'
+// POSIX path rules on every host: a user per agent runs on Linux only, so its
+// paths must not change meaning under another platform's rules (in tests too).
+import { posix as path } from 'node:path'
 
 import type { AgentHostClient } from './client'
 import type { HelloFrame } from './protocol'
