@@ -51,7 +51,16 @@ vi.mock('../../lib/runtimeFolder', async (orig) => ({
     ocState.marks.push(args)
   },
 }))
-vi.mock('../../lib/agentSource', () => ({ getRegistry: () => ({ reconnect: async () => {} }) }))
+const registry = vi.hoisted(() => ({ needs: [] as string[] }))
+vi.mock('../../lib/agentSource', () => ({
+  getRegistry: () => ({
+    reconnect: async () => {},
+    source: {
+      isInUse: () => true,
+      markInUse: (reason: string) => registry.needs.push(reason),
+    },
+  }),
+}))
 vi.mock('../../lib/cwdGuard', () => ({ liveCwd: () => '/live/dir' }))
 vi.mock('../../lib/runtimes/killTree', () => ({ killProcessTree: () => {} }))
 
@@ -165,6 +174,7 @@ describe('Gateway start that needs `openclaw doctor --fix`', () => {
     spawnState.scripts = []
     ocState.installFolder = undefined
     ocState.marks = []
+    registry.needs = []
   })
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
@@ -172,6 +182,17 @@ describe('Gateway start that needs `openclaw doctor --fix`', () => {
       else process.env[k] = v
     }
     fs.rmSync(home, { recursive: true, force: true })
+  })
+
+  it('a start from Clawboo marks the Gateway in use, also when it is running already', async () => {
+    // The server connects on demand. A Gateway that a service manager starts on
+    // its first connection answers the start's own probe, so the start ends at
+    // "already running" with no reconnect after it: the need has to come first.
+    pmState.reachable = true
+    const frames = await start()
+    expect(frames.at(-1)).toMatchObject({ type: 'complete', success: true })
+    expect(spawnState.calls).toEqual([])
+    expect(registry.needs).toEqual(['a person started the Gateway'])
   })
 
   it('runs the repair once, launches again, and reports the Gateway up', async () => {

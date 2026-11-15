@@ -21,7 +21,11 @@ import {
 import { getDb } from '../db'
 import { setGatewayAttachRefresher } from '../mcpAttachSecret'
 import { ClawbooNativeAgentSource } from './clawbooNativeAgentSource'
-import { OpenClawAgentSource, type OpenClawClientLike } from './openClawAgentSource'
+import {
+  hasStandingGatewayNeed,
+  OpenClawAgentSource,
+  type OpenClawClientLike,
+} from './openClawAgentSource'
 import { RuntimeAgentSource } from './runtimeAgentSource'
 
 /** The executor-driven coding runtimes that get a generic record source (peers of
@@ -76,6 +80,11 @@ class ServerAgentRegistry {
         return { gatewayUrl: s.gatewayUrl, gatewayToken: s.gatewayToken }
       },
       isConfigured: () => isGatewayConfigured(process.env),
+      // Connect at start only for an install that has OpenClaw agents (or owes
+      // the Gateway a delete); anything else that needs the Gateway marks the
+      // source in use when it does.
+      hasStandingNeed: () =>
+        hasStandingGatewayNeed(getDb(), () => isGatewayConfigured(process.env)),
       mcpBaseUrl: () => this.mcpBaseUrl,
       makeClient: () => new GatewayClient() as unknown as OpenClawClientLike,
       connectOptions: () => {
@@ -188,6 +197,18 @@ let singleton: ServerAgentRegistry | null = null
 export function getRegistry(): ServerAgentRegistry {
   singleton ??= new ServerAgentRegistry()
   return singleton
+}
+
+/**
+ * What the browser's Gateway proxy (`/api/gateway/ws`) dials, for a connection
+ * it has accepted. Dialing is what wakes a Gateway that starts on its first
+ * connection, so a dashboard that opens the proxy needs the Gateway: the server's
+ * own connection comes up beside it.
+ */
+export function gatewayProxyUpstreamSettings(): { url: string; token: string } {
+  getRegistry().source.markInUse('the dashboard opened its Gateway connection')
+  const settings = loadSettings(process.env)
+  return { url: settings.gatewayUrl, token: settings.gatewayToken }
 }
 
 let shutdownWired = false

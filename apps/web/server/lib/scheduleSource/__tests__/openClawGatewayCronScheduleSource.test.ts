@@ -302,6 +302,31 @@ describe('OpenClawGatewayCronScheduleSource', () => {
     expect(read.status.reason).toBe('gateway_disconnected')
   })
 
+  it('set up but not used yet: read says not_in_use, with no records and no Gateway call', async () => {
+    // The server connects on demand; until something needs the Gateway there is
+    // nothing read, and a reader such as the idle state must not try to find out.
+    const client = {
+      ...makeFakeClient({ connected: false }),
+      isConfigured: () => true,
+      isInUse: () => false,
+    }
+    const call = vi.spyOn(client, 'operatorCall')
+    const { records, status } = await new OpenClawGatewayCronScheduleSource(client).read()
+    expect(records).toEqual([])
+    expect(status).toMatchObject({ ok: false, degraded: true, reason: 'not_in_use' })
+    expect(call).not.toHaveBeenCalled()
+
+    // In use and not connected is still the dropped connection.
+    const inUse = { ...client, isInUse: () => true }
+    const read = await new OpenClawGatewayCronScheduleSource(inUse).read()
+    expect(read.status.reason).toBe('gateway_disconnected')
+
+    // Not set up at all wins over not in use.
+    const neither = { ...client, isConfigured: () => false }
+    const off = await new OpenClawGatewayCronScheduleSource(neither).read()
+    expect(off.status.reason).toBe('not_configured')
+  })
+
   it('answers an unknown job id as UnknownScheduleError (404), not a raw Gateway error', async () => {
     const client = makeFakeClient()
     // OpenClaw 2026.9's own not-found answer: INVALID_REQUEST with a detail code.

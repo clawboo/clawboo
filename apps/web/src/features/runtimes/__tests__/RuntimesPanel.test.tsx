@@ -9,14 +9,28 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { GatewayClient } from '@clawboo/gateway-client'
 
 import { useConnectionStore } from '@/stores/connection'
 
 import { server } from '../../../__vitest__/mswServer'
+import { cancelOpenClawWatch } from '../openClawOnDemand'
 import { RuntimesPanel } from '../RuntimesPanel'
+
+// Opening OpenClaw's row while it is not in use also brings up this page's own
+// Gateway client once the server connects. Stubbed: no socket in these tests.
+const browserConnect = vi.hoisted(() => ({
+  connect: vi.fn(),
+  enter: vi.fn(),
+}))
+vi.mock('@/lib/gatewayConnect', () => ({
+  connectGatewayFromSettings: browserConnect.connect,
+}))
+vi.mock('@/features/connection/GatewayBootstrap', () => ({
+  enterGatewayMode: browserConnect.enter,
+}))
 
 // A truthy stub for a live OpenClaw Gateway client (the OpenClaw row is "connected"
 // only when a real client is present, not merely when the app status is connected —
@@ -24,6 +38,13 @@ import { RuntimesPanel } from '../RuntimesPanel'
 const stubClient = {} as unknown as GatewayClient
 
 beforeEach(() => {
+  browserConnect.connect.mockReset()
+  browserConnect.connect.mockResolvedValue({
+    client: stubClient,
+    gatewayUrl: 'ws://localhost:18789',
+  })
+  browserConnect.enter.mockReset()
+  browserConnect.enter.mockResolvedValue(undefined)
   useConnectionStore.setState({ status: 'disconnected', client: null })
   // The OpenClaw row now also polls the server's registry health for thin-client
   // parity. Default it to disconnected so the browser-client assertions below are
@@ -34,7 +55,11 @@ beforeEach(() => {
     ),
   )
 })
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  // Opening OpenClaw starts a watch that outlives the panel; end it per test.
+  cancelOpenClawWatch()
+})
 
 describe('RuntimesPanel', () => {
   it('renders OpenClaw + all four runtime rows (status from GET /api/runtimes)', async () => {
@@ -271,5 +296,192 @@ describe('RuntimesPanel', () => {
     await userEvent.click(await screen.findByTestId('runtime-list-row-openclaw-toggle'))
     expect(screen.getByTestId('runtime-openclaw-setup')).toBeInTheDocument()
     expect(screen.getByText('MCP attach config')).toBeInTheDocument()
+  })
+
+  describe('OpenClaw set up and not in use (the server connects on demand)', () => {
+    // The server reports `inUse: false` until something needs the Gateway, and a
+    // Gateway that a service manager starts on its first connection stays asleep
+    // until then. Opening OpenClaw's row is a need: the panel asks the server to
+    // connect, once, and only when a person opens it.
+    function configured(health: () => Record<string, unknown>, onConnect: () => void) {
+      server.use(
+        http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),
+        http.get('/api/system/openclaw-config', () =>
+          HttpResponse.json({ config: { gateway: { port: 18789 } }, env: {}, version: null }),
+        ),
+        http.get('/api/agents/registry/health', () => HttpResponse.json(health())),
+        http.post('/api/agents/registry/connect', () => {
+          onConnect()
+          return HttpResponse.json(health())
+        }),
+      )
+    }
+
+    it('reads "Not in use", not "Disconnected", and asks for nothing until opened', async () => {
+      useConnectionStore.setState({ status: 'connected', client: null })
+      let connects = 0
+      configured(
+        () => ({
+          ok: false,
+          connection: 'disconnected',
+          lastSyncedAt: null,
+          inUse: false,
+          configured: true,
+        }),
+        () => (connects += 1),
+      )
+      render(<RuntimesPanel />)
+
+      expect(await screen.findByText('Not in use')).toBeInTheDocument()
+      expect(screen.queryByText('Disconnected')).not.toBeInTheDocument()
+      expect(screen.getByTestId('runtime-list-row-openclaw-toggle')).toHaveAccessibleName(
+        /connect openclaw/i,
+      )
+      expect(connects).toBe(0)
+    })
+
+    it('opening the row asks the server to connect, once, and the row then reads connected', async () => {
+      useConnectionStore.setState({ status: 'connected', client: null })
+      let connects = 0
+      let up = false
+      configured(
+        () =>
+          up
+            ? { ok: true, connection: 'connected', lastSyncedAt: 1, inUse: true, configured: true }
+            : {
+                ok: false,
+                connection: 'disconnected',
+                lastSyncedAt: null,
+                inUse: false,
+                configured: true,
+              },
+        () => {
+          connects += 1
+          up = true
+        },
+      )
+      render(<RuntimesPanel />)
+      await screen.findByText('Not in use')
+
+      await userEvent.click(screen.getByTestId('runtime-list-row-openclaw-toggle'))
+
+      await waitFor(() => expect(connects).toBe(1))
+      await waitFor(() => expect(screen.queryByText('Not in use')).not.toBeInTheDocument())
+      expect(screen.getAllByText('Connected').length).toBeGreaterThan(0)
+      expect(connects).toBe(1)
+      // The page loaded with no Gateway client, so it brings one up now.
+      expect(browserConnect.connect).toHaveBeenCalledTimes(1)
+      expect(browserConnect.enter).toHaveBeenCalledWith(stubClient, 'ws://localhost:18789')
+    })
+
+    it('a Gateway named only in settings (no local openclaw.json) reads Not in use too', async () => {
+      // A remote or hand-configured Gateway: the server counts it as set up.
+      useConnectionStore.setState({ status: 'connected', client: null })
+      let connects = 0
+      server.use(
+        http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),
+        http.get('/api/agents/registry/health', () =>
+          HttpResponse.json({
+            ok: false,
+            connection: 'disconnected',
+            lastSyncedAt: null,
+            inUse: false,
+            configured: true,
+          }),
+        ),
+        http.post('/api/agents/registry/connect', () => {
+          connects += 1
+          return HttpResponse.json({ ok: false, connection: 'connecting', inUse: true })
+        }),
+      )
+      render(<RuntimesPanel />)
+
+      expect(await screen.findByText('Not in use')).toBeInTheDocument()
+      await userEvent.click(screen.getByTestId('runtime-list-row-openclaw-toggle'))
+      await waitFor(() => expect(connects).toBe(1))
+    })
+
+    it('a Gateway never set up reads Set up and asks for nothing when opened', async () => {
+      useConnectionStore.setState({ status: 'connected', client: null })
+      let connects = 0
+      server.use(
+        http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [], available: [] })),
+        http.get('/api/agents/registry/health', () =>
+          HttpResponse.json({
+            ok: false,
+            connection: 'disconnected',
+            lastSyncedAt: null,
+            inUse: false,
+            configured: false,
+          }),
+        ),
+        http.post('/api/agents/registry/connect', () => {
+          connects += 1
+          return HttpResponse.json({})
+        }),
+      )
+      render(<RuntimesPanel />)
+
+      const toggle = await screen.findByTestId('runtime-list-row-openclaw-toggle')
+      expect(toggle).toHaveAccessibleName(/set up openclaw/i)
+      await userEvent.click(toggle)
+      expect(screen.queryByText('Not in use')).not.toBeInTheDocument()
+      expect(connects).toBe(0)
+    })
+
+    it('a Gateway that does not answer after the open leaves the page without a client', async () => {
+      useConnectionStore.setState({ status: 'connected', client: null })
+      let connects = 0
+      configured(
+        () =>
+          connects > 0
+            ? {
+                ok: false,
+                connection: 'disconnected',
+                lastSyncedAt: null,
+                inUse: true,
+                configured: true,
+              }
+            : {
+                ok: false,
+                connection: 'disconnected',
+                lastSyncedAt: null,
+                inUse: false,
+                configured: true,
+              },
+        () => (connects += 1),
+      )
+      render(<RuntimesPanel />)
+      await screen.findByText('Not in use')
+
+      await userEvent.click(screen.getByTestId('runtime-list-row-openclaw-toggle'))
+
+      await waitFor(() => expect(connects).toBe(1))
+      expect(await screen.findByText('Disconnected')).toBeInTheDocument()
+      expect(browserConnect.connect).not.toHaveBeenCalled()
+    })
+
+    it('a Gateway in use that is down still reads "Disconnected" with Reconnect', async () => {
+      useConnectionStore.setState({ status: 'connected', client: null })
+      let connects = 0
+      configured(
+        () => ({
+          ok: false,
+          connection: 'disconnected',
+          lastSyncedAt: null,
+          inUse: true,
+          configured: true,
+        }),
+        () => (connects += 1),
+      )
+      render(<RuntimesPanel />)
+
+      expect(await screen.findByText('Disconnected')).toBeInTheDocument()
+      expect(screen.getByTestId('runtime-list-row-openclaw-toggle')).toHaveAccessibleName(
+        /reconnect openclaw/i,
+      )
+      await userEvent.click(screen.getByTestId('runtime-list-row-openclaw-toggle'))
+      expect(connects).toBe(0)
+    })
   })
 })

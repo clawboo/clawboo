@@ -63,7 +63,8 @@ export async function fleetSummaryGET(_req: Request, res: Response): Promise<voi
     const ocHealth = await getRegistry().source.health()
     meta.set('openclaw', {
       runtimeClass: 'connected-substrate',
-      healthOk: ocHealth.connection === 'connected',
+      // Null (no reading) while nothing uses the Gateway, rather than down.
+      healthOk: ocHealth.inUse === false ? null : ocHealth.connection === 'connected',
     })
     await Promise.all(
       enabledRuntimeIds().map(async (id) => {

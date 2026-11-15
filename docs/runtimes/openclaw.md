@@ -185,6 +185,8 @@ Once OpenClaw is connected, its row reads **Connected** and offers **Manage**:
 
 When OpenClaw is set up but its Gateway is offline, the row shows that and offers **Reconnect**. **Reconnect OpenClaw** runs the same setup as above: it reuses your configuration and starts the Gateway. For OpenClaw's own service commands, see [the gateway command](https://docs.openclaw.ai/cli/gateway).
 
+When OpenClaw is set up and nothing uses it yet, the row reads **Not in use** and offers **Connect**. Opening the row has the server connect to the Gateway (see [How Clawboo connects](#how-clawboo-connects)); it then reads **Connected**, or **Disconnected** with **Reconnect** if the Gateway does not answer. Once the server is connected, within about 90 seconds of opening the row, the dashboard opens its own Gateway connection too, which OpenClaw 1:1 chats use, even if you have left the page by then.
+
 ## What Clawboo writes to OpenClaw
 
 Clawboo changes OpenClaw's files in these places. `~/.openclaw` is OpenClaw's state folder (`OPENCLAW_STATE_DIR` moves it), and `~/.clawboo` is Clawboo's (`CLAWBOO_HOME` moves it).
@@ -212,7 +214,7 @@ To back up or reset these folders, see [Where Clawboo keeps data](/operating/dat
 
 Clawboo keeps two connections to the Gateway. Both use a device identity that you approved once during setup, stored in `~/.clawboo/proxy-device-identity.json`. That identity only proves Clawboo to the Gateway; it does not protect the dashboard itself (see [Self-host securely](/guides/self-host-securely)).
 
-**The server's own connection** stays open whenever the Gateway runs, with or without a browser tab. Over it, Clawboo:
+**The server's own connection** stays open once something needs the Gateway (see [How Clawboo connects](#how-clawboo-connects)), with or without a browser tab. Over it, Clawboo:
 
 - runs every OpenClaw agent turn in team chat, including the tasks those agents are given;
 - runs OpenClaw agent Routines, and lists the Gateway's own cron jobs on the Routines page, where you can turn them on or off, run them or delete them;
@@ -224,6 +226,18 @@ Clawboo keeps two connections to the Gateway. Both use a device identity that yo
 **The browser's connection** goes through the Clawboo server, which adds the saved Gateway token, so the server never sends that token to the browser. It carries your 1:1 chats with an OpenClaw agent and streams replies as they arrive. The Clawboo server forwards those replies without reading them, so an OpenClaw Boo Zero cannot hand work to a team from its own chat. Ask in the team's chat instead, where the server runs it. See [Boo Zero](/using/boo-zero#give-a-team-work-from-this-chat).
 
 **When the Gateway is down**, your OpenClaw agents still show (from Clawboo's last copy) but can't run. You can't create an OpenClaw agent or edit its files: **Create Boo** makes a Clawboo Native agent instead, and says so. Deleting an OpenClaw agent is remembered and sent to the Gateway when it reconnects. If you also have agents on other runtimes, the dashboard loads as usual with a banner, "OpenClaw Gateway is offline", and a **Reconnect** button.
+
+### How Clawboo connects
+
+The server connects to the Gateway only once something needs it. A Gateway that a service manager starts on its first connection, such as a systemd socket unit on a small Linux machine, then stays asleep while nothing uses OpenClaw. Each of these is a need:
+
+- **An OpenClaw agent exists** in Clawboo and is not archived, or, while OpenClaw is still set up, the delete of one is still owed to the Gateway (it was deleted while the Gateway was down). An install with OpenClaw agents connects at every start, as before.
+- **You open OpenClaw** in **Settings** > **Runtimes**, or start the Gateway from Clawboo (setup, **Reconnect**, **Start** or **Restart**).
+- **The dashboard opens its own Gateway connection.** It does that only once the Gateway is in use, so loading the dashboard is not a need.
+- **A routine for an OpenClaw agent falls due.** The fire waits for the connection it starts, as it waits for any Gateway still coming up.
+- **A request that needs the Gateway**: creating an OpenClaw agent or a sync without a body, when a Gateway is set up, or a change to the Gateway address or token. A create or sync on a Gateway nothing used yet waits up to about 5 seconds for the connection, and answers `503` if it is not up by then; try it again a few seconds later.
+
+Until then the server neither connects nor probes the Gateway's port, and reports the Gateway as not in use rather than unreachable. So a new Clawboo next to an OpenClaw you already use shows none of its agents at first: the welcome screen says OpenClaw is set up and offers **Open OpenClaw**, which opens its row and brings them in. OpenClaw's row reads **Not in use**, for a Gateway named in Clawboo's settings as well as one set up on this machine. [System Health](/using/system-health) passes the Gateway check as "not in use yet". The dashboard loads with no Gateway connection and no offline banner, and **Capabilities** shows no warning for OpenClaw. The Gateway's own cron jobs are not read, so [`GET /api/system/idle`](/reference/rest-api/system#sleep-and-wake) reports that source `off` with the reason `not_in_use`. Once something needs the Gateway, the server stays connected, and reconnects after a drop, until it stops.
 
 For the protocol detail, see [Gateway and events](/internals/gateway-and-events).
 
@@ -359,9 +373,9 @@ The card shows what the approval step reported:
 </Accordion>
 <Accordion title="The API answers 503 gateway_disconnected">
 
-**What it means:** the request needs the Gateway (creating an OpenClaw agent, reading or writing its files), and Clawboo's server isn't connected to it.
+**What it means:** the request needs the Gateway (creating an OpenClaw agent, reading or writing its files), and Clawboo's server isn't connected to it. A create or a sync that finds a Gateway set up and not yet in use starts the connection and waits up to about 5 seconds for it, so this can also mean the Gateway is still starting.
 
-**Fix:** start the Gateway from **Settings > Runtimes > OpenClaw**, then try again.
+**Fix:** start the Gateway from **Settings > Runtimes > OpenClaw**, or wait a few seconds, then try again.
 
 </Accordion>
 </AccordionGroup>

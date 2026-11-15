@@ -265,21 +265,26 @@ function checkGatewayProbeTimeoutMs(): number {
   return DEFAULTS.gatewayProbeTimeoutMs
 }
 
+/** What `readGatewayConnection` answers while nothing uses the Gateway. */
+const NOT_IN_USE = 'not-in-use'
+
 /** One instantaneous read of the source's connection state, bounded so a wedged
  *  `health()` cannot hang the probe. The read itself is cheap: an in-memory field
- *  plus one settings row, never a network round trip. */
+ *  plus one settings row (and one agents row while nothing uses the Gateway),
+ *  never a network round trip. */
 async function readGatewayConnection(timeoutMs: number): Promise<string> {
   const health = await Promise.race([
     // .catch() so a late health() rejection (after the timeout wins the race) can
     // never surface as an unhandled rejection.
     getRegistry()
       .source.health()
-      .catch(() => ({ connection: 'error' })),
-    new Promise<{ connection: string }>((resolve) =>
+      .catch(() => ({ connection: 'error', inUse: undefined })),
+    new Promise<{ connection: string; inUse?: boolean }>((resolve) =>
       setTimeout(() => resolve({ connection: 'timeout' }), timeoutMs).unref(),
     ),
   ])
-  return health.connection
+  // Nothing has needed the Gateway, so the source is not trying to connect.
+  return health.inUse === false ? NOT_IN_USE : health.connection
 }
 
 /**
@@ -309,13 +314,23 @@ async function probeGatewayConnection(): Promise<CheckOutcome> {
   const deadline = Date.now() + timeoutMs
 
   let connection = await readGatewayConnection(timeoutMs)
-  while (connection !== 'connected' && Date.now() < deadline) {
+  while (connection !== 'connected' && connection !== NOT_IN_USE && Date.now() < deadline) {
     await new Promise<void>((resolve) => setTimeout(resolve, GATEWAY_SETTLE_POLL_MS).unref())
     connection = await readGatewayConnection(Math.max(1, deadline - Date.now()))
   }
 
   if (connection === 'connected') {
     return { ok: true, message: 'OpenClaw Gateway reachable + synced' }
+  }
+  // Set up, with no OpenClaw agent and nothing else that needed it yet. The
+  // server connects when something does, so a Gateway that starts on its first
+  // connection stays asleep; "not reachable" would be a false alarm.
+  if (connection === NOT_IN_USE) {
+    return {
+      ok: true,
+      message:
+        'OpenClaw Gateway not in use yet (skipped): Clawboo connects when something needs it',
+    }
   }
   return {
     ok: false,

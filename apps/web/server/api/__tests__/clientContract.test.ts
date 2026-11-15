@@ -224,6 +224,7 @@ const PINNED_ROUTES = [
   'POST /api/agents',
   'POST /api/agents/sync',
   'GET /api/agents/registry/health',
+  'POST /api/agents/registry/connect',
   'POST /api/agents/cleanup-ghosts',
   'GET /api/agents/:agentId',
   'PATCH /api/agents/:agentId/model',

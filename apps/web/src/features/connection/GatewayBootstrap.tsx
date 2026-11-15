@@ -66,7 +66,13 @@ import { useBooZeroStore, identifyBooZero } from '@/stores/booZero'
 import { hydrateTeams } from '@/lib/hydrateTeams'
 import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
 import { TEAM_ACCENT_PRESETS } from '@/features/teams/TeamAccentPicker'
-import { apiFetch, consumeApiSSE, pushAgentSync, listAgents } from '@clawboo/control-client'
+import {
+  apiFetch,
+  consumeApiSSE,
+  fetchRegistryHealth,
+  pushAgentSync,
+  listAgents,
+} from '@clawboo/control-client'
 import { fetchAgentModelMap } from '@/lib/agentModelMap'
 import type { AgentState } from '@/stores/fleet'
 import type { SystemInfo } from '@/stores/system'
@@ -799,15 +805,34 @@ export function GatewayBootstrap() {
         return true
       }
 
+      // Nothing uses the Gateway yet (no OpenClaw agent, view or routine): the
+      // server has not connected and neither does this page. Opening the Gateway
+      // proxy would wake a Gateway that starts on its first connection, so load
+      // the dashboard without it, and with no banner: a Gateway nobody uses is not
+      // one that is down. Opening OpenClaw in Runtimes is what connects.
+      const enterWithoutGateway = async (): Promise<void> => {
+        const r = await enterNativeMode(null)
+        if (!r.ok) {
+          setNativeError('Could not load your workspace. The server may be restarting.')
+        }
+      }
+
       setAutoConnecting(true)
       try {
         // 1. Check system status first
         let gatewayRunning = true // optimistic default if status check fails
+        let statusRead = false
         try {
           const statusResp = await apiFetch('/api/system/status')
           if (statusResp.ok) {
             const systemInfo = (await statusResp.json()) as SystemInfo
             gatewayRunning = systemInfo.gateway.running
+            statusRead = true
+
+            if (systemInfo.gateway.inUse === false) {
+              await enterWithoutGateway()
+              return
+            }
 
             // Gateway not running but OpenClaw is installed & configured
             // → show lightweight "Gateway Offline" overlay instead of full connect screen
@@ -823,6 +848,12 @@ export function GatewayBootstrap() {
           }
         } catch {
           // Status check failed — proceed with optimistic auto-connect
+        }
+        // Unread status (a restart, a rate limit): ask the registry before
+        // dialing. A failed read of that says in use, so the dial goes ahead.
+        if (!statusRead && !(await fetchRegistryHealth()).inUse) {
+          await enterWithoutGateway()
+          return
         }
 
         // 2. If Gateway is running (or status unknown), try normal auto-connect

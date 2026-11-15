@@ -207,19 +207,53 @@ export interface RegistryHealth {
   ok: boolean
   connection: 'connected' | 'connecting' | 'reconnecting' | 'disconnected'
   lastSyncedAt: number | null
+  /** False while nothing has needed the Gateway, so the server has not connected
+   *  to it (it connects on demand): 'disconnected' then means "not in use", not
+   *  "unreachable". True otherwise, including on a read that failed. */
+  inUse: boolean
+  /** Whether this install set up a Gateway at all: settings name one, or
+   *  OpenClaw's own config exists. False on a read that failed. */
+  configured: boolean
+}
+
+function toRegistryHealth(body: Partial<RegistryHealth>): RegistryHealth {
+  return {
+    ok: body.ok === true,
+    connection: body.connection ?? 'disconnected',
+    lastSyncedAt: body.lastSyncedAt ?? null,
+    inUse: body.inUse !== false,
+    configured: body.configured === true,
+  }
+}
+
+const UNKNOWN_HEALTH: RegistryHealth = {
+  ok: false,
+  connection: 'disconnected',
+  lastSyncedAt: null,
+  inUse: true,
+  configured: false,
 }
 
 export async function fetchRegistryHealth(): Promise<RegistryHealth> {
   try {
     const res = await apiFetch('/api/agents/registry/health')
-    if (!res.ok) return { ok: false, connection: 'disconnected', lastSyncedAt: null }
-    const body = (await res.json()) as Partial<RegistryHealth>
-    return {
-      ok: body.ok === true,
-      connection: body.connection ?? 'disconnected',
-      lastSyncedAt: body.lastSyncedAt ?? null,
-    }
+    if (!res.ok) return { ...UNKNOWN_HEALTH }
+    return toRegistryHealth((await res.json()) as Partial<RegistryHealth>)
   } catch {
-    return { ok: false, connection: 'disconnected', lastSyncedAt: null }
+    return { ...UNKNOWN_HEALTH }
+  }
+}
+
+/** A person opened OpenClaw's views: ask the server to connect to the Gateway
+ *  (it connects on demand, and stays connected once it has). Answers with the
+ *  health once the first attempt settles, or after a few seconds while a Gateway
+ *  is still starting. Defensive: reports disconnected on any error. */
+export async function connectOpenClawGateway(): Promise<RegistryHealth> {
+  try {
+    const res = await apiFetch('/api/agents/registry/connect', { method: 'POST' })
+    if (!res.ok) return { ...UNKNOWN_HEALTH }
+    return toRegistryHealth((await res.json()) as Partial<RegistryHealth>)
+  } catch {
+    return { ...UNKNOWN_HEALTH }
   }
 }

@@ -88,6 +88,7 @@ export const AUTOMATIC_WRITE_ROUTES: ReadonlySet<string> = new Set([
   'POST /api/chat-history',
   // Sent as a dialog or a setup panel opens, or a personality edit is left.
   'POST /api/access/launch-code',
+  'POST /api/agents/registry/connect',
   'POST /api/system/auto-configure-openclaw',
   'POST /api/system/install-openclaw',
   'POST /api/system/gateway',

@@ -108,6 +108,11 @@ export interface OpenClawAgentSourceDeps {
    *  the default local address, so its URL alone cannot say. Absent: a URL in
    *  settings counts as set up. */
   isConfigured?: () => boolean
+  /** Whether this install needs the Gateway by itself, before anything asks for
+   *  it: the registry answers whether an OpenClaw agent exists. While this is
+   *  false and nothing has called `markInUse`, the source opens no connection
+   *  (see "On demand" below). Absent: always, so the source connects at start. */
+  hasStandingNeed?: () => boolean
   /** Construct a fresh Gateway client (the registry injects the real one + signer). */
   makeClient: () => OpenClawClientLike
   /** Connect options the registry supplies (token + signConnect). */
@@ -142,6 +147,31 @@ export function pendingUpstreamDeletes(db: ClawbooDb): Set<string> {
     .where(like(settings.key, `${PENDING_DELETE_PREFIX}%`))
     .all()
   return new Set(rows.map((r) => r.key.slice(PENDING_DELETE_PREFIX.length)))
+}
+
+/** Whether an OpenClaw agent exists that is not archived. */
+export function hasLiveOpenClawAgent(db: ClawbooDb): boolean {
+  const row = db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(and(eq(agents.sourceId, 'openclaw'), isNull(agents.archivedAt)))
+    .limit(1)
+    .get()
+  return row !== undefined
+}
+
+/**
+ * What has the server connect to the Gateway at start, before anything asks for
+ * it (see "On demand" in the source): an OpenClaw agent that is not archived, or
+ * a delete of one still owed to a Gateway that is still set up. The second
+ * matters once the last OpenClaw agent was deleted while the Gateway was down:
+ * without it the delete would wait for a connection nothing opens, and a Gateway
+ * that runs anyway would keep running that agent. With OpenClaw removed since,
+ * there is nothing to send it to.
+ */
+export function hasStandingGatewayNeed(db: ClawbooDb, isConfigured: () => boolean): boolean {
+  if (hasLiveOpenClawAgent(db)) return true
+  return pendingUpstreamDeletes(db).size > 0 && isConfigured()
 }
 
 function clearPendingDelete(db: ClawbooDb, gatewayId: string): void {
@@ -244,6 +274,12 @@ export class OpenClawAgentSource implements AgentSource {
   private connection: HealthResult['connection'] = 'disconnected'
   private connecting = false
   private stopped = false
+  // `start()` has run. A need noted before it (a request served while the server
+  // is still booting) connects at start, once the MCP base URL is known.
+  private started = false
+  // Something needed the Gateway since this process started. Sticky: the
+  // connection then stays up, and retries, until the server stops.
+  private inUse = false
   // Set when the last connect failed for an AUTH-class reason. Suppresses the
   // per-delivery `reconnectAndWait` re-attempt (the amplifier that hammers the
   // Gateway) and routes the retry to the long AUTH_RETRY_FLOOR_MS backoff. Cleared
@@ -290,6 +326,92 @@ export class OpenClawAgentSource implements AgentSource {
   isConfigured(): boolean {
     if (this.deps.isConfigured) return this.deps.isConfigured()
     return Boolean(this.deps.loadSettings().gatewayUrl?.trim())
+  }
+
+  // ── On demand ─────────────────────────────────────────────────────────────
+  //
+  // A Gateway that a service manager starts on its first connection stays asleep
+  // until something here needs it, so connecting at every boot would start it at
+  // every boot. The source therefore connects only once something does:
+  //
+  //   - an OpenClaw agent exists (`hasStandingNeed`, read at start and on every
+  //     `isInUse()` until it says yes);
+  //   - a person opens OpenClaw's views, or the dashboard opens the Gateway
+  //     proxy, or an OpenClaw routine falls due (each calls `markInUse`);
+  //   - an explicit `reconnect()` (a settings change, a Gateway start, an
+  //     OpenClaw delivery).
+  //
+  // Until then the source reports `inUse: false`, and readers say "not in use"
+  // rather than "unreachable". Once in use it stays in use until the process
+  // stops: the connection is held and retried as before.
+
+  /** Whether something needs the Gateway. Noticing a standing need (an OpenClaw
+   *  agent) marks the source in use, which connects it once started. */
+  isInUse(): boolean {
+    if (this.inUse) return true
+    if (!this.standingNeed()) return false
+    this.markInUse('an OpenClaw agent exists')
+    return true
+  }
+
+  /** Something needs the Gateway now: connect (once started), and keep the
+   *  connection until the process stops. Idempotent. */
+  markInUse(reason: string): void {
+    if (this.inUse) return
+    this.inUse = true
+    this.log('info', { reason }, 'agent-source: the OpenClaw Gateway is needed; connecting')
+    if (this.started && !this.stopped) void this.openConnection()
+  }
+
+  /**
+   * `markInUse`, then wait (bounded) for the first connect attempt to settle, so
+   * a caller can answer with a state that means something: connected, or down
+   * after a real try. Never throws.
+   */
+  async markInUseAndWait(reason: string, timeoutMs = 5_000): Promise<HealthResult> {
+    this.markInUse(reason)
+    // A connect attempt sets 'connecting' synchronously, so there is no window
+    // between this check and the subscription below.
+    if (this.connection === 'connecting' || this.connection === 'reconnecting') {
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const done = (): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          unsubscribe()
+          resolve()
+        }
+        const unsubscribe = this.onConnectionChange((c) => {
+          if (c === 'connected') done()
+          // A reconnect stops and starts in one go, and the stop says
+          // 'disconnected' on the way: answer only if no new attempt follows.
+          else if (c === 'disconnected')
+            setTimeout(() => {
+              if (this.connection !== 'connecting' && this.connection !== 'reconnecting') done()
+            }, 0)
+        })
+        const timer = setTimeout(done, timeoutMs)
+        timer.unref?.()
+      })
+    }
+    return this.health()
+  }
+
+  private standingNeed(): boolean {
+    if (!this.deps.hasStandingNeed) return true
+    try {
+      return this.deps.hasStandingNeed()
+    } catch (err) {
+      // A need that cannot be read is assumed: connecting is what every server
+      // did before connections were made on demand.
+      this.log(
+        'warn',
+        { err: String(err) },
+        'agent-source: could not read whether OpenClaw is used',
+      )
+      return true
+    }
   }
 
   /** The Gateway URL settings name (the default local address when none is set). */
@@ -538,13 +660,31 @@ export class OpenClawAgentSource implements AgentSource {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  /** Begin. Connects only when something needs the Gateway (see "On demand");
+   *  otherwise a later `markInUse` connects. */
   async start(): Promise<void> {
     this.stopped = false
+    this.started = true
+    // Read here rather than through isInUse(), whose markInUse would start a
+    // connect of its own that this call could then not wait for.
+    if (!this.inUse && this.standingNeed()) {
+      this.inUse = true
+      this.log('info', { reason: 'an OpenClaw agent exists' }, 'agent-source: connecting at start')
+    }
+    if (!this.inUse) {
+      this.setConnection('disconnected')
+      return
+    }
     await this.openConnection()
   }
 
   async stop(): Promise<void> {
     this.stopped = true
+    // A connect still in flight belongs to the client torn down below, and a
+    // disconnected GatewayClient never settles it. Left set, this flag would make
+    // every later openConnection return early, and the source would never
+    // connect again until the server restarts.
+    this.connecting = false
     if (this.retryTimer) clearTimeout(this.retryTimer)
     if (this.resyncTimer) clearTimeout(this.resyncTimer)
     this.retryTimer = null
@@ -608,9 +748,15 @@ export class OpenClawAgentSource implements AgentSource {
 
   /** Re-read settings + reconnect (called when settings change or the gateway starts).
    *  Clears any auth block: an explicit reconnect means "the credentials/pairing may
-   *  have changed — try again now" (the recovery path out of the long auth backoff). */
+   *  have changed, try again now" (the recovery path out of the long auth backoff).
+   *  Every caller is something that needs the Gateway (a person setting it up or
+   *  starting it, an OpenClaw delivery), so it marks the source in use. */
   async reconnect(): Promise<void> {
     this.authBlocked = false
+    if (!this.inUse) {
+      this.inUse = true
+      this.log('info', { reason: 'a reconnect was asked for' }, 'agent-source: connecting')
+    }
     await this.stop()
     await this.start()
   }
@@ -673,13 +819,15 @@ export class OpenClawAgentSource implements AgentSource {
     }
     this.connecting = true
     this.setConnection('connecting')
-    let client: OpenClawClientLike
+    let client: OpenClawClientLike | null = null
     try {
       client = this.deps.makeClient()
       this.client = client
       this.unsubStatus = client.onStatus((status) => this.onStatus(status))
       this.unsubEvent = client.onEvent((frame) => this.onGatewayEvent(frame))
       await client.connect(gatewayUrl, this.deps.connectOptions())
+      // Stopped or replaced while connecting (a reconnect): that client is gone.
+      if (this.client !== client) return
       this.connecting = false
       this.retries = 0
       this.authBlocked = false
@@ -691,6 +839,9 @@ export class OpenClawAgentSource implements AgentSource {
         this.log('warn', { err: String(err) }, 'agent-source: initial sync failed'),
       )
     } catch (err) {
+      // As above: the failure of a client a stop already tore down is not ours,
+      // and tearing down here would end the connect that replaced it.
+      if (client !== null && this.client !== client) return
       this.connecting = false
       this.teardownClient()
       this.setConnection('disconnected')
@@ -1250,10 +1401,14 @@ export class OpenClawAgentSource implements AgentSource {
   async health(): Promise<HealthResult> {
     const db = this.db()
     const last = getSetting(db, SETTING_LAST_SYNCED)
+    const inUse = this.isInUse()
     return {
       ok: this.connection === 'connected',
       connection: this.connection,
       lastSyncedAt: last ? Number(last) : null,
+      inUse,
+      configured: this.isConfigured(),
+      ...(inUse ? {} : { message: 'not in use' }),
     }
   }
 

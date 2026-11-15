@@ -4,10 +4,13 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { connectMock } = vi.hoisted(() => ({ connectMock: vi.fn() }))
+const { connectMock, disconnectMock } = vi.hoisted(() => ({
+  connectMock: vi.fn(),
+  disconnectMock: vi.fn(),
+}))
 
 vi.mock('@clawboo/gateway-client', () => ({
-  GatewayClient: vi.fn(() => ({ connect: connectMock })),
+  GatewayClient: vi.fn(() => ({ connect: connectMock, disconnect: disconnectMock })),
   resolveProxyGatewayUrl: () => 'ws://proxy/api/gateway/ws',
   // The browser announces itself as `webchat-ui`, NOT the Control UI: 2026.9
   // build-checks `openclaw-control-ui` and refuses a browser that cannot match
@@ -32,6 +35,7 @@ describe('connectGatewayFromSettings', () => {
   beforeEach(() => {
     connectMock.mockReset()
     connectMock.mockResolvedValue(undefined)
+    disconnectMock.mockReset()
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -85,5 +89,20 @@ describe('connectGatewayFromSettings', () => {
     stubSettings({ gatewayUrl: 'ws://localhost:18789' })
     connectMock.mockRejectedValue(new Error('NOT_PAIRED'))
     await expect(connectGatewayFromSettings()).rejects.toThrow('NOT_PAIRED')
+  })
+
+  it('disconnects a client whose connect failed, so it does not redial for good', async () => {
+    // A failed connect arms the client's own reconnect loop, and the caller gets
+    // no client to stop: each redial would be a failed sign-in at the Gateway.
+    stubSettings({ gatewayUrl: 'ws://localhost:18789' })
+    connectMock.mockRejectedValue(new Error('NOT_PAIRED'))
+    await expect(connectGatewayFromSettings()).rejects.toThrow('NOT_PAIRED')
+    expect(disconnectMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a connected client connected', async () => {
+    stubSettings({ gatewayUrl: 'ws://localhost:18789' })
+    await connectGatewayFromSettings()
+    expect(disconnectMock).not.toHaveBeenCalled()
   })
 })

@@ -126,6 +126,8 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     for (const run of listQueuedRuns(db)) {
       if (routineStartRefusal(db, run) !== null) continue
       if (gateway && routineNeedsGateway(db, run, gateway)) {
+        // The wait ends when the connection comes up, so make sure one is opened.
+        gateway.markInUse?.()
         seen.add(run.id)
         let since = waitingSince.get(run.id)
         if (since === undefined) {
@@ -449,6 +451,7 @@ export function serverGateway(): GatewayState {
   return {
     configured: () => getRegistry().source.isConfigured(),
     connected: () => getRegistry().source.isConnected(),
+    markInUse: () => getRegistry().source.markInUse('an OpenClaw routine is due'),
   }
 }
 

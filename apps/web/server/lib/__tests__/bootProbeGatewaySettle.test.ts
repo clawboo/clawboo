@@ -8,7 +8,8 @@
 //
 // A warning that is always wrong is worse than no warning. These tests pin both
 // halves of the fix: a connection that lands late is reported reachable, and a
-// Gateway that never comes up is still reported unreachable.
+// Gateway that never comes up is still reported unreachable. A Gateway nothing
+// uses yet (the server connects on demand) is reported not in use, at once.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,6 +18,8 @@ const connectionState = {
   reads: 0,
   /** When set, the connection lands at this read, whenever the probe gets to it. */
   connectAtRead: 0,
+  /** What the source says while nothing has needed the Gateway (undefined: in use). */
+  inUse: undefined as boolean | undefined,
 }
 
 vi.mock('../agentSource', () => ({
@@ -34,6 +37,7 @@ vi.mock('../agentSource', () => ({
           ok: connectionState.value === 'connected',
           connection: connectionState.value,
           lastSyncedAt: null,
+          ...(connectionState.inUse !== undefined ? { inUse: connectionState.inUse } : {}),
         })
       },
     },
@@ -68,6 +72,7 @@ beforeEach(async () => {
   connectionState.value = 'connecting'
   connectionState.reads = 0
   connectionState.connectAtRead = 0
+  connectionState.inUse = undefined
 })
 
 afterEach(async () => {
@@ -109,6 +114,29 @@ describe('boot probe: Gateway connection settling', () => {
     expect(gatewayCheck(report)?.ok).toBe(false)
     expect(report.degraded).toContain('openclawGatewayReachable')
     expect(report.fatal).toEqual([]) // degraded, never fatal: SQLite still serves
+  })
+
+  it('reports NOT IN USE, passing and without waiting, while nothing needs the Gateway', async () => {
+    // An install with OpenClaw set up and no OpenClaw agent: the server has not
+    // connected on purpose, so a Gateway that starts on its first connection stays
+    // asleep. "Not reachable" would be a false alarm, and waiting the whole settle
+    // window for a connect nobody started would only slow the boot report.
+    connectionState.value = 'disconnected'
+    connectionState.inUse = false
+    const report = await runBootProbe({ port: 18790 })
+    const check = gatewayCheck(report)
+    expect(check?.ok).toBe(true)
+    expect(check?.message).toMatch(/not in use/)
+    expect(report.degraded).not.toContain('openclawGatewayReachable')
+    expect(check?.durationMs).toBeLessThan(1200)
+  })
+
+  it('a Gateway in use that never connects is still UNREACHABLE', async () => {
+    connectionState.value = 'disconnected'
+    connectionState.inUse = true
+    const report = await runBootProbe({ port: 18790 })
+    expect(gatewayCheck(report)?.ok).toBe(false)
+    expect(gatewayCheck(report)?.message).toMatch(/not reachable/)
   })
 
   it('reports reachable immediately when already connected, without waiting', async () => {

@@ -112,13 +112,13 @@ Every schedule from every source, with each one's `teamName` and `agentName` fil
     sourceId: 'clawboo-routine' | 'openclaw-gateway-cron' | 'hermes-gateway-jobs'
     ok: boolean
     degraded: boolean
-    reason?: string // 'gateway_disconnected', 'gateway_stopped', 'stale_cache', 'profile_unreadable', 'not_configured', or an error message
+    reason?: string // 'gateway_disconnected', 'gateway_stopped', 'stale_cache', 'profile_unreadable', 'not_configured', 'not_in_use', or an error message
     at: number      // epoch ms of this read
   }>
 }
 ```
 
-The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs. When the Hermes gateway is not running, the Hermes jobs source reports `reason: 'gateway_stopped'` with no cache, or `'stale_cache'`; a profile it could not read while the gateway runs makes it degraded with `reason: 'profile_unreadable'`, and that profile's jobs are left out. With no Hermes agents, or no Hermes that Clawboo installed, it reports `{ ok: false, degraded: false, reason: 'not_configured' }` and no jobs.
+The Routines source reports `{ ok: true, degraded: false }`. When its Gateway connection is down, the Gateway cron source reports `{ ok: false, degraded: true, reason: 'gateway_disconnected' }` with no cache, or `reason: 'stale_cache'` when it serves cached jobs. With no Gateway set up at all it reports `reason: 'not_configured'` and no jobs. With a Gateway set up that nothing uses yet, so the server has not connected to it (see [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects)), it reports `reason: 'not_in_use'` and no jobs. When the Hermes gateway is not running, the Hermes jobs source reports `reason: 'gateway_stopped'` with no cache, or `'stale_cache'`; a profile it could not read while the gateway runs makes it degraded with `reason: 'profile_unreadable'`, and that profile's jobs are left out. With no Hermes agents, or no Hermes that Clawboo installed, it reports `{ ok: false, degraded: false, reason: 'not_configured' }` and no jobs.
 
 ### Example
 
