@@ -50,7 +50,7 @@ import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
 import { stopAgentUser } from './lib/agentUser/boot'
-import { isAgentUserMode } from './lib/agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from './lib/agentUser/config'
 import { copyAgentStateIn } from './lib/agentUser/copyInAtBoot'
 import { bootAgentIsolation } from './lib/agentUser/serverBoot'
 import {
@@ -756,7 +756,13 @@ async function main() {
     // With agent isolation, the work folder belongs to the agent user, so older
     // work is COPIED in through the agent host instead (the originals stay, as
     // the rollback). Worktrees are rebuilt from their branches.
-    if (agentIsolation) {
+    if (agentIsolation && isAgentPoolMode(process.env)) {
+      // A user per agent: each agent starts with its own empty home. Copying
+      // older state in, per agent, is not built yet.
+      log.info(
+        'Agent isolation: each agent runs as its own user; older runtime homes and team folders are not copied in',
+      )
+    } else if (agentIsolation) {
       const report = await copyAgentStateIn(process.env, db)
       if (report.copied.length + report.skipped.length > 0) {
         log.info(

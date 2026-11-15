@@ -30,6 +30,7 @@ import { resolveAgentUserConfig, type AgentUserConfig } from './config'
 import { keepRuntimesDirApartFrom } from '../runtimeFolder'
 import { setUnavailableAgentBinaries } from '../runtimes/spawner'
 import type { HelloFrame } from './protocol'
+import { poolIsolationStatus, stopAgentPool } from './poolBoot'
 import { peekAgentHost, setActiveAgentHost } from './state'
 import { currentUserName, killAllAgentProcesses, lookupUser, socketProblem } from './system'
 import { installAgentWorktreeIo } from './worktreeIo'
@@ -115,7 +116,7 @@ let restarting = false
  * planted while it still ran as the server's user, say). macOS has no such
  * switch; there the startup check refuses setuid files in the work folder.
  */
-function noNewPrivsPrefix(): string[] {
+export function noNewPrivsPrefix(): string[] {
   if (process.platform !== 'linux') return []
   const setpriv = ['/usr/bin/setpriv', '/bin/setpriv'].find((p) => fs.existsSync(p))
   return setpriv ? [setpriv, '--no-new-privs'] : []
@@ -339,13 +340,24 @@ let lastUnavailable: CheckReport['unavailableRuntimes'] = []
  * What `/api/health` says about agent isolation: null when it is off; the
  * agent user, whether its host is running, and the runtimes it cannot run.
  */
-export function agentIsolationStatus(): {
-  user: string
-  uid: number
-  home: string
-  host: 'running' | 'down'
-  unavailableRuntimes: { runtime: string; path: string; reason: string }[]
-} | null {
+export function agentIsolationStatus():
+  | {
+      user: string
+      uid: number
+      home: string
+      host: 'running' | 'down'
+      unavailableRuntimes: { runtime: string; path: string; reason: string }[]
+    }
+  | {
+      mode: 'pool'
+      users: number
+      groups: number
+      hostsRunning: number
+      unavailableRuntimes: { runtime: string; path: string; reason: string }[]
+    }
+  | null {
+  const pooled = poolIsolationStatus()
+  if (pooled) return pooled
   const active = peekAgentHost()
   if (!active) return null
   return {
@@ -359,6 +371,7 @@ export function agentIsolationStatus(): {
 
 /** At shutdown, after the graceful pass: stop every agent process and the host. */
 export function stopAgentUser(): void {
+  stopAgentPool()
   watchStop?.()
   watchStop = null
   const active = peekAgentHost()

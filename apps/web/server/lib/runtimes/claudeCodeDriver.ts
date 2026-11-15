@@ -132,9 +132,12 @@ export interface SdkSpawnOptions {
 export function spawnTrackedClaudeProcess(
   opts: SdkSpawnOptions,
   onStderr: (chunk: string) => void,
+  /** The agent the run is for: with a user per agent it runs as that user. */
+  agentId: string | null = null,
 ): ChildProcess {
   const child = spawnAgentProcess({
     kind: 'runtime',
+    agentId,
     command: opts.command,
     args: opts.args,
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
@@ -604,7 +607,7 @@ export function createClaudeCodeDriver(
       // Spawn the CLI ourselves so its pid is known: shutdown reaps it, and the
       // next boot reaps it if this engine dies without one.
       options['spawnClaudeCodeProcess'] = (spawnOpts: SdkSpawnOptions) =>
-        spawnTrackedClaudeProcess(spawnOpts, (chunk) => stderrTail.push(chunk))
+        spawnTrackedClaudeProcess(spawnOpts, (chunk) => stderrTail.push(chunk), opts.agentId)
       for await (const msg of mod.query({ prompt: input.stream, options })) {
         if (finished) break
         if (msg.type === 'assistant') {

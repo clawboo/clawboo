@@ -148,3 +148,89 @@ export function agentUserPlan(p: PlanInput): string {
   )
   return lines.join('\n')
 }
+
+export interface PoolPlanInput {
+  platform: NodeJS.Platform
+  serverUser: string
+  serverHome: string
+  nodePath: string
+  /** How many agent users, and team groups, to make. */
+  users: number
+  teams: number
+  /** The first uid (and private gid) of the pool, and the first team gid. */
+  firstUid: number
+  firstTeamGid: number
+}
+
+/** `clawboo agent-user plan --pool <n> --teams <m>`: a user per agent. */
+export function agentPoolPlan(p: PoolPlanInput): string {
+  if (p.platform !== 'linux') {
+    return [
+      'A user per agent (CLAWBOO_AGENT_USERS) runs on Linux for now.',
+      'On this computer use one agent user for every agent: `clawboo agent-user plan`.',
+    ].join('\n')
+  }
+  const users = Array.from({ length: p.users }, (_, i) => `clawboo-a${i + 1}`)
+  const teams = Array.from({ length: p.teams }, (_, i) => `clawboo-t${i + 1}`)
+  const s = p.serverUser
+  const runAs =
+    teams.length > 0 ? `(${users.join(', ')} : ${teams.join(', ')})` : `(${users.join(', ')})`
+  const lines: string[] = [
+    `# A user per agent: ${p.users} agent users and ${p.teams} team groups, apart from ${s}.`,
+    '# Run these once, as an administrator. Clawboo never runs them itself.',
+    '',
+    '# 1. Each agent user with a group of its own, a private home and no password.',
+    'sudo install -d -m 755 /var/lib/clawboo-agents',
+  ]
+  users.forEach((u, i) => {
+    const id = p.firstUid + i
+    lines.push(
+      `sudo groupadd -g ${id} ${u} && sudo useradd -u ${id} -g ${id} -m -d /var/lib/clawboo-agents/${u} -s /bin/bash ${u} && sudo passwd -l ${u} && sudo chmod 700 /var/lib/clawboo-agents/${u}`,
+    )
+  })
+  lines.push(
+    '',
+    "# 2. The team groups. Nobody but the server is ever a member: an agent gets its team's group only while it is on that team.",
+  )
+  teams.forEach((t, i) => lines.push(`sudo groupadd -g ${p.firstTeamGid + i} ${t}`))
+  lines.push(
+    '',
+    `# 3. ${s} makes the team folders, so it is in every one of these groups. Log in again afterwards.`,
+    `sudo usermod -aG ${[...users, ...teams].join(',')} ${s}`,
+    '',
+    `# 4. Let ${s} start processes as each agent user, with a team's group, and nothing else.`,
+    '#    The users are written out: sudo takes a team group only then, not through an alias.',
+    `printf '%s\\n' '${s} ALL=${runAs} NOPASSWD: ALL' 'Defaults:${s} !requiretty' | sudo tee /etc/sudoers.d/clawboo >/dev/null`,
+    'sudo chmod 440 /etc/sudoers.d/clawboo',
+    'sudo visudo -cf /etc/sudoers.d/clawboo',
+    '',
+    "# 5. The work folder, the server's; setfacl for the team folders; limits; no jobs of their own.",
+    `sudo install -d -o ${s} -g ${s} -m 711 /var/lib/clawboo-work`,
+    'sudo apt-get install -y acl   # or: sudo dnf install -y acl',
+    ...users.map(
+      (u) =>
+        `printf '%s\\n' '${u} hard nproc 4096' '${u} hard nofile 65536' | sudo tee /etc/security/limits.d/${u}.conf >/dev/null`,
+    ),
+    `printf '%s\\n' ${users.join(' ')} | sudo tee -a /etc/cron.deny /etc/at.deny >/dev/null`,
+    `chmod 750 ${p.serverHome}`,
+    '',
+  )
+  if (p.nodePath.startsWith(p.serverHome + path.posix.sep)) {
+    lines.push(
+      `# Node runs from ${p.nodePath}, inside your home, where the agent users cannot reach it.`,
+      '# Install Node, Clawboo and each runtime where every user can run them, such as /usr/local or /opt.',
+      '',
+    )
+  }
+  const env = `CLAWBOO_AGENT_USERS=${users.join(',')}${teams.length > 0 ? ` CLAWBOO_AGENT_GROUPS=${teams.join(',')}` : ''} CLAWBOO_WORK_DIR=/var/lib/clawboo-work`
+  lines.push(
+    '# Then check it, and start Clawboo with the settings:',
+    `${env} clawboo agent-user check`,
+    `${env} clawboo`,
+    '',
+    '# Each agent gets a user when it is created and keeps it. With no user free, a new agent waits',
+    '# (its runs say so) until you add users or delete an agent. These users belong to this Clawboo',
+    '# only: it stops every process they run when it starts and when it stops.',
+  )
+  return lines.join('\n')
+}

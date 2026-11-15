@@ -128,7 +128,7 @@ With the sign-in in place, the setup writes no key, and if OpenClaw has no defau
 
 ### OpenClaw's own sandbox stays off
 
-OpenClaw can run its agents' tools in a Docker or Podman container of its own. Clawboo keeps that sandbox off (`agents.defaults.sandbox.mode: "off"` in `openclaw.json`), so OpenClaw's tools run on the same computer Clawboo and its other agents use. **Set up OpenClaw** writes it only when your config has no `agents.defaults.sandbox`, so a sandbox you set up yourself stays. `off` is OpenClaw's own default; Clawboo writes it out so it holds if a later OpenClaw changes that default.
+OpenClaw can run its agents' tools in a Docker or Podman container of its own. Clawboo keeps that sandbox off (`agents.defaults.sandbox.mode: "off"` in `openclaw.json`), so OpenClaw's tools run on the same computer Clawboo and its other agents use. **Set up OpenClaw** writes it only when your config has no `agents.defaults.sandbox`, so a sandbox you set up yourself stays. `off` is OpenClaw's own default; Clawboo writes it out so it holds if a later OpenClaw changes that default. [Agent isolation](/operating/agent-isolation), with one agent user or a user per agent, does not cover OpenClaw agents: they run inside the OpenClaw Gateway, as whoever started it.
 
 ## Default models
 

@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { childEnvFor } from '../../../agentHost/host'
 import { killProcessTree } from '../../runtimes/killTree'
 import { AgentHostError } from '../client'
-import { encodeFrame } from '../protocol'
+import { AGENT_HOST_PROTOCOL_VERSION, encodeFrame } from '../protocol'
 import {
   closed,
   collect,
@@ -39,7 +39,8 @@ describe.runIf(posix)('agent host protocol', () => {
     const hello = await h.client.waitForHello()
     expect(hello.uid).toBe(process.getuid?.())
     expect(hello.home).toBe(os.userInfo().homedir)
-    expect(hello.v).toBe(1)
+    expect(hello.v).toBe(AGENT_HOST_PROTOCOL_VERSION)
+    expect(hello.groups).toEqual(process.getgroups?.() ?? [])
   })
 
   it('starts a process and streams its output, exit code and close in order', async () => {
@@ -595,6 +596,7 @@ describe.runIf(posix)('agent host client, against a hostile host', () => {
         home: '/x',
         pid: 1,
         platform: 'linux',
+        groups: [1],
       }),
     )
     await expect(hello).rejects.toThrow(/protocol 99/)

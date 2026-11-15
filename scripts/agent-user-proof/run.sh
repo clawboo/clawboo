@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Prove agent isolation (CLAWBOO_AGENT_USER) in a Linux container with two
-# real users: a server user and an agent user.
+# Prove agent isolation in a Linux container with real users: a server user and
+# one agent user (CLAWBOO_AGENT_USER), then a pool with a user per agent
+# (CLAWBOO_AGENT_USERS).
 #
 # Run from anywhere, after `pnpm build`. Needs Docker. Each scenario prints
 # PASS / FAIL lines; the script exits non-zero on any failure.
@@ -21,6 +22,10 @@ EXTERNALS=(--external:better-sqlite3 --external:ws --external:pino --external:pi
   --target=node22 --log-level=warning --outfile="$OUT/agent-host.js"
 "$ESBUILD" "$HERE/proof.ts" --bundle --platform=node --format=cjs --target=node22 \
   --log-level=warning "${EXTERNALS[@]}" --outfile="$OUT/proof.cjs"
+"$ESBUILD" "$HERE/poolProof.ts" --bundle --platform=node --format=cjs --target=node22 \
+  --log-level=warning "${EXTERNALS[@]}" --outfile="$OUT/pool-proof.cjs"
+"$ESBUILD" "$HERE/beneathProof.ts" --bundle --platform=node --format=cjs --target=node22 \
+  --log-level=warning --outfile="$OUT/beneath-proof.cjs"
 if [ -f "$ROOT/apps/web/dist/server.js" ]; then cp "$ROOT/apps/web/dist/server.js" "$OUT/server.js"; fi
 cp "$HERE/fake-runtime.sh" "$HERE/fake-mcp.mjs" "$HERE/serverBoot.mjs" "$OUT/"
 cp "$ROOT/apps/web/server/agentHost/clawboo-launch.sh" "$OUT/clawboo-launch"
@@ -98,6 +103,22 @@ docker rm -f "$name" >/dev/null 2>&1 || true
 expect_line "$out" 'READY' 'the server was running with the host'
 if grep -q 'LAUNCHER_EXIT=0' <<<"$out"; then echo "FAIL  the launcher exits non-zero"; fail=1; else echo "PASS  the launcher exits non-zero"; fi
 expect_line "$out" 'AGENT_PROCS=0' 'no agent process survives'
+
+# A user per agent: three pool users on two teams, started through the pool's
+# one sudo rule, as the server user with its groups.
+POOL=(-e CLAWBOO_AGENT_USER= -e CLAWBOO_AGENT_USERS=clawboo-a1,clawboo-a2,clawboo-a3
+  -e CLAWBOO_AGENT_GROUPS=clawboo-t1,clawboo-t2 -e CLAWBOO_WORK_DIR=/srv/clawboo-work)
+AS_SERVER='cd /home/clawboo && exec setpriv --reuid=10001 --regid=10001 --init-groups env HOME=/home/clawboo'
+
+scenario "pool: each agent its own user; homes, profiles, displays, signals and team folders walled" \
+  docker run "${COMMON[@]}" "${POOL[@]}" "$IMAGE" sh -c "$AS_SERVER node /proof/pool-proof.cjs"
+
+scenario "pool: share operations stay beneath the share's root, even through a swapped folder" \
+  docker run "${COMMON[@]}" --user 10001 "$IMAGE" node /proof/beneath-proof.cjs
+
+scenario "pool: a pool user whose home another can list makes the check refuse" \
+  docker run "${COMMON[@]}" "${POOL[@]}" "$IMAGE" sh -c \
+  "chmod 755 /var/lib/clawboo-agents/a2 && $AS_SERVER node /proof/pool-proof.cjs refuse"
 
 echo
 if [ "$fail" = 0 ]; then echo "agent isolation proof: all passed"; else echo "agent isolation proof: FAILED"; fi

@@ -1081,7 +1081,42 @@ const SCHEMA_DDL = `
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_approval_rules_key    ON approval_rules (rule_key);
     CREATE INDEX IF NOT EXISTS        idx_approval_rules_grant   ON approval_rules (grant_id);
-    CREATE INDEX IF NOT EXISTS        idx_approval_rules_expires ON approval_rules (expires_at);`
+    CREATE INDEX IF NOT EXISTS        idx_approval_rules_expires ON approval_rules (expires_at);
+
+    -- The OS users of the agent user pool (CLAWBOO_AGENT_USERS), one row each,
+    -- synced from the setting at boot. An agent keeps its user for its life; a
+    -- deleted agent's user is wiped ('scrubbing') before another agent gets it.
+    -- in_pool = 0: the setting no longer names it, and nobody new gets it.
+    CREATE TABLE IF NOT EXISTS agent_os_users (
+      user_name   TEXT    PRIMARY KEY,
+      uid         INTEGER NOT NULL,
+      pool_order  INTEGER NOT NULL DEFAULT 0,
+      in_pool     INTEGER NOT NULL DEFAULT 1,
+      -- free | assigned | scrubbing
+      state       TEXT    NOT NULL DEFAULT 'free',
+      agent_id    TEXT,
+      assigned_at INTEGER,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_agent_os_users_agent
+      ON agent_os_users (agent_id) WHERE state = 'assigned';
+
+    -- The team groups of the pool (CLAWBOO_AGENT_GROUPS), the same way: a team
+    -- keeps its group for its life, and a deleted team's folders go before the
+    -- group is handed out again.
+    CREATE TABLE IF NOT EXISTS team_os_groups (
+      group_name  TEXT    PRIMARY KEY,
+      gid         INTEGER NOT NULL,
+      pool_order  INTEGER NOT NULL DEFAULT 0,
+      in_pool     INTEGER NOT NULL DEFAULT 1,
+      -- free | assigned | scrubbing
+      state       TEXT    NOT NULL DEFAULT 'free',
+      team_id     TEXT,
+      assigned_at INTEGER,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_team_os_groups_team
+      ON team_os_groups (team_id) WHERE state = 'assigned';`
 
 /**
  * Bring the database up to the schema above, so the file is immediately usable

@@ -22,15 +22,27 @@ import type { Readable, Writable } from 'node:stream'
 import {
   O_NONBLOCK,
   appendNoFollow,
+  collectEntries,
   mkdirMode,
   readBounded,
-  statType,
   toStat,
   writeAtomic,
 } from './fsOps'
 import {
+  beneathAppend,
+  beneathAvailable,
+  beneathList,
+  beneathMkdir,
+  beneathRead,
+  beneathRealpath,
+  beneathRename,
+  beneathRm,
+  beneathRmdir,
+  beneathStat,
+  beneathWrite,
+} from './beneath'
+import {
   AGENT_HOST_PROTOCOL_VERSION,
-  MAX_LIST_REPLY_CHARS,
   MAX_READ_BYTES,
   MAX_SEARCH_MATCHES,
   MAX_WRITE_BYTES,
@@ -63,6 +75,142 @@ function hasNoNewPrivs(): boolean {
   }
 }
 
+/**
+ * Throw `EACCES` unless `p` resolves inside `root` (both by their real paths).
+ * `whole`: `p` itself is followed (a listing, a realpath); otherwise its folder
+ * is, and its last part stays as named (the ops never follow a link there).
+ * A part that does not exist yet is checked through the nearest one that does.
+ */
+export function assertWithin(p: string, root: string, whole: boolean): void {
+  // Only a path as it stands: `..` or `.` parts would be read one way here and
+  // another way, through a link, by the operation itself.
+  if (!path.isAbsolute(p) || path.posix.normalize(p) !== p) {
+    throw Object.assign(new Error(`${p} is not a plain absolute path`), { code: 'EACCES' })
+  }
+  const realRoot = fs.realpathSync(root)
+  let probe = path.resolve(whole ? p : path.dirname(p))
+  let real: string | null = null
+  for (let i = 0; i < 64 && real === null; i++) {
+    try {
+      real = fs.realpathSync(probe)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      const up = path.dirname(probe)
+      if (up === probe) break
+      probe = up
+    }
+  }
+  const rel = real === null ? '..' : path.relative(realRoot, real)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw Object.assign(new Error(`${p} leads outside its share`), { code: 'EACCES' })
+  }
+}
+
+/**
+ * Throw `EACCES` when a folder on the way from `root` to `p` is a link (the
+ * last part may be one: removing a link removes the link). `p` is a plain
+ * absolute path under `root` (`assertWithin` checked).
+ */
+function assertNoLinkBelow(p: string, root: string): void {
+  const parts = path.relative(root, p).split(path.sep).filter(Boolean)
+  let cur = root
+  for (const part of parts.slice(0, -1)) {
+    cur = path.join(cur, part)
+    let st: fs.Stats
+    try {
+      st = fs.lstatSync(cur)
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT') return
+      throw err
+    }
+    if (!st.isDirectory()) {
+      throw Object.assign(new Error(`${p} goes through ${cur}, which is not a folder`), {
+        code: 'EACCES',
+      })
+    }
+  }
+}
+
+/** The parts of `p` below the share's spelled root; refused outside it. */
+function partsBelow(p: string, root: string): string[] {
+  const rel = path.relative(root, p)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw Object.assign(new Error(`${p} is outside its share`), { code: 'EACCES' })
+  }
+  return rel.split(path.sep).filter(Boolean)
+}
+
+/** A share's `fs.*` request, carried out through folder descriptors (Linux). */
+async function beneathOp(
+  f: Record<string, unknown>,
+  root: string,
+  realRoot: string,
+): Promise<Record<string, unknown>> {
+  const parts = (key: string): string[] => partsBelow(String(f[key]), root)
+  const mode = Number(f['mode']) & 0o777
+  switch (f['op']) {
+    case 'fs.read': {
+      const max = Number(f['maxBytes'])
+      const off = Number(f['offset'])
+      try {
+        const r = beneathRead(
+          realRoot,
+          parts('path'),
+          Number.isFinite(max) && max >= 0 ? max : MAX_READ_BYTES,
+          Number.isInteger(off) && off > 0 ? off : 0,
+        )
+        return {
+          missing: false,
+          data: r.data.toString('base64'),
+          size: r.size,
+          truncated: r.truncated,
+        }
+      } catch (err) {
+        if (errorCode(err) === 'ENOENT') return { missing: true }
+        throw err
+      }
+    }
+    case 'fs.write': {
+      const data = Buffer.from(String(f['data'] ?? ''), 'base64')
+      if (data.length > MAX_WRITE_BYTES)
+        throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
+      beneathWrite(realRoot, parts('path'), data, mode, true)
+      return {}
+    }
+    case 'fs.append': {
+      const data = Buffer.from(String(f['data'] ?? ''), 'base64')
+      if (data.length > MAX_WRITE_BYTES)
+        throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
+      beneathAppend(realRoot, parts('path'), data, mode)
+      return {}
+    }
+    case 'fs.mkdir':
+      beneathMkdir(realRoot, parts('path'), mode)
+      return {}
+    case 'fs.rm':
+      await beneathRm(realRoot, parts('path'))
+      return {}
+    case 'fs.rmdir':
+      beneathRmdir(realRoot, parts('path'))
+      return {}
+    case 'fs.rename':
+      beneathRename(realRoot, parts('from'), parts('to'))
+      return {}
+    case 'fs.stat':
+      return { stat: beneathStat(realRoot, parts('path')) }
+    case 'fs.realpath':
+      return { path: beneathRealpath(realRoot, parts('path')) }
+    case 'fs.list': {
+      const max = Math.max(0, Math.min(Number(f['max']) || 0, 100_000))
+      return await beneathList(realRoot, parts('path'), max)
+    }
+    default:
+      throw Object.assign(new Error(`${String(f['op'])} is not a share's file operation`), {
+        code: 'ENOSYS',
+      })
+  }
+}
+
 /** Who the host is, as the kernel says. */
 export function hostIdentity(): Omit<HelloFrame, 't' | 'v'> {
   const info = os.userInfo()
@@ -73,6 +221,7 @@ export function hostIdentity(): Omit<HelloFrame, 't' | 'v'> {
     home: info.homedir,
     pid: process.pid,
     platform: process.platform,
+    groups: typeof process.getgroups === 'function' ? process.getgroups() : [],
   }
 }
 
@@ -339,22 +488,7 @@ async function listDirAsync(
   max: number,
 ): Promise<{ entries: FsEntry[]; truncated: boolean }> {
   const names = (await fs.promises.readdir(dir)).sort()
-  const entries: FsEntry[] = []
-  let chars = 0
-  for (const [i, name] of names.slice(0, max).entries()) {
-    if (i % 512 === 511) await yieldNow()
-    // The reply is one line; past the budget, stop and say so rather than send
-    // a line the server would refuse as too long (and drop the connection).
-    chars += name.length * 2 + 96
-    if (chars > MAX_LIST_REPLY_CHARS) return { entries, truncated: true }
-    try {
-      const st = await fs.promises.lstat(path.join(dir, name))
-      entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
-    } catch {
-      /* gone between the listing and the stat */
-    }
-  }
-  return { entries, truncated: names.length > max }
+  return collectEntries(names, max, (name) => fs.promises.lstat(path.join(dir, name)))
 }
 
 export interface HostConnection {
@@ -530,6 +664,35 @@ export function serveConnection(
     if (f['t'] !== 'req' || typeof f['id'] !== 'number') return
     const id = f['id']
     try {
+      let confined: string | null = null
+      // A share's file (a team's folder, with a user per agent): every path the
+      // request names must resolve, links followed, inside the share's root,
+      // so a link a teammate planted cannot carry the request into this user's
+      // own home or anywhere else this user may write.
+      if (typeof f['within'] === 'string' && String(f['op']).startsWith('fs.')) {
+        const paths = [f['path'], f['from'], f['to']].filter(
+          (p): p is string => typeof p === 'string',
+        )
+        for (const p of paths)
+          assertWithin(p, f['within'], f['op'] === 'fs.list' || f['op'] === 'fs.realpath')
+        confined = fs.realpathSync(f['within'])
+        if (beneathAvailable()) {
+          // Linux: every step below the root through folder descriptors, so a
+          // folder a teammate swaps for a link mid-operation cannot redirect it.
+          return reply(id, await beneathOp(f, f['within'], confined))
+        }
+        if (process.platform === 'linux') {
+          throw Object.assign(
+            new Error("a share's file needs /proc/self/fd, which this system does not have"),
+            { code: 'EACCES' },
+          )
+        }
+        // Elsewhere (a user per agent runs on Linux only; this is for tests),
+        // by name, checked before and after.
+        if (f['op'] === 'fs.rm' || f['op'] === 'fs.rename' || f['op'] === 'fs.rmdir') {
+          for (const p of paths) assertNoLinkBelow(p, f['within'])
+        }
+      }
       switch (f['op']) {
         case 'ping':
           return reply(id, {})
@@ -563,6 +726,7 @@ export function serveConnection(
               String(f['path']),
               Number.isFinite(max) && max >= 0 ? max : MAX_READ_BYTES,
               Number.isInteger(off) && off > 0 ? off : 0,
+              confined,
             )
             return reply(id, {
               missing: false,
@@ -583,6 +747,7 @@ export function serveConnection(
           // cannot be set is refused, not written readable by others.
           writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777, {
             strictOwnerOnly: true,
+            within: confined,
           })
           return reply(id, {})
         }
@@ -590,11 +755,11 @@ export function serveConnection(
           const data = Buffer.from(String(f['data'] ?? ''), 'base64')
           if (data.length > MAX_WRITE_BYTES)
             throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
-          appendNoFollow(String(f['path']), data, Number(f['mode']) & 0o777)
+          appendNoFollow(String(f['path']), data, Number(f['mode']) & 0o777, confined)
           return reply(id, {})
         }
         case 'fs.mkdir':
-          mkdirMode(String(f['path']), Number(f['mode']) & 0o777)
+          mkdirMode(String(f['path']), Number(f['mode']) & 0o777, confined)
           return reply(id, {})
         case 'fs.rm':
           await fs.promises.rm(String(f['path']), { recursive: true, force: true })
@@ -713,6 +878,20 @@ export function serveConnection(
               return { path: p, ok: false, code: errorCode(err) }
             }
           })
+          return reply(id, { results })
+        }
+        case 'canSignal': {
+          const pids = Array.isArray(f['pids']) ? f['pids'].slice(0, 1000) : []
+          const results = pids
+            .filter((p): p is number => typeof p === 'number' && Number.isInteger(p) && p > 1)
+            .map((pid) => {
+              try {
+                process.kill(pid, 0)
+                return { pid, ok: true }
+              } catch (err) {
+                return { pid, ok: false, code: errorCode(err) }
+              }
+            })
           return reply(id, { results })
         }
         default:

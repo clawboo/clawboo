@@ -28,6 +28,7 @@ import { createLogger } from '@clawboo/logger'
 import { isLoopbackPortFree } from '../../portUtils'
 import { getRuntimeSecret, runtimeVaultReadable, setRuntimeSecret } from '../../secretsVault'
 import { killProcessTree } from '../killTree'
+import { isAgentPoolMode } from '../../agentUser/config'
 import { isAgentUserMode, spawnAgentProcess } from '../spawner'
 import { isSubprocessShutdown, registerRuntimeChild, unregisterRuntimeChild } from '../subprocess'
 import { createHermesClient, type HermesClient } from './client'
@@ -414,6 +415,14 @@ export class HermesGatewaySupervisor {
   }
 
   private async start(): Promise<HermesGatewayConnection> {
+    if (isAgentPoolMode()) {
+      // One gateway runs every Hermes agent's tools, so it would be one user
+      // for all of them; with a user per agent it does not start (yet).
+      this.state = 'failed'
+      this.lastError =
+        'Hermes runs one gateway for every Hermes agent, which is not available while each agent runs as its own user (CLAWBOO_AGENT_USERS).'
+      throw new Error(this.lastError)
+    }
     const command = this.deps.resolveCommand()
     if (!command) {
       this.state = 'not-installed'

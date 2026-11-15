@@ -19,7 +19,8 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 
 import { agentReadFile } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { agentUserHome, poolHomeHolding } from '../agentUser/poolRoute'
 import { agentHomeDir } from '../agentUser/state'
 import { isWindows, resolveRuntimeBin } from '../platform'
 
@@ -43,7 +44,15 @@ export function userCodexAuthPath(): string {
  * here, apart from the person's own. Null with the setting off. Throws when the
  * agent host is not running.
  */
-export function agentCodexHome(): string | null {
+export function agentCodexHome(
+  of: { agentId?: string | null; near?: string | null } = {},
+): string | null {
+  if (isAgentPoolMode()) {
+    // With a user per agent, the agent's own user's: named by the agent, or by
+    // a folder in that user's home (a run's CODEX_HOME). Null for neither.
+    const home = of.agentId ? agentUserHome(of.agentId) : of.near ? poolHomeHolding(of.near) : null
+    return home ? path.join(home, '.codex') : null
+  }
   return isAgentUserMode() ? path.join(agentHomeDir(), '.codex') : null
 }
 
@@ -86,9 +95,9 @@ export async function hasUsableCodexAuthIn(codexHome: string): Promise<boolean> 
 
 /** With agents on their own OS user: does that user hold a usable Codex login of
  *  its own? False with the setting off, or when the agent host is not running. */
-export async function isAgentCodexLoggedIn(): Promise<boolean> {
+export async function isAgentCodexLoggedIn(agentId: string | null = null): Promise<boolean> {
   try {
-    const home = agentCodexHome()
+    const home = agentCodexHome({ agentId })
     return home ? await hasUsableCodexAuthIn(home) : false
   } catch {
     return false

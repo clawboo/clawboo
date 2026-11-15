@@ -1,12 +1,15 @@
 ---
 title: 'Run agents as their own user'
 sidebarTitle: 'Agent isolation'
-description: "Set CLAWBOO_AGENT_USER so every agent runs as a separate operating system user that cannot read Clawboo's database, saved keys or settings, and how to set it up on Linux, macOS and in a container."
+description: "Set CLAWBOO_AGENT_USER so every agent runs as a separate operating system user that cannot read Clawboo's database, saved keys or settings, or CLAWBOO_AGENT_USERS for a user of its own per agent, and how to set them up on Linux, macOS and in a container."
 keywords:
   [
     'agent isolation',
     'CLAWBOO_AGENT_USER',
+    'CLAWBOO_AGENT_USERS',
+    'CLAWBOO_AGENT_GROUPS',
     'agent user',
+    'user per agent',
     'sandbox',
     'sudo',
     'sudoers',
@@ -20,6 +23,8 @@ keywords:
 By default, Claude Code, Codex, Hermes and Clawboo Native's commands run as your user account. They can open any file you can, including Clawboo's database and the vault that holds your saved keys. Set `CLAWBOO_AGENT_USER` and every agent runs as a separate user account instead, one that cannot read any of that. This page explains what that protects, what it does not, and how to set it up.
 
 It is off unless you set it. An install without the setting runs exactly as before.
+
+On Linux you can go one step further and give each agent a user of its own, so agents are walled off from each other too: see [A user per agent](#a-user-per-agent).
 
 <Note>
 Available from 0.7.0. Clawboo 0.6.0 and older ignore `CLAWBOO_AGENT_USER`, and agents keep running as you. Run `clawboo --version` to see yours.
@@ -44,7 +49,7 @@ It does **not**:
 
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
 - protect an agent's own credentials from that agent: the provider key in its environment, its sign-ins and its browser's saved logins, and a [website login](/using/website-logins) Clawboo filled into its page;
-- keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder, and on Linux one agent's programs can open another agent's display;
+- keep agents apart from each other. All agents share one agent user, so one team's agent can read another team's folder, and on Linux one agent's programs can open another agent's display. For that, give each agent its own user ([A user per agent](#a-user-per-agent));
 - keep one agent from acting as another on Clawboo's MCP servers. An agent's attach links are long-lived links that carry their own credential, and another agent can read them in that agent's runtime home (they share the agent user), or on the command line of a Claude Code run. That includes a run's Tools link, which carries the run's reference: while the run lasts, an agent that reads it can call [`fill_login`](/using/website-logins#what-this-protects-and-what-it-does-not) as that run, with its person's logins;
 - change what Clawboo's tools allow. Agents still reach the board, memory and team chat through Clawboo's MCP servers, and approvals, grants and budgets still apply;
 - cover OpenClaw agents. They run inside the OpenClaw Gateway, as whoever started it. Use OpenClaw's own sandbox for them;
@@ -202,6 +207,75 @@ The launcher:
 
 Before it connects, the server checks the folder's and the socket's owners and modes, and refuses anything else. Keep the data folder and the work folder apart: two volumes, or two top-level folders on one volume with different owners, such as `/data` and `/work`. Install the runtimes into a folder outside both, owned by root or the server user and writable by no one else, and name it with `CLAWBOO_RUNTIMES_DIR` (for example `/opt/clawboo-runtimes`, made when the image is built). The launcher and the agent host both run in the one container.
 
+## A user per agent
+
+Available in releases after 0.7.0. Clawboo 0.7.0 and older ignore `CLAWBOO_AGENT_USERS`. Run `clawboo --version` to see yours.
+
+With `CLAWBOO_AGENT_USERS` (Linux only for now), each agent runs as a user of its own, taken from a pool of users you make once. It is used instead of `CLAWBOO_AGENT_USER`, never with it, and everything above still holds. On top of it, one agent cannot:
+
+- list another agent's home, or read its runtime home (its sign-ins and sessions), its browser profile (cookies included) or its display's cookie;
+- connect to another agent's display;
+- signal another agent's processes;
+- reach the folder of a team it is not on.
+
+Agents on the same team share their team folder, and nothing else of each other's. A file one teammate leaves there still reaches another that opens or runs it, as with any shared folder, so put agents you do not trust on different teams. A check of an agent's work (its verify command, its reviewer, git on the team's history) runs as that agent, never as another teammate.
+
+### How it works
+
+- **Users.** An agent gets the next free user from the pool when it is created, oldest agent first, and keeps it for its life. Archiving an agent keeps its user. When an agent is deleted, its processes stop at once and its user is wiped before another agent gets it: its home emptied and its files in `/tmp`, `/var/tmp`, `/dev/shm` and `/run/user/<uid>` removed, each checked afterwards. A user that cannot be wiped stays out of use, and so does one whose uid changed.
+- **Teams.** Each team gets a group from `CLAWBOO_AGENT_GROUPS` the same way. An agent's processes run with its team's group (`sudo -g`) and nothing else, so moving an agent to another team (or out of one) stops its processes at once, and they start again with the new group. A deleted team's group is handed out again only once its folders are gone and no process holds it.
+- **Hosts.** Each agent user has its own agent host, started the first time that agent needs one and closed, with the agent's processes, after 10 minutes with nothing to do. A host that stops answering for 5 seconds costs only its own agent's processes: Clawboo stops every process of that user and starts the host again on the next need. One agent stopping its own host stops nobody else.
+- **The work folder** is yours, mode `0711`: agents pass through it and never list it. Each team's folders (its team folder, with its task folders inside, and the work check's history) sit under a folder Clawboo makes itself, owned by you, with the team's group and mode `2770`, and an inherited ACL that gives the team every file made inside. So a file one teammate writes, the others can read and change, while a file a program makes private (mode `0600`) stays private. An agent with no team gets the same kind of folder for itself alone, `teams/_agent-<agent id>`, instead of the shared `_no-team`.
+
+| What                                                  | Where, with a user per agent            | Owner and mode                                                    |
+| ----------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| An agent's runtime homes, browser profile and display | under the home of the agent's own user  | that user, `0700`                                                 |
+| The work folder (`CLAWBOO_WORK_DIR`, required)        | the folder you name                     | you, `0711`                                                       |
+| A team's folder, and its task folders                 | `<work folder>/teams/<team id>`         | you, the team's group, `2770`, with an inherited ACL for the team |
+| The folder of an agent with no team                   | `<work folder>/teams/_agent-<agent id>` | you, that agent user's own group, `2770`                          |
+
+### Not available yet with a user per agent
+
+- **Code tasks in a repository.** A task that would work in a checkout of a repository is refused with the reason; agents still work in their team folder. Task checkouts and the agents' copies of repositories are not laid out by team yet.
+- **Hermes.** The Hermes gateway runs every Hermes agent's tools in one process, so it would be one user for all of them. It does not start while `CLAWBOO_AGENT_USERS` is set.
+- **OpenClaw.** As with one agent user, OpenClaw agents run in the OpenClaw Gateway and are not covered.
+- **Connectors shared by every agent.** A connector with local reach and no saved credential is one program every agent talks to, so it does not start. Each agent's own browser works, and so do connectors that hold a saved credential (they run as you, as before).
+- **Sign-ins on the Runtimes page.** Each agent's Codex and Hermes sign-in would be its own, kept in its user's home, and the Runtimes page's sign-in does not pick an agent yet. Give Codex an API key, or Claude Code an API key or `CLAUDE_CODE_OAUTH_TOKEN`.
+- **Containers.** `clawboo-launch` starts one agent host; it does not start a pool.
+- **Older state.** Turning a pool on copies nothing in: each agent starts with an empty home, and its team with an empty folder.
+
+### When the pool is too small
+
+A new agent with no free user is still created, and its runs refuse with "has no agent user", saying to add users or delete an agent. The next user that is freed or added goes to the oldest agent waiting. A team with no free group works the same way. An agent never falls back to a shared user.
+
+### Set it up
+
+Print the commands, and run them once as an administrator:
+
+```bash
+clawboo agent-user plan --pool 8 --teams 4
+```
+
+They make the users `clawboo-a1` to `clawboo-a8`, each with a group of its own and a private home under `/var/lib/clawboo-agents`, and the team groups `clawboo-t1` to `clawboo-t4`. They put the user Clawboo runs as in every one of those groups (it makes the team folders), add one sudoers rule, make the work folder, and install `setfacl` (the `acl` package). The sudoers rule names every user one by one, because sudo lets a rule change the group only when the users are written out:
+
+```bash
+alice ALL=(clawboo-a1, clawboo-a2, clawboo-a3 : clawboo-t1, clawboo-t2) NOPASSWD: ALL
+```
+
+Log in again so the new groups apply. Then check, and start Clawboo with the same settings (without them it starts with isolation off):
+
+```bash
+CLAWBOO_AGENT_USERS=clawboo-a1,clawboo-a2,clawboo-a3 CLAWBOO_AGENT_GROUPS=clawboo-t1,clawboo-t2 CLAWBOO_WORK_DIR=/var/lib/clawboo-work clawboo agent-user check
+```
+
+```bash
+CLAWBOO_AGENT_USERS=clawboo-a1,clawboo-a2,clawboo-a3 CLAWBOO_AGENT_GROUPS=clawboo-t1,clawboo-t2 CLAWBOO_WORK_DIR=/var/lib/clawboo-work clawboo
+```
+
+`CLAWBOO_AGENT_USERS` also takes a range of user ids, such as `uid:20001-20008`, and `CLAWBOO_AGENT_GROUPS` a range of group ids, such as `gid:21001-21004`. Every user in the pool belongs to this Clawboo only: it stops every process they run when it starts and when it stops.
+
+The startup check runs the steps below once for the pool, and steps 6 to 9 once for each user, in that user's own host. It also refuses when two users share a uid, a primary group or a home, when an agent user is a member of another agent user's group or of a team group, when the user Clawboo runs as is missing from one of the groups, and when one agent user can list another's home or signal another's process.
+
 ## What the startup check proves
 
 `clawboo agent-user check` runs the same check the server runs at every start, without starting the dashboard or stopping anything. In order:
@@ -220,12 +294,14 @@ Before it connects, the server checks the folder's and the socket's owners and m
 
 ## Settings
 
-| Variable                    | What it does                                                                                                          |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `CLAWBOO_AGENT_USER`        | The agent user's name. Unset (the default) turns isolation off.                                                       |
-| `CLAWBOO_AGENT_SWITCH`      | `sudo` (default) or `doas`, to start the agent host on a computer or virtual machine.                                 |
-| `CLAWBOO_AGENT_HOST_SOCKET` | Set by `clawboo-launch`: the socket of an agent host the launcher started. The server connects instead of using sudo. |
-| `CLAWBOO_WORK_DIR`          | With isolation on, must be a folder the agent user owns. Defaults to `<agent home>/work`.                             |
+| Variable                    | What it does                                                                                                                                       |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAWBOO_AGENT_USER`        | The agent user's name. Unset (the default) turns isolation off.                                                                                    |
+| `CLAWBOO_AGENT_SWITCH`      | `sudo` (default) or `doas`, to start the agent host on a computer or virtual machine.                                                              |
+| `CLAWBOO_AGENT_HOST_SOCKET` | Set by `clawboo-launch`: the socket of an agent host the launcher started. The server connects instead of using sudo.                              |
+| `CLAWBOO_WORK_DIR`          | With isolation on, must be a folder the agent user owns. Defaults to `<agent home>/work`. With a user per agent it is required, and must be yours. |
+| `CLAWBOO_AGENT_USERS`       | A user per agent (Linux): the pool, as names (`clawboo-a1,clawboo-a2`) or a uid range (`uid:20001-20008`). Not with `CLAWBOO_AGENT_USER`.          |
+| `CLAWBOO_AGENT_GROUPS`      | With a user per agent: the team groups, as names or a gid range (`gid:21001-21004`).                                                               |
 
 ## Related
 

@@ -6,6 +6,7 @@
 
 import type { AgentHostClient } from './client'
 import type { AgentUserConfig } from './config'
+import type { AgentPool } from './poolHosts'
 import type { HelloFrame } from './protocol'
 
 export interface ActiveAgentHost {
@@ -31,8 +32,15 @@ export function setActiveAgentHost(next: ActiveAgentHost | null): void {
   active = next
 }
 
-/** The running host, or a throw that says why there is none. */
+/** The running host, or a throw that says why there is none. With a user per
+ *  agent there is no single host: callers pick one by agent or by path
+ *  (`poolRoute.ts`). */
 export function activeAgentHost(): ActiveAgentHost {
+  if (pool) {
+    throw new AgentHostUnavailableError(
+      'each agent runs as its own user (CLAWBOO_AGENT_USERS), so this needs the agent it is for',
+    )
+  }
   if (!active) throw new AgentHostUnavailableError()
   if (active.client.closed) throw new AgentHostUnavailableError(active.client.closed)
   return active
@@ -46,4 +54,23 @@ export function peekAgentHost(): ActiveAgentHost | null {
 /** The agent user's home folder, as the host reported it. */
 export function agentHomeDir(): string {
   return activeAgentHost().hello.home
+}
+
+// ── A user per agent (CLAWBOO_AGENT_USERS) ──────────────────────────────
+
+let pool: AgentPool | null = null
+
+export function setActiveAgentPool(next: AgentPool | null): void {
+  pool = next
+}
+
+/** The pool's hosts, or a throw when the pool is not running. */
+export function activeAgentPool(): AgentPool {
+  if (!pool) throw new AgentHostUnavailableError('the agent user pool has not started')
+  return pool
+}
+
+/** The pool's hosts, or null. */
+export function peekAgentPool(): AgentPool | null {
+  return pool
 }

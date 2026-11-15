@@ -32,6 +32,7 @@ import {
   type ToolDescriptor,
 } from '@clawboo/db'
 
+import { isAgentPoolMode } from '../agentUser/config'
 import { connectorInstanceIdForSlug } from '../capabilitySource/connectorIdentity'
 import {
   agentBrowserSession,
@@ -41,6 +42,8 @@ import {
   noteCallEnd,
   noteCallStart,
   desktopDriverListingEnv,
+  isPerAgentLaunch,
+  pooledConnectorRefusal,
   type AgentBrowserSpawn,
 } from './agentBrowsers'
 import { maskFilledValues } from '../logins/filledValues'
@@ -198,6 +201,18 @@ function toDescriptor(
       if (def.launch.transport === 'stdio' && def.launch.perAgentDisplay && !routedAgentId) {
         throw new Error(
           `${def.displayName} acts only for an agent, on that agent's own screen, and this call named no agent.`,
+        )
+      }
+      // With a user per agent the shared process runs as this server and only
+      // lists tools: a call that names no agent has no agent user to run as.
+      if (
+        isAgentPoolMode() &&
+        def.launch.transport === 'stdio' &&
+        def.launch.perAgentProfileFlag &&
+        !routedAgentId
+      ) {
+        throw new Error(
+          `${def.displayName} acts only for an agent while each agent runs as its own user, and this call named no agent.`,
         )
       }
       // A person has taken over this agent's screen: its own clicks would land
@@ -416,6 +431,11 @@ async function performConnect(
     launch.transport === 'stdio'
       ? resolveConnectorCredentials(def.slug, def.authInputs ?? [])
       : null
+  const refusal =
+    launch.transport === 'stdio'
+      ? pooledConnectorRefusal(def.displayName, declared, isPerAgentLaunch(launch))
+      : null
+  if (refusal) throw new Error(refusal)
   const asAgent = declared ? agentUserConnectorStart('connector', declared) : null
 
   const plan: ConnectorSpawnPlan =

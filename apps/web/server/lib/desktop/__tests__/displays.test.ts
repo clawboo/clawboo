@@ -87,7 +87,10 @@ vi.mock('../../runtimes/spawner', async (importOriginal) => ({
     return p
   },
 }))
-vi.mock('../../agentUser/config', () => ({ isAgentUserMode: () => spawned.agentMode }))
+vi.mock('../../agentUser/config', () => ({
+  isAgentUserMode: () => spawned.agentMode,
+  isAgentPoolMode: () => false,
+}))
 const agentWrites = vi.hoisted(() => [] as { file: string; mode?: number; data: Buffer }[])
 vi.mock('../../agentUser/agentFs', () => ({
   agentMkdir: async () => {},

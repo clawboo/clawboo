@@ -20,6 +20,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { agentReadFile } from '../agentUser/agentFs'
+import { isAgentPoolMode } from '../agentUser/config'
 import { isWindows, resolveRuntimeBin } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { agentCodexHome, isAgentCodexLoggedIn, isCodexLoggedIn, userCodexHome } from './codexAuth'
@@ -357,6 +358,9 @@ async function loadAgentCodexModels(agentHome: string): Promise<CodexModelList> 
 /** Probe the installed CLI (only when it is signed in: an anonymous `model/list`
  *  is the shipped catalog) and read the cache, then pick what to trust. */
 async function loadCodexModels(): Promise<CodexModelList> {
+  // With a user per agent there is no one login to ask: each agent signs in as
+  // its own user. The shipped list, and never the person's own.
+  if (isAgentPoolMode()) return combineCodexModelSources(null, null)
   const agentHome = agentCodexHome()
   if (agentHome) return loadAgentCodexModels(agentHome)
   const codexHome = userCodexHome()

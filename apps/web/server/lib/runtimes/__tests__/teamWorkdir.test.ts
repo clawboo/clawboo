@@ -46,6 +46,21 @@ describe('team-chat working folder', () => {
     await rm(`${home}-work`, { recursive: true, force: true })
   })
 
+  it("with a user per agent, a task of no team runs in its assignee's own folder", () => {
+    process.env['CLAWBOO_AGENT_USERS'] = 'clawboo-a1'
+    try {
+      expect(taskRunFolderFor('codex', { id: 't1', teamId: null, assigneeAgentId: 'a1' })).toEqual({
+        dir: path.join(teams, '_agent-a1', 'tasks', 't1'),
+        teamFolder: path.join(teams, '_agent-a1'),
+      })
+      expect(() => taskRunFolderFor('codex', { id: 't1', teamId: null })).toThrow(
+        /a folder of no team needs its agent/,
+      )
+    } finally {
+      delete process.env['CLAWBOO_AGENT_USERS']
+    }
+  })
+
   it('is <work folder>/teams/<teamId>, outside the clawboo home', () => {
     expect(teamWorkdirPath('team-1')).toBe(path.join(teams, 'team-1'))
     expect(teamWorkdirPath('team-1').startsWith(home + path.sep)).toBe(false)

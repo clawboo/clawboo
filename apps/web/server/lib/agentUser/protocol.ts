@@ -16,7 +16,7 @@
 // The host trusts the server, which is the more privileged side.
 
 /** Bumped on any change a peer of the other version would misread. */
-export const AGENT_HOST_PROTOCOL_VERSION = 1
+export const AGENT_HOST_PROTOCOL_VERSION = 2
 
 /**
  * The longest line either side accepts. A frame carries at most one chunk of a
@@ -49,6 +49,9 @@ export interface HelloFrame {
   home: string
   pid: number
   platform: string
+  /** Every group the host holds (`getgroups`). A pooled agent's host must hold
+   *  its own group and, when it is on a team, that team's, and nothing else. */
+  groups: number[]
 }
 
 export type StdioMode = 'pipe' | 'ignore'
@@ -88,6 +91,8 @@ export type HostRequest =
   /** Try, as the agent user, every way it might become another user. */
   | { op: 'privCheck'; serverUser: string }
   | { op: 'canExec'; paths: string[] }
+  /** Try `kill(pid, 0)` on each: another agent's processes must refuse (`EPERM`). */
+  | { op: 'canSignal'; pids: number[] }
 
 export type HostOp = HostRequest['op']
 
@@ -178,6 +183,7 @@ export interface HostReplies {
     noNewPrivs?: boolean
   }
   canExec: { results: { path: string; ok: boolean; code?: string }[] }
+  canSignal: { results: { pid: number; ok: boolean; code?: string }[] }
 }
 
 /** A reply frame. `ok: false` carries an error code and message. */
@@ -200,7 +206,9 @@ export type StdinFrame =
   | { t: 'pause'; proc: string }
   | { t: 'resume'; proc: string }
 
-export type ReqFrame = { t: 'req'; id: number } & HostRequest
+/** Any `fs.*` request may also carry `within`: a folder (a share's root) that
+ *  every path it names must resolve inside, or the host refuses it. */
+export type ReqFrame = { t: 'req'; id: number; within?: string } & HostRequest
 
 export type HostToServerFrame = HelloFrame | ResFrame | ProcEventFrame
 export type ServerToHostFrame = ReqFrame | StdinFrame

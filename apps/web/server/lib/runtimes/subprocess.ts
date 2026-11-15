@@ -278,6 +278,9 @@ export interface ResolvedSpawn {
 }
 
 export interface SpawnDriverConfig<N> {
+  /** The agent the run is for: with a user per agent (CLAWBOO_AGENT_USERS) its
+   *  process runs as that agent's user. */
+  agentId?: string | null
   /** Async prep (write isolated config/home, build argv) run once on `start()`. */
   resolve: () => Promise<ResolvedSpawn>
   /** Parse one stdout line into zero+ native events. */
@@ -420,6 +423,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       // escaping). With agents on their own OS user the agent host starts it.
       spawned = spawnAgentProcess({
         kind: 'runtime',
+        agentId: cfg.agentId ?? null,
         command: plan.command,
         args: plan.args,
         ...(resolved.cwd != null ? { cwd: resolved.cwd } : {}),

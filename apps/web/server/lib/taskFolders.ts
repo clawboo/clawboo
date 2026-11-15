@@ -27,12 +27,18 @@
 
 import path from 'node:path'
 
-import { getTask, teams, type ClawbooDb, type DbTask } from '@clawboo/db'
+import { agents, getTask, teams, type ClawbooDb, type DbTask } from '@clawboo/db'
 import { assertSafeTaskId } from '@clawboo/worktrees'
 
 import { agentList, agentRemoveEmptyDir, agentStat } from './agentUser/agentFs'
+import { isAgentPoolMode } from './agentUser/config'
 import type { FsEntry } from './agentUser/protocol'
-import { NO_TEAM_SEGMENT, TASK_FOLDERS_SEGMENT, teamWorkdirPath } from './runtimes/teamWorkdir'
+import {
+  NO_TEAM_SEGMENT,
+  TASK_FOLDERS_SEGMENT,
+  noTeamSegmentFor,
+  teamWorkdirPath,
+} from './runtimes/teamWorkdir'
 
 /**
  * Remove a task folder if it is empty. The one place a task folder is removed.
@@ -68,8 +74,17 @@ export interface TaskFolderGcResult {
  */
 export async function gcTaskFolders(db: ClawbooDb): Promise<TaskFolderGcResult> {
   const result: TaskFolderGcResult = { removed: [], kept: 0 }
+  // With a user per agent there is no shared `_no-team` folder: each agent on
+  // no team has one of its own.
+  const noTeam = isAgentPoolMode()
+    ? db
+        .select({ id: agents.id })
+        .from(agents)
+        .all()
+        .map((a) => noTeamSegmentFor(a.id))
+    : [NO_TEAM_SEGMENT]
   const teamIds = [
-    NO_TEAM_SEGMENT,
+    ...noTeam,
     ...db
       .select({ id: teams.id })
       .from(teams)

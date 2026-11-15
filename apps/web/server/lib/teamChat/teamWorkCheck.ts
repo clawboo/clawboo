@@ -79,6 +79,7 @@ import { reviewsRoot, workDirInUse } from '../workDir'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from '../verification'
 import { readTeamVerifyCommand } from '../verification/teamVerifyCommand'
 import { parseCodingModelConfig } from './serverDeliver'
+import { runAsAgent } from '../agentUser/poolRoute'
 
 const log = createLogger('team-work-check')
 
@@ -452,115 +453,129 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     }
 
   return {
-    async begin(taskId, agentId) {
-      const target = targetFor(agentId)
-      if (!target) return
-      // The task is claimed and nothing beats it until its run starts, so a slow
-      // snapshot (a big folder, another task's snapshot ahead in the queue) must
-      // not read as a dead claim to the board's stale sweep.
-      const stopBeat = startTaskHeartbeat(db, taskId, {
-        assigneeAgentId: agentId,
-        execId: getTask(db, taskId)?.runExecutionId ?? null,
-      })
-      try {
-        await ensureTeamWorkdir(target.folder)
-        await historyMutex.run(gitDir, async () => {
-          await ensureHistory(gitDir)
-          // A task that already has a starting point keeps it: a Retry after a
-          // failed check is measured from where the task first began, so a Retry
-          // that changes nothing is still checked.
-          if (await baseOf(target.folder, taskId)) return
-          const sha = await snapshot(gitDir, target.folder, `clawboo: before task ${taskId}`, {
-            orOlder: true,
-          })
-          await historyGit(gitDir, target.folder, ['update-ref', baseRef(taskId), sha])
+    begin(taskId, agentId) {
+      return runAsAgent(agentId, async () => {
+        const target = targetFor(agentId)
+        if (!target) return
+        // The task is claimed and nothing beats it until its run starts, so a slow
+        // snapshot (a big folder, another task's snapshot ahead in the queue) must
+        // not read as a dead claim to the board's stale sweep.
+        const stopBeat = startTaskHeartbeat(db, taskId, {
+          assigneeAgentId: agentId,
+          execId: getTask(db, taskId)?.runExecutionId ?? null,
         })
-      } catch (err) {
-        log.error({ err, teamId, taskId }, 'could not record the team folder before the run')
-        const why = err instanceof Error ? err.message : String(err)
-        note(
-          taskId,
-          `Clawboo could not record the team folder before this run, so its work will not be checked: ${why}`,
-        )
-      } finally {
-        stopBeat()
-      }
-    },
-
-    async prepare(taskId, agentId) {
-      const task = getTask(db, taskId)
-      if (task?.status !== 'in_progress') return null
-      // A card that only held a plan did no work, and what is in the folder is someone else's.
-      if (isPlanHolder(task.sourceDelegationId)) return null
-      const tried = (getTaskVerification(db, taskId)?.attempts.length ?? 0) > 0
-      const target = targetFor(agentId)
-      if (!target)
-        return tried
-          ? unableToCheck(
-              taskId,
-              "An earlier attempt failed the team's check, and the team no longer has a check this attempt can run, so the task waits for a person.",
-            )
-          : null
-      const noStart =
-        "An earlier attempt failed the team's check, and the record of where this task began is gone, so the task waits for a person."
-      let measured: { b: string; h: string; d: DiffStat } | null = null
-      let measureFailed = false
-      try {
-        measured = await measure(target.folder, taskId)
-      } catch (err) {
-        log.warn({ err, teamId, taskId }, 'could not measure what the task changed')
-        measureFailed = true
-      }
-      if (!measureFailed) {
-        if (!measured) return tried ? unableToCheck(taskId, noStart) : null
-        // After a failed attempt the check runs even on an unchanged folder: the
-        // work it failed may still be there, and an undo has to pass it too.
-        if (!measured.d.dirty && !tried) {
-          await dropBase(target.folder, taskId)
-          return null
-        }
-      }
-      // The run this check is for: the task's latest execution now, as the run
-      // that just ended. A newer one means the task is being run again.
-      const runId = latestRun(taskId)
-      const wait: CheckWait = { turn: null, since: null, waitedMs: 0, limitReached: false }
-      const prepared: PreparedWorkCheck = async () => {
-        if (measured)
-          return check(taskId, agentId, target, measured.b, measured.h, measured.d, runId, wait)
-        // A folder a teammate is changing can fail a measure, which must not leave the
-        // work unchecked: the wait came first, and this is one more try. Only now
-        // does it give up, the way a measure that fails on a quiet folder does.
-        if (wait.since !== null && getTask(db, taskId)?.status !== 'in_review')
-          return { verdict: 'decided' }
-        let found: { b: string; h: string; d: DiffStat } | null
         try {
-          found = await measure(target.folder, taskId)
+          await ensureTeamWorkdir(target.folder)
+          await historyMutex.run(gitDir, async () => {
+            await ensureHistory(gitDir)
+            // A task that already has a starting point keeps it: a Retry after a
+            // failed check is measured from where the task first began, so a Retry
+            // that changes nothing is still checked.
+            if (await baseOf(target.folder, taskId)) return
+            const sha = await snapshot(gitDir, target.folder, `clawboo: before task ${taskId}`, {
+              orOlder: true,
+            })
+            await historyGit(gitDir, target.folder, ['update-ref', baseRef(taskId), sha])
+          })
         } catch (err) {
-          log.error({ err, teamId, taskId }, 'could not measure what the task changed')
+          log.error({ err, teamId, taskId }, 'could not record the team folder before the run')
           const why = err instanceof Error ? err.message : String(err)
-          endWait(taskId, target.folder, wait)
-          if (tried)
-            return unableToCheck(
-              taskId,
-              `An earlier attempt failed the team's check, and this one could not be measured, so the task waits for a person: ${why}`,
-            )()
           note(
             taskId,
-            `Clawboo could not see what this run changed, so its work is not checked: ${why}`,
+            `Clawboo could not record the team folder before this run, so its work will not be checked: ${why}`,
           )
-          return { verdict: 'unchecked' }
+        } finally {
+          stopBeat()
         }
-        if (!found || (!found.d.dirty && !tried)) {
-          endWait(taskId, target.folder, wait)
-          if (!found && tried) return unableToCheck(taskId, noStart)()
-          if (found) await dropBase(target.folder, taskId)
-          return { verdict: 'unchecked' }
+      })
+    },
+
+    prepare(taskId, agentId) {
+      // Git on the team history, the verify command and the reviewer run as the
+      // agent being checked (with a user per agent), never as another teammate.
+      return runAsAgent(agentId, async () => {
+        const task = getTask(db, taskId)
+        if (task?.status !== 'in_progress') return null
+        // A card that only held a plan did no work, and what is in the folder is someone else's.
+        if (isPlanHolder(task.sourceDelegationId)) return null
+        const tried = (getTaskVerification(db, taskId)?.attempts.length ?? 0) > 0
+        const target = targetFor(agentId)
+        if (!target)
+          return tried
+            ? unableToCheck(
+                taskId,
+                "An earlier attempt failed the team's check, and the team no longer has a check this attempt can run, so the task waits for a person.",
+              )
+            : null
+        const noStart =
+          "An earlier attempt failed the team's check, and the record of where this task began is gone, so the task waits for a person."
+        let measured: { b: string; h: string; d: DiffStat } | null = null
+        let measureFailed = false
+        try {
+          measured = await measure(target.folder, taskId)
+        } catch (err) {
+          log.warn({ err, teamId, taskId }, 'could not measure what the task changed')
+          measureFailed = true
         }
-        return check(taskId, agentId, target, found.b, found.h, found.d, runId, wait)
-      }
-      prepared.hold = (signal) => holdCheck(taskId, target.folder, wait, signal)
-      prepared.sharedFolder = lastRunWasShared(target.folder, agentId)
-      return prepared
+        if (!measureFailed) {
+          if (!measured) return tried ? unableToCheck(taskId, noStart) : null
+          // After a failed attempt the check runs even on an unchanged folder: the
+          // work it failed may still be there, and an undo has to pass it too.
+          if (!measured.d.dirty && !tried) {
+            await dropBase(target.folder, taskId)
+            return null
+          }
+        }
+        // The run this check is for: the task's latest execution now, as the run
+        // that just ended. A newer one means the task is being run again.
+        const runId = latestRun(taskId)
+        const wait: CheckWait = { turn: null, since: null, waitedMs: 0, limitReached: false }
+        // Called later, outside `prepare`: everything it runs (a measure on
+        // retry, git on the history, the check) runs as the agent checked.
+        const prepared: PreparedWorkCheck = () => runAsAgent(agentId, preparedCheck)
+        const preparedCheck = async (): Promise<WorkCheckResult> => {
+          if (measured)
+            return runAsAgent(agentId, () =>
+              check(taskId, agentId, target, measured.b, measured.h, measured.d, runId, wait),
+            )
+          // A folder a teammate is changing can fail a measure, which must not leave the
+          // work unchecked: the wait came first, and this is one more try. Only now
+          // does it give up, the way a measure that fails on a quiet folder does.
+          if (wait.since !== null && getTask(db, taskId)?.status !== 'in_review')
+            return { verdict: 'decided' }
+          let found: { b: string; h: string; d: DiffStat } | null
+          try {
+            found = await measure(target.folder, taskId)
+          } catch (err) {
+            log.error({ err, teamId, taskId }, 'could not measure what the task changed')
+            const why = err instanceof Error ? err.message : String(err)
+            endWait(taskId, target.folder, wait)
+            if (tried)
+              return unableToCheck(
+                taskId,
+                `An earlier attempt failed the team's check, and this one could not be measured, so the task waits for a person: ${why}`,
+              )()
+            note(
+              taskId,
+              `Clawboo could not see what this run changed, so its work is not checked: ${why}`,
+            )
+            return { verdict: 'unchecked' }
+          }
+          if (!found || (!found.d.dirty && !tried)) {
+            endWait(taskId, target.folder, wait)
+            if (!found && tried) return unableToCheck(taskId, noStart)()
+            if (found) await dropBase(target.folder, taskId)
+            return { verdict: 'unchecked' }
+          }
+          return runAsAgent(agentId, () =>
+            check(taskId, agentId, target, found.b, found.h, found.d, runId, wait),
+          )
+        }
+        prepared.hold = (signal) =>
+          runAsAgent(agentId, () => holdCheck(taskId, target.folder, wait, signal))
+        prepared.sharedFolder = lastRunWasShared(target.folder, agentId)
+        return prepared
+      })
     },
   }
 

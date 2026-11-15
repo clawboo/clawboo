@@ -42,7 +42,8 @@ import {
 } from '@clawboo/mcp'
 
 import { agentMkdir, agentReadFile, agentWriteFile } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { agentUserHome } from '../agentUser/poolRoute'
 import { agentHomeDir } from '../agentUser/state'
 import { isPersonInControl } from '../desktop/control'
 import {
@@ -180,14 +181,22 @@ export interface AgentUserConnectorStart {
 export function agentUserConnectorStart(
   kind: 'connector' | 'browser',
   declared: Readonly<Record<string, string>>,
+  /** The agent a browser is for: with a user per agent it runs as that user. */
+  agentId: string | null = null,
 ): AgentUserConnectorStart | null {
   if (!isAgentUserMode()) return null
   if (Object.keys(declared).length > 0) return null
+  // With a user per agent only a browser (one per agent) runs as an agent user.
+  // A shared connector would be one process every agent talks to; the only one
+  // started (a desktop driver's tool listing) does no agent's work, and stays
+  // with the server. `pooledConnectorRefusal` keeps every other one from starting.
+  if (isAgentPoolMode() && (kind !== 'browser' || !agentId)) return null
   let started: ChildProcess | null = null
   return {
     spawn: (command, args, opts) => {
       const child = spawnAgentProcess({
         kind,
+        agentId,
         command,
         args,
         ...(opts.cwd ? { cwd: opts.cwd } : {}),
@@ -224,8 +233,40 @@ export function profileDirFor(
   inAgentSpace: boolean = isAgentUserMode(),
 ): string {
   const stem = createHash('sha256').update(agentId).digest('hex').slice(0, 16)
-  const root = inAgentSpace ? agentHomeDir() : resolveClawbooDir()
+  const root = !inAgentSpace
+    ? resolveClawbooDir()
+    : isAgentPoolMode()
+      ? agentUserHome(agentId)
+      : agentHomeDir()
   return path.join(root, 'browser-profiles', slug, stem)
+}
+
+/** Whether each agent's calls to this stdio connector go to a process of its
+ *  own: a per-agent browser (a profile flag) or a desktop driver (a display). */
+export function isPerAgentLaunch(launch: {
+  perAgentProfileFlag?: string
+  perAgentDisplay?: boolean
+}): boolean {
+  return Boolean(launch.perAgentDisplay || launch.perAgentProfileFlag)
+}
+
+/**
+ * Why a connector may not start with a user per agent (CLAWBOO_AGENT_USERS),
+ * or null. A connector with local reach and no credential is one process every
+ * agent talks to, so it would carry one agent's files to another: it does not
+ * start. A credentialed one stays with the server, as always, and a desktop
+ * driver's shared child only lists tools (each agent's calls go to its own).
+ */
+export function pooledConnectorRefusal(
+  displayName: string,
+  declared: Readonly<Record<string, string>> | null,
+  /** Each agent's calls go to a process of its own (a per-agent browser or
+   *  desktop driver): the shared one only lists tools, as this server. */
+  perAgent: boolean,
+): string | null {
+  if (!isAgentPoolMode() || declared === null) return null
+  if (Object.keys(declared).length > 0 || perAgent) return null
+  return `${displayName} would be one program shared by every agent, and each agent runs as its own user (CLAWBOO_AGENT_USERS), so it does not start. Agents keep their own browsers.`
 }
 
 /** The file, or null when there is none. Any other failure throws: a file that
@@ -569,7 +610,7 @@ async function spawnReservedBrowser(
   // Which user runs this browser decides where its profile lives, so it is
   // settled before anything is made.
   const declared = resolveConnectorCredentials(spec.slug, spec.authInputs ?? [])
-  const asAgent = agentUserConnectorStart('browser', declared)
+  const asAgent = agentUserConnectorStart('browser', declared, agentId)
   const profileDir = profileDirFor(spec.slug, agentId, asAgent !== null)
   const scratchDir = scratchDirFor(spec.slug, agentId, asAgent !== null)
   if (asAgent) {

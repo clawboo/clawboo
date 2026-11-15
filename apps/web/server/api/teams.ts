@@ -22,6 +22,7 @@ import {
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 
+import { releaseDeleted } from '../lib/agentUser/poolBoot'
 import { actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
@@ -396,6 +397,9 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
     // team folders' root, and the removal takes a symlink, never its target. The
     // folder is agent space, so the agent-space file verbs remove it (the agent
     // host, when agents run as their own OS user).
+    // With a user per agent, its former members' processes stop before this
+    // answers, and the team's group is handed back once its folders are gone.
+    await releaseDeleted()
     let folderRemoved = false
     if (existed) {
       try {
@@ -498,6 +502,9 @@ export async function teamAgentPOST(req: Request, res: Response): Promise<void> 
     if (runtime === 'clawboo-native') {
       await ensureNativeBooZero(db, getRegistry().nativeSource)
     }
+    // With a user per agent, a host still holding another team's group stops
+    // before this answers.
+    await releaseDeleted()
 
     res.json({ ok: true })
   } catch (err) {
@@ -508,7 +515,7 @@ export async function teamAgentPOST(req: Request, res: Response): Promise<void> 
 // ─── DELETE /api/teams/:id/agents/:agentId ───────────────────────────────────
 // Removes an agent from a team (sets teamId = null).
 
-export function teamAgentDELETE(req: Request, res: Response): void {
+export async function teamAgentDELETE(req: Request, res: Response): Promise<void> {
   // A person's call: taking a team's lead off it hands the team to its first member.
   if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['id'] as string | undefined
@@ -532,6 +539,7 @@ export function teamAgentDELETE(req: Request, res: Response): void {
     }
 
     db.update(agents).set({ teamId: null }).where(eq(agents.id, agentId)).run()
+    await releaseDeleted()
 
     res.json({ ok: true })
   } catch (err) {

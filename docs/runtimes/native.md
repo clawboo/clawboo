@@ -146,7 +146,7 @@ The run's folder is the task's own git worktree when the task run has one; see [
 
 - **You approve every command, and nothing is remembered.** Each one raises a card that reads "_agent_ wants to run a command on this computer." with the command and the folder. **Run it** approves it. There is no **Always** option.
 - **One program, no shell.** The agent can't use pipes, redirects or shell operators. Programs that run other programs (shells, interpreters, package runners and similar) are refused before you're asked.
-- **It runs as you.** The command runs in the run's folder (the task's worktree, the task's own folder, or the team's folder), under your user account, with network access. Your API keys are not passed to it.
+- **It runs as you.** The command runs in the run's folder (the task's worktree, the task's own folder, or the team's folder), under your user account, with network access. Your API keys are not passed to it. With a [user per agent](/operating/agent-isolation#a-user-per-agent) (`CLAWBOO_AGENT_USERS`, Linux only for now), approved commands and the file tools run as the agent's own OS user instead, still with network access.
 - **Limits per run:** the agent can ask about 10 commands. Each card waits 10 minutes for an answer, a command is stopped after 5 minutes (time the computer spends asleep does not count, except a sleep of under about a minute), and output is cut at 64 KiB.
 - **A refusal ends it.** If you decline, or nobody answers in time, the agent can't ask again in that run.
 

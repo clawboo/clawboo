@@ -153,6 +153,14 @@ function pathArg(p: string): string {
  */
 const BUNDLE_FETCH_ONLY = ['-c', 'protocol.allow=never', '-c', 'protocol.file.allow=always']
 
+/**
+ * After a fetch, git starts `git maintenance run --auto --detach`, which
+ * outlives the fetch and keeps writing in the repository. In the mirror that
+ * would be an agent process the host no longer tracks: run it in the
+ * foreground, so it ends with the fetch.
+ */
+const NO_DETACHED_MAINTENANCE = ['-c', 'maintenance.autoDetach=false', '-c', 'gc.autoDetach=false']
+
 /** Copy a file of the server's into agent space, in chunks, through the host. */
 async function copyToAgent(from: string, to: string): Promise<void> {
   const fd = fs.openSync(from, 'r')
@@ -267,6 +275,7 @@ export async function syncMirror(repoPath: string, baseSha: string): Promise<str
       '-C',
       mirror,
       ...BUNDLE_FETCH_ONLY,
+      ...NO_DETACHED_MAINTENANCE,
       'fetch',
       '--quiet',
       '--',

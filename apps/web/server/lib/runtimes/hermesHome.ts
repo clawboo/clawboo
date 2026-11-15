@@ -28,7 +28,7 @@ import {
   agentStat,
   agentWriteFile,
 } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
 import { MAX_READ_BYTES } from '../agentUser/protocol'
 import { agentHermesHome, hasUsableHermesCodexAuthIn, userHermesAuthPath } from './hermesAuth'
 
@@ -224,7 +224,9 @@ export async function seedHermesAuth(home: string): Promise<boolean> {
     // read its refresh token there. The managed home is agent space, so its side
     // is read and written through the agent-space file verbs.
     let src: { data: Buffer; mtimeMs: number }
-    const agentHome = agentHermesHome()
+    // With a user per agent, the login of the user whose home `home` is in.
+    if (isAgentPoolMode() && !agentHermesHome({ near: home })) return false
+    const agentHome = agentHermesHome({ near: home })
     if (agentHome) {
       if (!(await hasUsableHermesCodexAuthIn(agentHome))) return false
       const file = path.join(agentHome, 'auth.json')

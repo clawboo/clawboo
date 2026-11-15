@@ -2,7 +2,7 @@
 // stop processes: user lookup, the launcher socket's ownership, and "stop every
 // agent process" (design 4.8).
 
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -98,4 +98,132 @@ export function killAllAgentProcesses(
     if (!res.error) ran = true
   }
   return ran
+}
+
+// ── A user per agent (CLAWBOO_AGENT_USERS) ──────────────────────────────
+
+/** `getent <db> <key>`'s output, or null when there is no such entry. */
+export function getentRun(args: string[]): string | null {
+  try {
+    return execFileSync('getent', args, { encoding: 'utf8', timeout: 5_000 })
+  } catch {
+    return null
+  }
+}
+
+/** Whether stderr from `<switch> -u <user> -- ...` is the switch refusing
+ *  (sudo's "a password is required", "Sorry, user ... is not allowed"). */
+export function switchRefused(stderr: string): boolean {
+  return (
+    /^(sudo|doas):/m.test(stderr) ||
+    /Sorry, user /.test(stderr) ||
+    /not allowed to execute/.test(stderr)
+  )
+}
+
+const SWITCH_ENV = (): NodeJS.ProcessEnv => ({
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin',
+})
+
+/**
+ * Stop every process of one pool user (`kill -KILL -1` as that user, three
+ * times), without blocking: one agent's stop must not hold up the server.
+ * First the switch is tried with `true`, which cannot fail on its own: a
+ * switch that will not run it cannot run `kill` either, and that rejects
+ * (nothing was stopped). `kill` finding nothing left to stop is no failure,
+ * but the switch refusing `kill` itself is.
+ */
+export function reapPoolUser(
+  sw: AgentUserConfig['switch'],
+  user: string,
+  run: typeof execFile = execFile,
+): Promise<void> {
+  const call = (args: string[]): Promise<{ failed: string | null }> =>
+    new Promise((resolve) => {
+      run(
+        sw,
+        ['-n', '-u', user, '--', ...args],
+        { timeout: 5_000, env: SWITCH_ENV() },
+        (err, _out, stderr) => {
+          const text = String(stderr ?? '')
+          if (!err) return resolve({ failed: null })
+          const c = (err as { code?: unknown }).code
+          if (
+            typeof c === 'string' ||
+            (err as { killed?: boolean }).killed ||
+            (err as { signal?: unknown }).signal
+          ) {
+            return resolve({ failed: text.trim() || (err as Error).message })
+          }
+          resolve({
+            failed: switchRefused(text)
+              ? text.trim()
+              : args[0] === 'true'
+                ? text.trim() || `exited ${String(c)}`
+                : null,
+          })
+        },
+      )
+    })
+  return (async () => {
+    const probe = await call(['true'])
+    if (probe.failed) throw new Error(`could not stop the processes of ${user}: ${probe.failed}`)
+    for (let i = 0; i < 3; i++) {
+      const r = await call(['kill', '-KILL', '-1'])
+      if (r.failed) throw new Error(`could not stop the processes of ${user}: ${r.failed}`)
+    }
+  })()
+}
+
+/**
+ * `kill -KILL -1` as `user`, three times, blocking (boot and exit). Returns
+ * why it could not be done (the switch will not run `true` as that user, or
+ * refuses `kill`), or null; `kill` finding nothing left to stop is no failure.
+ */
+export function reapUserSync(
+  sw: AgentUserConfig['switch'],
+  user: string,
+  run: typeof spawnSync = spawnSync,
+): string | null {
+  const call = (args: string[]): { status: number | null; failed: string | null } => {
+    const res = run(sw, ['-n', '-u', user, '--', ...args], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      env: SWITCH_ENV(),
+    })
+    const stderr = String(res.stderr ?? '')
+    if (res.error) return { status: null, failed: res.error.message }
+    if (res.signal) return { status: null, failed: `${sw} was stopped by ${res.signal}` }
+    if (res.status !== 0 && switchRefused(stderr))
+      return { status: res.status, failed: stderr.trim() }
+    return { status: res.status, failed: null }
+  }
+  const probe = call(['true'])
+  if (probe.failed) return probe.failed
+  if (probe.status !== 0) return `${sw} could not run a command as ${user} (exit ${probe.status})`
+  for (let i = 0; i < 3; i++) {
+    const r = call(['kill', '-KILL', '-1'])
+    if (r.failed) return r.failed
+  }
+  return null
+}
+
+/**
+ * Give a share root its inherited ACL (Linux `setfacl`): the share's group may
+ * read, write and enter everything made inside, whatever the maker's umask, and
+ * nobody else may. The folder is the server's own, just made.
+ */
+export function setShareAcl(
+  dir: string,
+  gid: number,
+  run: typeof execFile = execFile,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    run(
+      'setfacl',
+      ['-m', `g:${gid}:rwx,d:g:${gid}:rwx,d:m::rwx,d:o::-`, '--', dir],
+      { timeout: 10_000 },
+      (err) => (err ? reject(err) : resolve()),
+    )
+  })
 }

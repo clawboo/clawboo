@@ -91,7 +91,8 @@ describe.runIf(posix)('agent-owned mirror', { timeout: 120_000 }, () => {
     setActiveAgentHost(null)
     h.client.close()
     vi.unstubAllEnvs()
-    fs.rmSync(dir, { recursive: true, force: true })
+    // A git process an earlier test step left could still be writing.
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
 
   it('brings a base commit in, works in a checkout of the mirror, and brings the branch out', async () => {
@@ -137,6 +138,11 @@ describe.runIf(posix)('agent-owned mirror', { timeout: 120_000 }, () => {
     const second = git(repo, 'rev-parse', 'HEAD')
     await syncMirror(repo, second)
     expect(git(mirror, 'cat-file', '-t', second)).toBe('commit')
+    // The fetch's own maintenance runs in the foreground, ending with it:
+    // git would otherwise leave it writing in the mirror after the fetch.
+    const fetches = spawned.filter((c) => c.includes('fetch'))
+    expect(fetches.length).toBeGreaterThan(0)
+    for (const f of fetches) expect(f).toContain('maintenance.autoDetach=false')
     // Already there: nothing moves.
     const before = spawned.length
     await syncMirror(repo, second)

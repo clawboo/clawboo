@@ -12,8 +12,9 @@ import path from 'node:path'
 import { resolveClawbooDir } from '@clawboo/config'
 
 import { agentMkdir, agentRemove } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
-import { agentHomeDir } from '../agentUser/state'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { actingAgent, agentUserHome } from '../agentUser/poolRoute'
+import { agentHomeDir, peekAgentPool } from '../agentUser/state'
 
 /** What a collapsed segment is allowed to look like once the rewrite is done. */
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9_-]+$/
@@ -43,11 +44,43 @@ export function sanitizeAgentId(agentId: string | null | undefined): string {
  * (CLAWBOO_AGENT_USER), under that user's home instead: the agent user cannot
  * read the data folder, and these homes (CODEX_HOME, HERMES_HOME,
  * CLAUDE_CONFIG_DIR) are the agents' own state, which the runtimes must read and
- * write.
+ * write. With a user per agent (CLAWBOO_AGENT_USERS), under the home of the
+ * agent's own user, so `agentId` is needed: no agent reaches another's.
  */
-export function runtimeHomesRoot(env: NodeJS.ProcessEnv = process.env): string {
+export function runtimeHomesRoot(
+  env: NodeJS.ProcessEnv = process.env,
+  agentId?: string | null,
+): string {
+  if (isAgentPoolMode(env)) {
+    if (!agentId) {
+      throw new Error(
+        'each agent runs as its own user (CLAWBOO_AGENT_USERS), so a runtime home needs its agent',
+      )
+    }
+    return path.resolve(agentUserHome(agentId), 'runtimes')
+  }
   if (isAgentUserMode(env)) return path.resolve(agentHomeDir(), 'runtimes')
   return path.resolve(resolveClawbooDir(env), 'runtimes')
+}
+
+/**
+ * Where `homeDir` sits among the runtime homes, relative to its runtimes root
+ * (`<runtime>/<agent>`), or null when it is not one. With a user per agent the
+ * root is whichever pool user's home holds it.
+ */
+export function runtimeHomeRelative(
+  homeDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const abs = path.resolve(homeDir)
+  const roots = isAgentPoolMode(env)
+    ? (peekAgentPool()?.users ?? []).map((u) => path.resolve(u.home, 'runtimes'))
+    : [runtimeHomesRoot(env)]
+  for (const root of roots) {
+    const rel = path.relative(root, abs)
+    if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return rel
+  }
+  return null
 }
 
 /**
@@ -65,7 +98,7 @@ export function runtimeIdentityHomePath(
   agentId: string | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const root = runtimeHomesRoot(env)
+  const root = runtimeHomesRoot(env, agentId)
   const prefix = root.endsWith(path.sep) ? root : root + path.sep
   const home = path.resolve(root, sanitizeAgentId(runtimeId), sanitizeAgentId(agentId))
   if (!home.startsWith(prefix)) {
@@ -84,15 +117,37 @@ export function runtimeIdentityHomePath(
  * A dot name there can never be a runtime's own folder (those are sanitized
  * ids). Remove it with `removeThrowawayRuntimeHome`.
  */
-export async function makeThrowawayRuntimeHome(prefix: string): Promise<string> {
+export async function makeThrowawayRuntimeHome(
+  prefix: string,
+  /** With a user per agent: whose home it goes in, the agent the run is for,
+   *  or (for a reviewer, which is no agent) the agent whose work it checks. */
+  actor: { agentId?: string | null; cwd?: string | null } = {},
+): Promise<string> {
   if (!isAgentUserMode()) return mkdtemp(path.join(os.tmpdir(), prefix))
+  let owner: string | null = null
+  if (isAgentPoolMode()) {
+    owner = actor.agentId && hasUser(actor.agentId) ? actor.agentId : null
+    owner ??= actingAgent()
+    if (!owner) {
+      throw new Error('a throwaway runtime home needs the agent whose user runs it')
+    }
+  }
   const dir = path.join(
-    runtimeHomesRoot(),
+    runtimeHomesRoot(process.env, owner),
     '.throwaway',
     `${prefix}${randomBytes(8).toString('hex')}`,
   )
   await agentMkdir(dir, { mode: 0o700 })
   return dir
+}
+
+function hasUser(agentId: string): boolean {
+  try {
+    agentUserHome(agentId)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Remove a home `makeThrowawayRuntimeHome` made. Missing is fine. */

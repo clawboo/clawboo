@@ -91,6 +91,7 @@ describe('health: agent isolation', () => {
         home: '/var/lib/clawboo-agent',
         pid: 1,
         platform: 'linux',
+        groups: [10002],
       },
       config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
     })

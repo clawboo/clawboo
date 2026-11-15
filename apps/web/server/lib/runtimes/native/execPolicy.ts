@@ -54,8 +54,9 @@ import { access, open, realpath, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import path from 'node:path'
 
-import { isAgentUserMode } from '../../agentUser/config'
-import { activeAgentHost, agentHomeDir } from '../../agentUser/state'
+import { isAgentPoolMode, isAgentUserMode } from '../../agentUser/config'
+import { hostForAgent } from '../../agentUser/poolRoute'
+import { activeAgentHost, agentHomeDir, activeAgentPool } from '../../agentUser/state'
 import { realPathOrSpelling, workDirSpellings } from '../../workDir'
 
 /** Refusal codes, carried to the model so it can adapt rather than retry blindly. */
@@ -287,7 +288,7 @@ export async function resolveProgramPath(
   pathEnv: string | undefined,
 ): Promise<string | null> {
   if (isAgentUserMode()) {
-    const found = await resolveAgentProgram(program, pathEnv)
+    const found = await resolveAgentProgram(program, pathEnv, null)
     return found.ok ? found.resolved : null
   }
   const candidates = programCandidates(program, pathEnv)
@@ -339,8 +340,12 @@ function programCandidates(program: string, pathEnv: string | undefined): string
 
 /** Agent space in every spelling: the work folder and the agent user's home. */
 function agentSpaceRoots(): string[] {
-  const home = path.resolve(agentHomeDir())
-  return [...new Set([...workDirSpellings(), home, realPathOrSpelling(home)])]
+  // With a user per agent, every agent user's home: a program another agent
+  // wrote is agent-written all the same.
+  const homes = isAgentPoolMode()
+    ? activeAgentPool().users.map((u) => path.resolve(u.home))
+    : [path.resolve(agentHomeDir())]
+  return [...new Set([...workDirSpellings(), ...homes, ...homes.map((h) => realPathOrSpelling(h))])]
 }
 
 function isInAgentSpace(p: string, roots: readonly string[]): boolean {
@@ -373,8 +378,10 @@ const notTrustedOwner = (real: string): ExecRefusal =>
   )
 
 /** The candidates the agent user can execute, as the agent host reports it. */
-async function agentCanExec(paths: string[]): Promise<Set<string>> {
-  const res = await activeAgentHost().client.request({ op: 'canExec', paths })
+async function agentCanExec(paths: string[], agentId: string | null): Promise<Set<string>> {
+  const client =
+    isAgentPoolMode() && agentId ? await hostForAgent(agentId) : activeAgentHost().client
+  const res = await client.request({ op: 'canExec', paths })
   const ok = new Set<string>()
   for (const r of Array.isArray(res.results) ? res.results : []) {
     if (r && r.ok === true && typeof r.path === 'string') ok.add(r.path)
@@ -393,13 +400,15 @@ export type AgentProgramResolution = { ok: true; resolved: string } | ExecRefusa
 export async function resolveAgentProgram(
   program: string,
   pathEnv: string | undefined,
+  /** The agent the command is for: with a user per agent, its host checks it. */
+  agentId: string | null = null,
 ): Promise<AgentProgramResolution> {
   try {
     const roots = agentSpaceRoots()
     const candidates = programCandidates(program, pathEnv)
     const outside = candidates.filter((c) => !isInAgentSpace(c, roots))
     if (program.startsWith('/') && outside.length === 0) return inAgentSpace(program)
-    const runnable = outside.length > 0 ? await agentCanExec(outside) : new Set<string>()
+    const runnable = outside.length > 0 ? await agentCanExec(outside, agentId) : new Set<string>()
     let first: ExecRefusal | null = null
     for (const candidate of outside) {
       if (!runnable.has(candidate)) continue

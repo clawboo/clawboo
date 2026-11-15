@@ -31,7 +31,8 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { agentReadFile } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { agentUserHome, poolHomeHolding } from '../agentUser/poolRoute'
 import { agentHomeDir } from '../agentUser/state'
 
 /** The user's real Hermes home (where `hermes login` stored auth.json). Honours
@@ -52,7 +53,13 @@ export function userHermesAuthPath(): string {
  * here, apart from the person's own. Null with the setting off. Throws when the
  * agent host is not running.
  */
-export function agentHermesHome(): string | null {
+export function agentHermesHome(
+  of: { agentId?: string | null; near?: string | null } = {},
+): string | null {
+  if (isAgentPoolMode()) {
+    const home = of.agentId ? agentUserHome(of.agentId) : of.near ? poolHomeHolding(of.near) : null
+    return home ? path.join(home, '.hermes') : null
+  }
   return isAgentUserMode() ? path.join(agentHomeDir(), '.hermes') : null
 }
 
@@ -153,9 +160,11 @@ export async function refreshAgentHermesCodexAuth(): Promise<boolean> {
 /** With agents on their own OS user: does that user hold a usable `openai-codex`
  *  login of its own? False with the setting off, or when the agent host is not
  *  running. */
-export async function isAgentHermesCodexAuthPresent(): Promise<boolean> {
+export async function isAgentHermesCodexAuthPresent(
+  agentId: string | null = null,
+): Promise<boolean> {
   try {
-    const home = agentHermesHome()
+    const home = agentHermesHome({ agentId })
     return home ? await hasUsableHermesCodexAuthIn(home) : false
   } catch {
     return false

@@ -87,7 +87,7 @@ import {
   agentStat,
   agentWriteFile,
 } from './agentUser/agentFs'
-import { isAgentUserMode } from './agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from './agentUser/config'
 import { checkedOutAt, exportTaskBranch, mirrorPathFor, syncMirror } from './agentUser/mirror'
 import { installAgentWorktreeIo, isInAgentSpace } from './agentUser/worktreeIo'
 import { getDb } from './db'
@@ -121,6 +121,10 @@ import { readFileAt } from './workspaceFs'
  * repo path so multiple repos never collide and (critically) so worktrees are
  * NOT created inside the user's repo tree. Every new checkout goes here.
  */
+/** Why a task gets no checkout of a repository with a user per agent. */
+export const POOL_CHECKOUTS_REFUSAL =
+  'Tasks that work in a copy of a repository are not available yet while each agent runs as its own user (CLAWBOO_AGENT_USERS). Agents can still work in their team folder.'
+
 function worktreeRootForRepo(repoPath: string): string {
   return path.join(workRoot('worktrees'), repoHash(repoPath))
 }
@@ -772,6 +776,11 @@ export async function provisionTaskWorkspace(
 
   const isolation = isolationForTask(input.kind ?? 'code')
   if (isolation !== 'worktree') return { ok: false, reason: 'no_isolation', isolation }
+  // With a user per agent a checkout belongs to the task's team, and the
+  // checkouts and the copies of repositories are not laid out by team yet.
+  if (isAgentPoolMode()) {
+    return { ok: false, reason: 'not_supported', why: POOL_CHECKOUTS_REFUSAL, isolation }
+  }
 
   // Dedup: a single logical worktree per task maps to a single workspace row.
   // A repeated/concurrent provision must NOT insert a duplicate. If an active
@@ -873,6 +882,14 @@ export async function resumeTaskWorkspace(
   const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
+  if (isAgentPoolMode()) {
+    return {
+      ok: false,
+      reason: 'not_supported',
+      why: POOL_CHECKOUTS_REFUSAL,
+      isolation: 'worktree',
+    }
+  }
   const repoPath = ws.repoPath || input.repoPath
   const agent = agentMode()
   try {

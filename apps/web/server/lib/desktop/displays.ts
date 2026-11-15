@@ -18,9 +18,12 @@
 //   agent user's folders). Watchers get pictures from the server and never a
 //   VNC connection of their own.
 //
-// All agents share one agent user today, so one agent's programs can reach
-// another agent's display. These walls keep the displays from other local
-// users and from the server's own secrets, not agents from each other.
+// With one agent user (CLAWBOO_AGENT_USER) all agents share it, so one agent's
+// programs can reach another agent's display: these walls keep the displays
+// from other local users and from the server's own secrets, not agents from
+// each other. With a user per agent (CLAWBOO_AGENT_USERS) the folder is in that
+// agent's own home and every process here runs as that agent's user, so the
+// display is walled off from the other agents too.
 //
 // LIFETIME. A display exists while something holds it: the agent's browser, its
 // desktop driver, or a person who started it by hand. When the last holder lets
@@ -39,7 +42,8 @@ import { resolveClawbooDir } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 
 import { agentMkdir, agentRemove, agentWriteFile } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { agentUserHome } from '../agentUser/poolRoute'
 import { agentHomeDir } from '../agentUser/state'
 import { findExecutable } from '../platform'
 import { buildChildEnv } from '../runtimes/childEnv'
@@ -352,6 +356,8 @@ export interface AgentDisplay {
 }
 
 interface Entry {
+  /** Whose display it is: with a user per agent, its processes run as that agent's user. */
+  agentId: string
   display: AgentDisplay | null
   starting: Promise<AgentDisplay | null> | null
   holders: Set<string>
@@ -380,7 +386,13 @@ export function displayFor(agentId: string): AgentDisplay | null {
  *  guaranteed to be a safe path segment. */
 export function displayDirFor(agentId: string, inAgentSpace: boolean = isAgentUserMode()): string {
   const stem = createHash('sha256').update(agentId).digest('hex').slice(0, 16)
-  const root = inAgentSpace ? agentHomeDir() : resolveClawbooDir()
+  // With a user per agent, in that agent's own home: no other agent can reach
+  // its cookie or its VNC socket.
+  const root = !inAgentSpace
+    ? resolveClawbooDir()
+    : isAgentPoolMode()
+      ? agentUserHome(agentId)
+      : agentHomeDir()
   return path.join(root, 'desktops', stem)
 }
 
@@ -447,6 +459,7 @@ async function connectRfb(entry: Entry, socketPath: string): Promise<RfbClient> 
       entry,
       spawnAgentProcess({
         kind: 'browser',
+        agentId: entry.agentId,
         command: process.execPath,
         args: ['-e', RELAY_SCRIPT, socketPath],
         env: buildChildEnv({}),
@@ -527,6 +540,7 @@ async function startDisplay(
     entry,
     spawnAgentProcess({
       kind: 'browser',
+      agentId: entry.agentId,
       command: tools.xvnc,
       args: [
         '-displayfd',
@@ -581,6 +595,7 @@ async function startDisplay(
       entry,
       spawnAgentProcess({
         kind: 'browser',
+        agentId: entry.agentId,
         command: tools.dbusDaemon,
         args: ['--session', '--nofork', '--nopidfile', `--address=${busAddress}`],
         env: displayServiceEnv(env, displayEnv, dir),
@@ -599,6 +614,7 @@ async function startDisplay(
       entry,
       spawnAgentProcess({
         kind: 'browser',
+        agentId: entry.agentId,
         command: tools.windowManager.bin,
         // `--sm-disable`: it never joins a desktop session's session manager,
         // which could restart it, or bring it back at the next login.
@@ -669,7 +685,14 @@ export async function acquireDisplay(
   if (!support.ok) return null
   let entry = entries.get(agentId)
   if (!entry) {
-    entry = { display: null, starting: null, holders: new Set(), stopTimer: null, procs: [] }
+    entry = {
+      agentId,
+      display: null,
+      starting: null,
+      holders: new Set(),
+      stopTimer: null,
+      procs: [],
+    }
     entries.set(agentId, entry)
   }
   entry.holders.add(holder)
