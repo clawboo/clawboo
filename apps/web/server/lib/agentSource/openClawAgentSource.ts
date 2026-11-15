@@ -354,6 +354,15 @@ export class OpenClawAgentSource implements AgentSource {
     return true
   }
 
+  /** Whether something has needed the Gateway since start, from memory alone.
+   *  Unlike isInUse() it never reads the standing need, so it never opens the
+   *  database: for a check on a path that has no other use for it. At start the
+   *  standing need is read anyway, so the two differ only for an OpenClaw agent
+   *  written since then by something other than the connection. */
+  wasMarkedInUse(): boolean {
+    return this.inUse
+  }
+
   /** Something needs the Gateway now: connect (once started), and keep the
    *  connection until the process stops. Idempotent. */
   markInUse(reason: string): void {

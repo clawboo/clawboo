@@ -1587,8 +1587,11 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
 
     // Check if gateway is running for hot reload hint. Not while nothing uses
     // it: the probe would start a Gateway that starts on its first connection.
+    // Read from memory: this route has no other use for the database, and
+    // opening it just for a hint would hold it open (on Windows a test's
+    // throwaway folder could then not be deleted).
     const port = resolvePort(stateDir)
-    const reachable = getRegistry().source.isInUse() ? await probeGatewayPort(port) : false
+    const reachable = getRegistry().source.wasMarkedInUse() ? await probeGatewayPort(port) : false
 
     res.json({ ok: true, ...(reachable ? { hotReloadHint: true } : {}) })
   } catch (err) {

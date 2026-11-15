@@ -16,7 +16,7 @@ import { getProxyDeviceIdentityPath } from '@clawboo/gateway-proxy'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { runBootProbe } from '../bootProbe'
-import { getDb, getDbPath } from '../db'
+import { getDb, getDbPath, resetDb } from '../db'
 import { writeApiPortFile } from '../portUtils'
 
 const itPosix = process.platform === 'win32' ? it.skip : it
@@ -34,6 +34,9 @@ beforeEach(async () => {
   delete process.env['CLAWBOO_SECRETS_MASTER_KEY']
 })
 afterEach(async () => {
+  // Close the process-wide connection a test opened before its folder goes:
+  // Windows cannot delete a database file that is still open.
+  resetDb()
   if (prevHome === undefined) delete process.env['HOME']
   else process.env['HOME'] = prevHome
   delete process.env['CLAWBOO_HOME']
