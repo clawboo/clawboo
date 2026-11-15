@@ -59,9 +59,7 @@ async function main(): Promise<void> {
   )
   check(
     'a listing works',
-    beneathList(R, ['a', 'b'], 10)
-      .entries.map((e) => e.name)
-      .join() === 'f.txt',
+    (await beneathList(R, ['a', 'b'], 10)).entries.map((e) => e.name).join() === 'f.txt',
   )
   beneathRename(R, ['a', 'b', 'f.txt'], ['a', 'g.txt'])
   check('a rename works', beneathStat(R, ['a', 'g.txt'])?.type === 'file')
@@ -69,8 +67,10 @@ async function main(): Promise<void> {
   await beneathRm(R, ['a'])
   check('a folder tree is removed', beneathStat(R, ['a']) === null)
 
-  // A folder of the share is a link into the victim (a teammate's swap).
+  // A folder of the share is a link into the victim (a teammate's swap). `x` is
+  // a real file in the share, the source the rename-in case moves.
   fs.symlinkSync(V, path.join(R, 's'))
+  fs.writeFileSync(path.join(R, 'x'), 'x')
   const victimIntact = (): boolean =>
     fs.readFileSync(path.join(V, 'secret.txt'), 'utf8') === 'secret' &&
     fs.existsSync(path.join(V, 'sub'))
@@ -78,7 +78,6 @@ async function main(): Promise<void> {
     ['remove', () => beneathRm(R, ['s', 'secret.txt'])],
     ['remove a folder', () => beneathRmdir(R, ['s', 'sub'])],
     ['rename out', () => beneathRename(R, ['s', 'secret.txt'], ['stolen.txt'])],
-    ['rename in', () => beneathRename(R, ['x'], ['s', 'planted.txt'])],
     ['make a folder', () => beneathMkdir(R, ['s', 'made'], 0o770)],
     ['write', () => beneathWrite(R, ['s', 'planted.txt'], Buffer.from('x'), 0o660, false)],
     ['append', () => beneathAppend(R, ['s', 'secret.txt'], Buffer.from('x'), 0o660)],
@@ -92,6 +91,18 @@ async function main(): Promise<void> {
       code,
     )
   }
+  // Renaming into the swapped folder: the source exists, so a refusal here is
+  // the destination check, not a missing file.
+  const renameIn = await refused(() => beneathRename(R, ['x'], ['s', 'planted.txt']))
+  check(
+    `rename in through a swapped folder is refused (${renameIn})`,
+    renameIn !== null &&
+      renameIn !== 'ENOENT' &&
+      fs.existsSync(path.join(R, 'x')) &&
+      !fs.existsSync(path.join(V, 'planted.txt')) &&
+      victimIntact(),
+    renameIn,
+  )
   check(
     'nothing was made in the victim',
     !fs.existsSync(path.join(V, 'made')) && !fs.existsSync(path.join(V, 'planted.txt')),
