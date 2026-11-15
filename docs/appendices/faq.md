@@ -122,7 +122,7 @@ If you choose your own token (`STUDIO_ACCESS_TOKEN`), use only letters, digits, 
 
 <Warning>
 
-On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/api/mcp/` path open, even with an access token set. Deny all of `/api/mcp/` at the proxy, or upgrade once a release newer than 0.5.0 is out. The [Security model](/operating/security) has the rules for nginx, Caddy and Cloudflare Tunnel. Run `clawboo --version` to see your version.
+On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/api/mcp/` path open, even with an access token set. Deny all of `/api/mcp/` at the proxy, or upgrade to 0.6.0 or later. The [Security model](/operating/security) has the rules for nginx, Caddy and Cloudflare Tunnel. Run `clawboo --version` to see your version.
 
 </Warning>
 

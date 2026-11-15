@@ -682,7 +682,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 <Warning>
 
-On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/api/mcp/` path open, even with an access token set. Deny all of `/api/mcp/` at the proxy, or upgrade once a release newer than 0.5.0 is out. [Security model](/operating/security) has the rules for nginx, Caddy and Cloudflare Tunnel.
+On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/api/mcp/` path open, even with an access token set. Deny all of `/api/mcp/` at the proxy, or upgrade to 0.6.0 or later. [Security model](/operating/security) has the rules for nginx, Caddy and Cloudflare Tunnel.
 
 </Warning>
 

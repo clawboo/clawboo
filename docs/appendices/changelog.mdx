@@ -8,32 +8,110 @@ Release history of the `clawboo` npm package, newest first. Each entry starts wi
 
 <Note>
 
-These docs follow the main branch. The latest npm release is 0.6.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
+These docs follow the main branch. The latest npm release is 0.7.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
 
 </Note>
 
 ## At a glance
 
-| Version | Released   | Highlights                                                                                                     |
-| ------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
-| 0.6.0   | 2026-11-04 | Rooms, steering, a rebuilt workspace, a dashboard that locks itself, a phone-ready web app, Ollama with no key |
-| 0.5.0   | 2026-10-21 | The Board as a calendar, task costs that count every run, a quieter team chat                                  |
-| 0.4.0   | 2026-09-28 | Connectors, a memory graph, building on the graph, Routines, a Needs you column                                |
-| 0.3.1   | 2026-07-20 | Team-chat reliability, live status badges, a provider manager per runtime                                      |
-| 0.3.0   | 2026-07-15 | Native-first: run on one provider key with no Gateway, teams that mix runtimes                                 |
-| 0.2.0   | 2026-06-20 | Clawboo runs its own agents and coordinates four other runtimes                                                |
-| 0.1.9   | 2026-06-01 | A lighter welcome screen, team colors                                                                          |
-| 0.1.8   | 2026-05-29 | Light and dark themes, a design-system pass                                                                    |
-| 0.1.7   | 2026-05-20 | Device pairing in the setup wizard, Windows fixes                                                              |
-| 0.1.6   | 2026-05-20 | Setup checks what is really installed                                                                          |
-| 0.1.5   | 2026-05-20 | Approve a new device from the dashboard                                                                        |
-| 0.1.4   | 2026-05-20 | OpenClaw protocol 4, Windows install support                                                                   |
-| 0.1.3   | 2026-05-19 | The CLI only opens a port that really serves Clawboo                                                           |
-| 0.1.2   | 2026-05-19 | Fixes `Cannot GET /`                                                                                           |
-| 0.1.1   | 2026-05-19 | First real release                                                                                             |
-| 0.1.0   | 2026-02-28 | Name placeholder                                                                                               |
+| Version | Released   | Highlights                                                                                                      |
+| ------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
+| 0.7.0   | 2026-11-14 | Readable task ids, plans and an Inbox, pause, agents on their own user, a computer you can watch for each agent |
+| 0.6.0   | 2026-11-04 | Rooms, steering, a rebuilt workspace, a dashboard that locks itself, a phone-ready web app, Ollama with no key  |
+| 0.5.0   | 2026-10-21 | The Board as a calendar, task costs that count every run, a quieter team chat                                   |
+| 0.4.0   | 2026-09-28 | Connectors, a memory graph, building on the graph, Routines, a Needs you column                                 |
+| 0.3.1   | 2026-07-20 | Team-chat reliability, live status badges, a provider manager per runtime                                       |
+| 0.3.0   | 2026-07-15 | Native-first: run on one provider key with no Gateway, teams that mix runtimes                                  |
+| 0.2.0   | 2026-06-20 | Clawboo runs its own agents and coordinates four other runtimes                                                 |
+| 0.1.9   | 2026-06-01 | A lighter welcome screen, team colors                                                                           |
+| 0.1.8   | 2026-05-29 | Light and dark themes, a design-system pass                                                                     |
+| 0.1.7   | 2026-05-20 | Device pairing in the setup wizard, Windows fixes                                                               |
+| 0.1.6   | 2026-05-20 | Setup checks what is really installed                                                                           |
+| 0.1.5   | 2026-05-20 | Approve a new device from the dashboard                                                                         |
+| 0.1.4   | 2026-05-20 | OpenClaw protocol 4, Windows install support                                                                    |
+| 0.1.3   | 2026-05-19 | The CLI only opens a port that really serves Clawboo                                                            |
+| 0.1.2   | 2026-05-19 | Fixes `Cannot GET /`                                                                                            |
+| 0.1.1   | 2026-05-19 | First real release                                                                                              |
+| 0.1.0   | 2026-02-28 | Name placeholder                                                                                                |
 
 Every 0.1.x release is deprecated on npm. That line ran on OpenClaw only and does not work reliably with current OpenClaw. Install a supported release with `npm install -g clawboo@latest`, or run `npx clawboo@latest`. Keep the `@latest`: a bare `npx clawboo` can reuse an old copy from npm's cache.
+
+<Update label="0.7.0" description="2026-11-14">
+
+0.7.0 makes the Board the place where work is tracked and decided, and gives each agent a computer you can watch. Tasks get readable ids such as `MAR-12`, a request you send in chat becomes one main task with its sub-tasks under it, a plan can wait for your OK, and a new **Inbox** shows what needs you and what changed. You can pause an agent, a team or a whole task tree, and Boo Zero can hand work to a team from its own chat. Runtimes now install into a folder Clawboo owns, with no `sudo`, and Hermes runs as the real Hermes through its own gateway. Agents can run as their own operating system user, each task gets a folder of its own, you can watch each agent's browser live, and agents can sign in to websites with a login they are never handed.
+
+**The Board**
+
+- **Readable task ids.** A team's tasks read like `MAR-12`: letters from the team's name, and a number. They show on cards, in the drawer and on task cards in chat, and Find and the Tasks tools take them. You can change the letters in the team's settings until its first task. Existing tasks get theirs on the first start. See [Task ids](/using/board#task-ids).
+- **One task per create.** A create sent again from the New task dialog, the Tasks tools or a team chat hand-off returns the same task instead of making a second one, and an agent that hands off the same open work twice under the same parent within 48 hours gets the first task back. An agent cannot hand work back to an agent that is waiting on it, and the hand-off caps now hold in team chat too.
+- **Your request is one card.** When a team's lead hands out work for something you asked in chat, your message becomes a main task with every hand-off and plan step nested under it, on the board and in the chat. It waits for its sub-tasks and moves to Done after the lead's summary. To add to a request, comment on its main task; a new message in the chat is a new request. See [Your requests and their sub-tasks](/using/board#your-requests-and-their-sub-tasks).
+- **A task that hands out work waits for it.** In team chat, its card reads "Waiting on 3 sub-tasks". When they close, its agent gets one more turn with all their results. A failed sub-task brings the parent to Needs you instead of letting it close as done. Agents can say how a task went with the new `report_result` tool, which never gets a task past a failing check.
+- **Plans.** An agent can write a plan as a document on its task, with every revision on the drawer's new **Plan** tab. Turn on **Ask me before splitting work** for a team, and a plan waits in Needs you until you accept it. It is off by default. See [Decide on a plan](/using/board#decide-on-a-plan).
+- **Every waiting task says what it waits for.** An agent that blocks a task must give a reason, and Needs you shows it. A task can be assigned to a person, and then no agent takes it. An agent can ask you a question (a choice, a yes or no, or a list of tasks to accept), which parks the task until you answer. You can reopen a finished task. On a local install, "a person" is one built-in person.
+- **Agents start when something happens on their task.** Your comment, or a task it waits on finishing, is saved so a restart cannot lose it, and starts the right run once. Agents can start each other with a comment once you allow it: Needs you asks once per job, and after that a job allows 12 wakes an hour, and two agents answering each other stop after 4. A comment from you always wakes the agent. See [What wakes an agent](/concepts/the-board#what-wakes-an-agent).
+- **A run's ending is told apart.** An empty reply gets one more turn, then waits in Needs you as **No result** instead of landing in Done. A rate limit, overload or network error goes back to To do and tries again twice. A budget cap or the circuit breaker stopping a run has a status of its own, so neither reads as your Stop.
+- **A job cannot run away.** Clawboo counts the runs a job starts by itself. At 100, nothing more starts by itself, and the job's top task shows in Needs you with **Carry on** and **Stop**. Your own messages, **Retry**, replies and **Accept** never count. See [When work restarts by itself](/concepts/the-board#when-work-restarts-by-itself).
+- **Labels, and a fair order.** Teams have labels you can set on tasks and filter the board by. Ready tasks go in this order: tasks that ran and came back, then priority, then oldest first. A task that keeps waiting moves up one priority every 4 hours, up to **High**. Agents, and scripts other than the dashboard, can set a priority of **High** at most: **Urgent** is a person's call.
+
+**Inbox and pause**
+
+- **Inbox.** The sidebar has an **Inbox** with **Unread**, **Needs you**, **Mine** and **All**, and a badge that counts what needs you and what changed. What you do yourself does not make a task unread for you. Read state is kept on the server, so it is the same in every browser, and behind a sign-in proxy each person has their own. See [See it all in the Inbox](/using/board#see-it-all-in-the-inbox).
+- **Pause an agent, a team or a task tree.** Use **Pause** in an agent's or a team chat's header, in a task's drawer, or from a right-click on the team rail or the Org chart. A pause holds until you resume it, through a restart. Its runs stop within seconds, and nothing it covers starts: no task, no Routine and no wake. A routine that falls due during a pause runs once on resume. A one-to-one chat with an OpenClaw agent runs in the Gateway, so a pause does not cover it. See [Pause work](/using/board#pause-work).
+- **Archived teams stop.** An archived team's agents stop working, and nothing wakes them until you bring the team back. Before, work left on its board kept starting.
+- **A person goes first.** When every run slot is taken, a person's chat turn goes first, then tasks by priority, so an **Urgent** task is no longer stuck behind everything queued before it.
+
+**Boo Zero**
+
+- **Hand work to a team from Boo Zero's chat.** Start a message with **@Team**, or say which team in plain words, and each hand-off becomes a task on that team's board, with its card in both chats. The result comes back to Boo Zero's chat, even across a restart. This works when Boo Zero runs on Clawboo Native, Claude Code, Codex or Hermes; an OpenClaw Boo Zero cannot hand off from its chat, and says so. See [Give a team work from this chat](/using/boo-zero#give-a-team-work-from-this-chat).
+- **Boo Zero asks before picking a team you did not name.** Work starts at once only on a team your message names. A hand-off to any other team waits on a card in the chat, and nothing starts until you press **Accept**.
+- **Words that are not yours are marked.** What an `@Team` message pulls in, Boo Zero's saved notes, and results kept since a Stop reach Boo Zero quoted, under who wrote them. On Clawboo Native, Claude Code, Codex and Hermes, a one-to-one chat gets only `get_task`, `list_tasks` and `add_comment` on the board.
+
+**Agent computers**
+
+- **Watch each agent's browser live.** The **Browser** card on an agent's page shows its browser live, and falls back to the last screenshot when no browser is open. On macOS and Windows, and on Linux without `Xvnc`, the view shows the browser about once a second, for watching only. See [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over).
+- **A screen for each agent on Linux.** With TigerVNC's `Xvnc` on the server, each agent's browser opens on a virtual screen of its own. **Take over** sends your mouse and keys to it while the agent's browser tools wait, until you **Hand back**. The agent's other programs share that screen, so type a password there only for an agent you trust. The screen listens on no network port. All agents share one agent user, so this keeps displays from other users on the machine, not agents from each other.
+- **Install the desktop tools.** On Linux, **Install the desktop tools** on an agent's **Screen** view installs TigerVNC's `Xvnc` (x86_64 only) and Cua Driver into Clawboo's runtimes folder, each checked against a SHA-256 Clawboo pins. Clawboo's copy of `Xvnc` needs some system libraries that Clawboo does not install, and the **Screen** view names any that is missing. Cua Driver, a new connector, lets an agent use the apps on its own screen. It runs only when agents run as their own user, and only for the agents you give it to. See [Connectors](/using/connectors).
+- **Share a screen with a link.** A **view link** lets someone with no way into your Clawboo watch one agent's screen. A **control link**, for example for a person who must type their own password into a site, is offered only when agents run as their own user. A view link expires after 8 hours and a control link after 1 hour by default. You can revoke either, and a restart revokes them all.
+- **The Computer tab.** The tab on an agent's page that showed its files is now **Computer**, with **Screen** and **Files**. It lists the agent's task folders beside its worktrees.
+- **A folder for each task.** A task run with no git worktree now starts in a folder of its own, `~/clawboo-work/teams/<team id>/tasks/<task id>` by default, instead of the team's shared folder, so a file stays with the task that made it. The task drawer shows it under **Files**. The folder sets where the run starts; it is not a sandbox. See [Task folders](/operating/data-and-state#task-folders).
+- **Sign in to websites without handing over the login.** Save a login under **Settings** > **Website logins**, or connect 1Password with a service account token. On a sign-in page, an agent calls the new `fill_login` tool, and Clawboo fills the login into the agent's own browser. The agent is told only `filled`, `no saved login`, `needs you` or `refused`. A login fills only on a page with exactly its saved scheme, host and port. Once a field is filled, the agent can still read it in its own page. A run uses only the logins of the person who started it or asked for its task, and a routine's run uses none. `fill_login` is offered to Clawboo Native, Claude Code, Codex and Hermes agents while the Playwright or Chrome DevTools connector is connected. See [Website logins](/using/website-logins).
+- Each agent's browser profile has Chrome's password manager turned off, so no password typed or filled into it is saved there.
+
+**Runtimes**
+
+- **Runtimes install into Clawboo's own folder.** OpenClaw, Claude Code and Codex install into `~/clawboo-runtimes` instead of npm's global folder (`<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set; `CLAWBOO_RUNTIMES_DIR` sets another). An install no longer needs `sudo`, no longer fails with a permission error on a system-wide Node, and is not lost when nvm switches Node. An update installs beside the current copy and switches only when it succeeds. A runtime you installed yourself keeps working when Clawboo has none of its own. See [The runtimes folder](/operating/data-and-state#the-runtimes-folder).
+- **OpenClaw checks Node first.** On a Node outside OpenClaw's range (`>=24.22.1 <25 || >=26.12.1`), the install says so and installs nothing, where npm used to install an older OpenClaw without a word. OpenClaw's setup also writes its tool sandbox as off, so OpenClaw's tools run on the same computer as your other agents; a sandbox you set up yourself is kept.
+- **Hermes runs as the real Hermes, through its own gateway.** Installing Hermes from **Settings** > **Runtimes** fetches release 0.23.1 from GitHub, with the uv and Python builds that release pins, each checked against a pinned hash: no Python of your own, and no pip or pipx. A Hermes installed earlier with pip or pipx reads **Update needed** until you install Clawboo's own. Clawboo runs one Hermes gateway on `127.0.0.1` and drives every Hermes agent through it as a Hermes profile, so each agent's memory, skills and sessions carry over. Hermes runs now stream, take a comment into the running turn, report their tokens, and ask before the commands Hermes's own policy flags. Hermes's chat channels stay off. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+- **Hermes's own jobs show in Routines.** Jobs a Hermes agent schedules in Hermes show in **Routines** under **Hermes's own jobs**, where you can disable, enable, run or delete them. Team work stays a Routine. `CLAWBOO_HERMES_TRANSPORT` is gone.
+- **Send a provider through your own gateway.** Set a provider's base URL, such as `OPENROUTER_BASE_URL` or `ANTHROPIC_BASE_URL`, to route its traffic through a gateway such as LiteLLM or a company proxy. Clawboo Native's runs, the key check when you save a key, and the model list all use it. An administrator can set it in the operator settings file too. See [Provider base URLs](/reference/environment-variables#provider-base-urls).
+- **A key from the environment shows as connected.** A provider key in the environment Clawboo starts with, such as `ANTHROPIC_API_KEY`, now reads as connected on the Providers page, and the row says it comes from the environment. Setting up OpenClaw still reuses only a saved key, so a key from the environment is never written to disk.
+
+**Agents on their own user, and the work folder**
+
+- **Run agents as their own operating system user.** Set `CLAWBOO_AGENT_USER` to a user made for them, and Claude Code, Codex and Hermes runs, Clawboo Native's approved commands and file tools, a task check's verify command, git in task checkouts, connectors with local reach and each agent's browser run as that user. That user cannot read Clawboo's database, the vault, its key, settings or the access token. Before it accepts a run, Clawboo checks this from inside that account. When the check fails, Clawboo refuses to start and says what to change. `clawboo agent-user plan` prints the setup commands for Linux or macOS, and `clawboo agent-user check` runs the check. It is off unless you set it and is not available on Windows. It does not limit the network, keep agents apart from each other, or cover OpenClaw agents. Clawboo stops every process the agent user runs each time Clawboo starts or stops, so give each install an agent user of its own. See [Run agents as their own user](/operating/agent-isolation).
+- **Your sign-ins stay yours.** With the setting on, your own Codex and Hermes sign-ins are not shared with the agents: sign them in from the Runtimes page, which runs as the agent user, or give the runtime an API key. Task checkouts come from a copy of each repository that the agent user owns, so an agent can no longer plant a hook in your repository. Connectors that hold a saved credential keep running as you, so agents cannot read their tokens.
+- **Agent work moves out of the data folder.** Team folders, task worktrees and review checkouts go in a work folder, `~/clawboo-work` by default (`CLAWBOO_WORK_DIR` sets another), so `../..` from a team folder no longer leads to the database or the saved keys. Agents that run as you can still open `~/.clawboo` by its full path: this removes the short route, not the access. The first start moves older work there by renaming it, and leaves a link at each old path. You can go back to 0.6.x after the move, though its team chat work checks then fail until you upgrade again; do not go below 0.6.0. See [The work folder](/operating/data-and-state#the-work-folder).
+- Clawboo no longer follows a link, or a hard link, that an agent puts at a task file's name such as `AGENT_HANDOFF.json` or `init.sh`.
+
+**If you script the API**
+
+- **A person's writes go through one check.** Board writes now record who made them. Moving a card, **Retry**, **Assign**, answering an approval, **Stop** on a chat, and the other writes that decide for you, such as a team's rules and members, budgets, Routines and their time zone, and connector grants, take a person's authority only from the dashboard's own page or from a person a sign-in proxy vouched for. Any other caller gets `403 person_only`, except that a card move from it still goes through, without a person's authority. A script acting for you can send `Sec-Fetch-Site: same-origin` and `Sec-Fetch-Mode: cors`. Chat messages from other callers still go through, marked `Local API call`. On your own computer this is a speed bump, not a security boundary. See [The person check](/operating/security#the-person-check).
+- **Copy signed MCP URLs for external agents again.** An attach signature now names the server it is for, so a Memory URL's signature no longer opens the Tasks tools. A signed URL you copied from `/api/mcp/config` is served as an unverified caller until you copy it again. Clawboo writes new URLs for its own runs each run.
+- **An app that starts Clawboo can name its person.** It hands Clawboo its public key in `CLAWBOO_APP_LINK_PUBLIC_KEY` and signs a short token for each request, so a message sent through the app counts as that person's and can start work. Such a person can allow an approval once or deny it, but never allow it always.
+- **Know when nobody is using Clawboo.** `GET /api/system/idle` says whether a person is here, whether an agent run is going, and when the next routine, OpenClaw cron job or Hermes job is due, so a computer or service that stops Clawboo when idle can start it again just before. See [Stop it when nobody is using it](/operating/deployment#stop-it-when-nobody-is-using-it).
+
+**Fixes**
+
+- The server answers sooner after it starts. Its startup database check is now SQLite's quick check, in a background thread; the full check runs once a day and on **Re-run probe** in **System Health**.
+- A due routine on an OpenClaw agent waits up to 5 minutes for the Gateway to connect instead of failing, so a routine that came due while Clawboo was stopped or the computer was asleep still runs.
+- A one-to-one chat no longer resumes a session that outgrew the model's context window. On Claude Code, Codex and Hermes the next message starts fresh, with one notice in the chat; Clawboo Native first trims its oldest turns when that makes room. **Retry** on a board task whose Claude Code run overflowed now starts a fresh session instead of overflowing again.
+- A team chat work check waits while a teammate is still working in the team folder, for up to 15 minutes, so it no longer checks a change halfway through. The card reads **Waiting to check**. A busy folder no longer lets finished work reach Done unchecked. The wait does not keep teammates' changes apart.
+- An agent's reply goes on its task when the work check starts, so a restart during the check no longer loses it. A crash while the task runner checks work no longer leaves the card stuck on **Verifying**.
+- Deleting a team stops its runs and cancels its open requests and the work under them.
+- Costs are charged where they belong: the reviewer asks the budget before it spends, and a one-to-one chat that reads a team's results is charged to that team. The audit log records budget edits, and writes the 80% and 100% warnings for team chat, one-to-one chat and peer-exchange spend.
+- Task comment and team chat events keep their author fields readable in the event log, instead of `[REDACTED]`.
+
+</Update>
 
 <Update label="0.6.0" description="2026-11-04">
 
