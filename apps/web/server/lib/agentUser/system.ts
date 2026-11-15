@@ -154,6 +154,31 @@ export function reapPoolUser(
 }
 
 /**
+ * `kill -KILL -1` as `user`, three times, blocking (boot and exit). Returns
+ * why the switch could not run it every time (sudo missing, a rule that does
+ * not allow it), or null; `kill` finding nothing left to stop is no failure.
+ */
+export function reapUserSync(
+  sw: AgentUserConfig['switch'],
+  user: string,
+  run: typeof spawnSync = spawnSync,
+): string | null {
+  const failures: string[] = []
+  for (let i = 0; i < 3; i++) {
+    const res = run(sw, ['-n', '-u', user, '--', 'kill', '-KILL', '-1'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin' },
+    })
+    const stderr = String(res.stderr ?? '')
+    if (res.error) failures.push(res.error.message)
+    else if (res.signal) failures.push(`${sw} was stopped by ${res.signal}`)
+    else if (/^(sudo|doas):/m.test(stderr)) failures.push(stderr.trim())
+  }
+  return failures.length === 3 ? failures[0]! : null
+}
+
+/**
  * Give a share root its inherited ACL (Linux `setfacl`): the share's group may
  * read, write and enter everything made inside, whatever the maker's umask, and
  * nobody else may. The folder is the server's own, just made.

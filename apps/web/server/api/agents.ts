@@ -579,7 +579,7 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
       if (source.id === 'hermes') void pauseDeletedHermesAgentJobs(agentId)
       forgetAgentComputer(agentId)
       // With a user per agent, its processes stop now and its user is wiped and handed back.
-      void releaseDeleted()
+      await releaseDeleted()
       res.json({ ok: true, upstreamDeleted: true })
     } catch (err) {
       if (isDisconnected(err)) {
@@ -610,7 +610,7 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
 // old rooms and its leader resume pointers (see lib/agentMove.ts). Refused for
 // Boo Zero, for a team's lead, and while the agent has a task in progress.
 
-export function agentMovePOST(req: Request, res: Response): void {
+export async function agentMovePOST(req: Request, res: Response): Promise<void> {
   // A person's call: moving a team's lead away hands the team to its first member.
   if (refuseUnlessPerson(req, res)) return
   const agentId = req.params['agentId'] as string | undefined
@@ -632,8 +632,9 @@ export function agentMovePOST(req: Request, res: Response): void {
       return
     }
     if (result.routinesMoved > 0) getRoutinesTicker()?.requestRescan()
-    // With a user per agent, its processes held the old team's group: they stop.
-    void releaseDeleted()
+    // With a user per agent, its processes held the old team's group: they stop
+    // before this answers.
+    await releaseDeleted()
     res.json(result)
   } catch (err) {
     res.status(500).json({ error: String(err) })

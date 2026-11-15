@@ -29,15 +29,41 @@ export function toStat(st: fs.Stats): FsStat {
 export const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0
 export const O_NONBLOCK = fs.constants.O_NONBLOCK ?? 0
 
+/**
+ * Throw `EACCES` unless the open `fd` is inside `realRoot` (a share's root, by
+ * its real path). Checked on what was opened, so a folder swapped for a link
+ * between a check and the open cannot carry the operation elsewhere. Linux
+ * reads it from `/proc/self/fd`, the only place a user per agent runs; other
+ * systems (tests) look the path up again, which is not race-free.
+ */
+export function assertFdWithin(fd: number, realRoot: string, p: string): void {
+  let real: string
+  try {
+    real = fs.readlinkSync(`/proc/self/fd/${fd}`)
+  } catch {
+    if (process.platform === 'linux') {
+      throw Object.assign(new Error(`${p}: cannot tell where it was opened`), { code: 'EACCES' })
+    }
+    real = fs.realpathSync(p)
+  }
+  const rel = path.relative(realRoot, real)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw Object.assign(new Error(`${p} leads outside its share`), { code: 'EACCES' })
+  }
+}
+
 /** Read at most `maxBytes` of a regular file from `offset`, never through a
- *  link at the path's end. `truncated`: more follows what was read. */
+ *  link at the path's end. `truncated`: more follows what was read. `within`:
+ *  the opened file must be inside that real path. */
 export function readBounded(
   p: string,
   maxBytes: number,
   offset = 0,
+  within?: string | null,
 ): { data: Buffer; size: number; truncated: boolean } {
   const fd = fs.openSync(p, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
   try {
+    if (within) assertFdWithin(fd, within, p)
     const st = fs.fstatSync(fd)
     if (!st.isFile()) {
       throw Object.assign(new Error(`${p} is not a regular file`), { code: 'ENOTFILE' })
@@ -67,7 +93,7 @@ export function writeAtomic(
   p: string,
   data: Buffer,
   mode: number,
-  opts: { strictOwnerOnly?: boolean } = {},
+  opts: { strictOwnerOnly?: boolean; within?: string | null } = {},
 ): void {
   const dir = path.dirname(p)
   const tmp = path.join(dir, `.${path.basename(p)}.${crypto.randomBytes(6).toString('hex')}.tmp`)
@@ -77,6 +103,9 @@ export function writeAtomic(
     mode,
   )
   try {
+    // The fresh file must be where it was asked for: written nowhere else, and
+    // the rename below finds it only there.
+    if (opts.within) assertFdWithin(fd, opts.within, p)
     let off = 0
     while (off < data.length) off += fs.writeSync(fd, data, off, data.length - off)
     if (opts.strictOwnerOnly && (mode & 0o077) === 0) fs.fchmodSync(fd, mode)
@@ -95,9 +124,18 @@ export function writeAtomic(
   }
 }
 
-/** Make a folder (and its parents) and give the last one exactly `mode`. */
-export function mkdirMode(p: string, mode: number): void {
+/** Make a folder (and its parents) and give the last one exactly `mode`.
+ *  `within`: the folder made must be inside that real path. */
+export function mkdirMode(p: string, mode: number, within?: string | null): void {
   fs.mkdirSync(p, { recursive: true, mode })
+  if (within) {
+    const fd = fs.openSync(p, fs.constants.O_RDONLY | O_NOFOLLOW | (fs.constants.O_DIRECTORY ?? 0))
+    try {
+      assertFdWithin(fd, within, p)
+    } finally {
+      fs.closeSync(fd)
+    }
+  }
   const st = fs.lstatSync(p)
   if (!st.isDirectory()) throw Object.assign(new Error(`${p} is not a folder`), { code: 'ENOTDIR' })
   if ((st.mode & 0o777) !== mode) chmodBestEffort(() => fs.chmodSync(p, mode))
@@ -132,8 +170,13 @@ export function listDir(dir: string, max: number): { entries: FsEntry[]; truncat
 }
 
 /** Append to a file (made with `mode` when missing), never through a link at
- *  the path's end. */
-export function appendNoFollow(p: string, data: Buffer, mode: number): void {
+ *  the path's end. `within`: the opened file must be inside that real path. */
+export function appendNoFollow(
+  p: string,
+  data: Buffer,
+  mode: number,
+  within?: string | null,
+): void {
   const fd = fs.openSync(
     p,
     // O_NONBLOCK: a named pipe an agent planted at the name must fail the
@@ -142,6 +185,7 @@ export function appendNoFollow(p: string, data: Buffer, mode: number): void {
     mode,
   )
   try {
+    if (within) assertFdWithin(fd, within, p)
     if (!fs.fstatSync(fd).isFile()) {
       throw Object.assign(new Error(`${p} is not a regular file`), { code: 'ENOTFILE' })
     }

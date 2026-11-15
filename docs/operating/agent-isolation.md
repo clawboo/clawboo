@@ -262,10 +262,14 @@ They make the users `clawboo-a1` to `clawboo-a8`, each with a group of its own a
 alice ALL=(clawboo-a1, clawboo-a2, clawboo-a3 : clawboo-t1, clawboo-t2) NOPASSWD: ALL
 ```
 
-Log in again so the new groups apply, then check and start:
+Log in again so the new groups apply. Then check, and start Clawboo with the same settings (without them it starts with isolation off):
 
 ```bash
 CLAWBOO_AGENT_USERS=clawboo-a1,clawboo-a2,clawboo-a3 CLAWBOO_AGENT_GROUPS=clawboo-t1,clawboo-t2 CLAWBOO_WORK_DIR=/var/lib/clawboo-work clawboo agent-user check
+```
+
+```bash
+CLAWBOO_AGENT_USERS=clawboo-a1,clawboo-a2,clawboo-a3 CLAWBOO_AGENT_GROUPS=clawboo-t1,clawboo-t2 CLAWBOO_WORK_DIR=/var/lib/clawboo-work clawboo
 ```
 
 `CLAWBOO_AGENT_USERS` also takes a range of user ids, such as `uid:20001-20008`, and `CLAWBOO_AGENT_GROUPS` a range of group ids, such as `gid:21001-21004`. Every user in the pool belongs to this Clawboo only: it stops every process they run when it starts and when it stops.

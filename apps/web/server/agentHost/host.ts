@@ -70,6 +70,11 @@ function hasNoNewPrivs(): boolean {
  * A part that does not exist yet is checked through the nearest one that does.
  */
 export function assertWithin(p: string, root: string, whole: boolean): void {
+  // Only a path as it stands: `..` or `.` parts would be read one way here and
+  // another way, through a link, by the operation itself.
+  if (!path.isAbsolute(p) || path.posix.normalize(p) !== p) {
+    throw Object.assign(new Error(`${p} is not a plain absolute path`), { code: 'EACCES' })
+  }
   const realRoot = fs.realpathSync(root)
   let probe = path.resolve(whole ? p : path.dirname(p))
   let real: string | null = null
@@ -86,6 +91,31 @@ export function assertWithin(p: string, root: string, whole: boolean): void {
   const rel = real === null ? '..' : path.relative(realRoot, real)
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw Object.assign(new Error(`${p} leads outside its share`), { code: 'EACCES' })
+  }
+}
+
+/**
+ * Throw `EACCES` when a folder on the way from `root` to `p` is a link (the
+ * last part may be one: removing a link removes the link). `p` is a plain
+ * absolute path under `root` (`assertWithin` checked).
+ */
+function assertNoLinkBelow(p: string, root: string): void {
+  const parts = path.relative(root, p).split(path.sep).filter(Boolean)
+  let cur = root
+  for (const part of parts.slice(0, -1)) {
+    cur = path.join(cur, part)
+    let st: fs.Stats
+    try {
+      st = fs.lstatSync(cur)
+    } catch (err) {
+      if ((err as { code?: string }).code === 'ENOENT') return
+      throw err
+    }
+    if (!st.isDirectory()) {
+      throw Object.assign(new Error(`${p} goes through ${cur}, which is not a folder`), {
+        code: 'EACCES',
+      })
+    }
   }
 }
 
@@ -557,6 +587,7 @@ export function serveConnection(
     if (f['t'] !== 'req' || typeof f['id'] !== 'number') return
     const id = f['id']
     try {
+      let confined: string | null = null
       // A share's file (a team's folder, with a user per agent): every path the
       // request names must resolve, links followed, inside the share's root,
       // so a link a teammate planted cannot carry the request into this user's
@@ -567,6 +598,12 @@ export function serveConnection(
         )
         for (const p of paths)
           assertWithin(p, f['within'], f['op'] === 'fs.list' || f['op'] === 'fs.realpath')
+        confined = fs.realpathSync(f['within'])
+        // Removing and renaming go by name (Node has no openat): no part of
+        // the path below the root may be a link when they start.
+        if (f['op'] === 'fs.rm' || f['op'] === 'fs.rename' || f['op'] === 'fs.rmdir') {
+          for (const p of paths) assertNoLinkBelow(p, f['within'])
+        }
       }
       switch (f['op']) {
         case 'ping':
@@ -601,6 +638,7 @@ export function serveConnection(
               String(f['path']),
               Number.isFinite(max) && max >= 0 ? max : MAX_READ_BYTES,
               Number.isInteger(off) && off > 0 ? off : 0,
+              confined,
             )
             return reply(id, {
               missing: false,
@@ -621,6 +659,7 @@ export function serveConnection(
           // cannot be set is refused, not written readable by others.
           writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777, {
             strictOwnerOnly: true,
+            within: confined,
           })
           return reply(id, {})
         }
@@ -628,11 +667,11 @@ export function serveConnection(
           const data = Buffer.from(String(f['data'] ?? ''), 'base64')
           if (data.length > MAX_WRITE_BYTES)
             throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
-          appendNoFollow(String(f['path']), data, Number(f['mode']) & 0o777)
+          appendNoFollow(String(f['path']), data, Number(f['mode']) & 0o777, confined)
           return reply(id, {})
         }
         case 'fs.mkdir':
-          mkdirMode(String(f['path']), Number(f['mode']) & 0o777)
+          mkdirMode(String(f['path']), Number(f['mode']) & 0o777, confined)
           return reply(id, {})
         case 'fs.rm':
           await fs.promises.rm(String(f['path']), { recursive: true, force: true })

@@ -307,6 +307,31 @@ describe.runIf(posix && me.uid !== 0)('a user per agent: routing for real', () =
     expect(fs.existsSync(path.join(users[1]!.home, 'init.sh'))).toBe(false)
   })
 
+  it("a share path with `..` after a teammate's link is refused, not read lexically", async () => {
+    const teamDir = taskRunWorkdirFor('codex', 'T1', process.env, 'agent-b')!
+    await agentMkdir(teamDir)
+    fs.mkdirSync(path.join(users[1]!.home, 'sub'))
+    fs.symlinkSync(path.join(users[1]!.home, 'sub'), path.join(teamDir, 'link'))
+    const evil = `${teamDir}/link/../evil`
+    await expect(agentWriteFile(evil, 'x')).rejects.toThrow(/not a plain absolute path/)
+    expect(fs.existsSync(path.join(users[1]!.home, 'evil'))).toBe(false)
+  })
+
+  it('the host checks the file it opened, not only the name it was given', async () => {
+    const { assertFdWithin } = await import('../../../agentHost/fsOps')
+    const outside = path.join(root, 'outside.txt')
+    fs.writeFileSync(outside, 'x')
+    const fd = fs.openSync(outside, 'r')
+    try {
+      expect(() => assertFdWithin(fd, path.join(root, 'work'), outside)).toThrow(
+        /outside its share/,
+      )
+      expect(() => assertFdWithin(fd, root, outside)).not.toThrow()
+    } finally {
+      fs.closeSync(fd)
+    }
+  })
+
   it('a team member whose user left the pool does not hold up the team', async () => {
     const { shareActor } = await import('../poolRoute')
     // agent-b's user stays in the records but the running pool no longer holds it.

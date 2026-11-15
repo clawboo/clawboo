@@ -241,6 +241,15 @@ export function profileDirFor(
   return path.join(root, 'browser-profiles', slug, stem)
 }
 
+/** Whether each agent's calls to this stdio connector go to a process of its
+ *  own: a per-agent browser (a profile flag) or a desktop driver (a display). */
+export function isPerAgentLaunch(launch: {
+  perAgentProfileFlag?: string
+  perAgentDisplay?: boolean
+}): boolean {
+  return Boolean(launch.perAgentDisplay || launch.perAgentProfileFlag)
+}
+
 /**
  * Why a connector may not start with a user per agent (CLAWBOO_AGENT_USERS),
  * or null. A connector with local reach and no credential is one process every
@@ -251,10 +260,12 @@ export function profileDirFor(
 export function pooledConnectorRefusal(
   displayName: string,
   declared: Readonly<Record<string, string>> | null,
-  perAgentDisplay: boolean,
+  /** Each agent's calls go to a process of its own (a per-agent browser or
+   *  desktop driver): the shared one only lists tools, as this server. */
+  perAgent: boolean,
 ): string | null {
   if (!isAgentPoolMode() || declared === null) return null
-  if (Object.keys(declared).length > 0 || perAgentDisplay) return null
+  if (Object.keys(declared).length > 0 || perAgent) return null
   return `${displayName} would be one program shared by every agent, and each agent runs as its own user (CLAWBOO_AGENT_USERS), so it does not start. Agents keep their own browsers.`
 }
 

@@ -12,7 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentPoolConfig } from '../config'
 import type { AccountRecord, GroupRecord, PoolUser } from '../pool'
-import { poolSudoersLines, runAgentPoolCheck, type PoolCheckDeps } from '../poolBoot'
+import {
+  poolSudoersLines,
+  recordedIdProblem,
+  runAgentPoolCheck,
+  type PoolCheckDeps,
+} from '../poolBoot'
 import type { HelloFrame } from '../protocol'
 import { startInProcessHost, type InProcessHost } from './inProcessHost'
 
@@ -142,6 +147,7 @@ describe.runIf(posix && me !== 0)('a user per agent: the startup check', () => {
       },
       reapSync: (u) => {
         reaped.push(u.name)
+        return null
       },
     }
     fs.chmodSync(path.join(dir, 'data'), 0o000)
@@ -281,9 +287,86 @@ describe.runIf(posix && me !== 0)('a user per agent: the startup check', () => {
     )
   })
 
+  it('refuses when the processes an earlier run left cannot be stopped', async () => {
+    deps.reapSync = (u) => (u.name === 'clawboo-a2' ? 'sudo: a password is required' : null)
+    expect(failed(await runAgentPoolCheck(config, deps))).toMatchObject({
+      step: 6,
+      message: expect.stringMatching(
+        /cannot stop the processes of clawboo-a2 \(sudo: a password is required\)/,
+      ),
+    })
+    expect(hosts).toHaveLength(0)
+  })
+
+  it('takes no interrupted search for temporary files as proof they are gone', async () => {
+    const { EventEmitter } = await import('node:events')
+    const { PassThrough } = await import('node:stream')
+    const { wipeTempFiles } = await import('../poolBoot')
+    const ending = (code: number | null, signal: string | null) => ({
+      spawn: () => {
+        const p = Object.assign(new EventEmitter(), { stdout: new PassThrough() })
+        setImmediate(() => {
+          p.stdout.end()
+          p.emit('close', code, signal)
+        })
+        return p as never
+      },
+    })
+    await expect(wipeTempFiles(ending(null, 'SIGKILL'), 20001)).rejects.toThrow(/did not finish/)
+    await expect(wipeTempFiles(ending(2, null), 20001)).rejects.toThrow(/did not finish \(2\)/)
+    // Exit 1 with nothing printed: only folders it may not enter.
+    await expect(wipeTempFiles(ending(1, null), 20001)).resolves.toBeUndefined()
+  })
+
   it('writes the users inline in the sudoers line, and leaves out an empty group list', () => {
     expect(poolSudoersLines('clawboo', ['a1', 'a2'], [])).toContain(
       'clawboo ALL=(a1, a2) NOPASSWD: ALL',
     )
+  })
+})
+
+describe('recordedIdProblem: ids that moved between names', () => {
+  const users = [{ name: 'clawboo-a1', uid: 20001 }]
+  const groups = [{ name: 'clawboo-t9', gid: 21001 }]
+
+  it('passes when the setting and the records agree', () => {
+    expect(
+      recordedIdProblem(
+        users,
+        groups,
+        [{ userName: 'clawboo-a1', uid: 20001, state: 'assigned' }],
+        [{ groupName: 'clawboo-t9', gid: 21001, state: 'assigned' }],
+      ),
+    ).toBeNull()
+  })
+
+  it('refuses a renamed team group that keeps a recorded gid', () => {
+    expect(
+      recordedIdProblem(
+        users,
+        groups,
+        [],
+        [{ groupName: 'clawboo-t1', gid: 21001, state: 'assigned' }],
+      ),
+    ).toMatch(/clawboo-t9 has gid 21001, which clawboo-t1 had/)
+  })
+
+  it('refuses a user whose uid changed, and a free row never blocks', () => {
+    expect(
+      recordedIdProblem(
+        [{ name: 'clawboo-a1', uid: 20005 }],
+        [],
+        [{ userName: 'clawboo-a1', uid: 20001, state: 'assigned' }],
+        [],
+      ),
+    ).toMatch(/clawboo-a1 had uid 20001 and now has 20005/)
+    expect(
+      recordedIdProblem(
+        users,
+        groups,
+        [],
+        [{ groupName: 'clawboo-t1', gid: 21001, state: 'free' }],
+      ),
+    ).toBeNull()
   })
 })

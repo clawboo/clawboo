@@ -226,3 +226,38 @@ describe('buildChildEnv: a configured proxy never carries loopback traffic', () 
     },
   )
 })
+
+describe("buildChildEnv: the server's identity stays out of agents' environments", () => {
+  const keys = ['CLAWBOO_AGENT_USER', 'CLAWBOO_AGENT_USERS', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME']
+  const saved: Record<string, string | undefined> = {}
+  beforeEach(() => {
+    for (const k of keys) saved[k] = process.env[k]
+    process.env['CLAUDE_CONFIG_DIR'] = '/home/operator/.claude'
+    process.env['CODEX_HOME'] = '/home/operator/.codex'
+  })
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  it('with a user per agent, as with one agent user, the operator config folders are not passed on', () => {
+    delete process.env['CLAWBOO_AGENT_USER']
+    process.env['CLAWBOO_AGENT_USERS'] = 'clawboo-a1,clawboo-a2'
+    const env = buildChildEnv()
+    expect(env['CLAUDE_CONFIG_DIR']).toBeUndefined()
+    expect(env['CODEX_HOME']).toBeUndefined()
+    expect(env['CLAWBOO_AGENT_USERS']).toBeUndefined()
+    // A run that sets its own home still gets it.
+    expect(buildChildEnv({ CLAUDE_CONFIG_DIR: '/var/lib/a1/.claude' })['CLAUDE_CONFIG_DIR']).toBe(
+      '/var/lib/a1/.claude',
+    )
+  })
+
+  it('with isolation off they pass as before', () => {
+    delete process.env['CLAWBOO_AGENT_USER']
+    delete process.env['CLAWBOO_AGENT_USERS']
+    expect(buildChildEnv()['CLAUDE_CONFIG_DIR']).toBe('/home/operator/.claude')
+  })
+})

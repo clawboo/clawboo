@@ -77,6 +77,11 @@ interface Entry {
   reaping: Promise<void> | null
   /** Why the last stop of this user's processes failed, or null. */
   reapFailed: string | null
+  /** The groups processes that could not be stopped may hold (null: its own),
+   *  kept until a stop succeeds. */
+  reapFailedGroups: Set<string | null>
+  /** Bumped by every stop: a start begun before it publishes nothing. */
+  generation: number
 }
 
 /** The longest pause between start attempts after failures. */
@@ -226,6 +231,8 @@ export class AgentPool {
         lastError: null,
         reaping: null,
         reapFailed: null,
+        reapFailedGroups: new Set(),
+        generation: 0,
       }
       this.entries.set(user.name, e)
     }
@@ -234,6 +241,7 @@ export class AgentPool {
 
   private async start(e: Entry): Promise<AgentHostClient> {
     const group = e.group
+    const generation = e.generation
     // A stop of this user's processes still under way would reach the new host.
     while (e.reaping) await e.reaping
     if (e.reapFailed) {
@@ -279,6 +287,13 @@ export class AgentPool {
       this.reapEntry(e)
       throw new PoolHostError(`the team of ${e.user.name}'s agent changed while its host started`)
     }
+    if (e.generation !== generation) {
+      // Stopped while it started (its agent deleted, a wipe begun): the late
+      // host and anything it started go too.
+      client.close('stopped while it started')
+      this.reapEntry(e)
+      throw new PoolHostError(`${e.user.name} was stopped while its host started`)
+    }
     e.client = client
     e.hello = hello
     e.failures = 0
@@ -305,6 +320,7 @@ export class AgentPool {
 
   /** Close an entry's host and stop every process of its user. */
   private stopEntry(e: Entry, reason: string): void {
+    e.generation += 1
     e.stopWatch?.()
     e.stopWatch = null
     const client = e.client
@@ -315,15 +331,18 @@ export class AgentPool {
   }
 
   private reapEntry(e: Entry): void {
+    const heldGroup = e.group?.name ?? null
     const prev = e.reaping ?? Promise.resolve()
     const p: Promise<void> = prev
       .then(() => this.deps.reap(e.user))
       .then(
         () => {
           e.reapFailed = null
+          e.reapFailedGroups.clear()
         },
         (err: unknown) => {
           e.reapFailed = err instanceof Error ? err.message : String(err)
+          e.reapFailedGroups.add(heldGroup)
           this.deps.log.warn(
             { user: e.user.name, err: e.reapFailed },
             "Agent isolation: could not stop an agent user's processes",
@@ -361,6 +380,21 @@ export class AgentPool {
     if (!user) return
     const e = this.entries.get(userName) ?? this.entryFor(user, null)
     this.stopEntry(e, reason)
+  }
+
+  /**
+   * Whether processes that could not be stopped may still hold `groupName`:
+   * a team's group is never handed out again while they might. Each check
+   * first tries those stops once more.
+   */
+  async groupMayBeHeld(groupName: string): Promise<boolean> {
+    for (const e of this.entries.values()) {
+      if (!e.reapFailed || !e.reapFailedGroups.has(groupName)) continue
+      this.reapEntry(e)
+      while (e.reaping) await e.reaping
+      if (e.reapFailed) return true
+    }
+    return false
   }
 
   /** Resolves once no stop of `userName`'s processes is under way. */

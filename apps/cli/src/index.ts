@@ -25,6 +25,7 @@ import fs from 'fs'
 
 import { resolveAccessTokenPath, resolveClawbooDir } from '@clawboo/config'
 
+import { agentUserArgs, type AgentUserOpts } from './agentUserArgs'
 import { runAgentUser } from './agentUser'
 import { writeDatabaseBackup } from './backup'
 import { VERSION } from './version'
@@ -892,18 +893,25 @@ program
 program
   .command('agent-user <action>')
   .description(
-    'Agents as their own OS user (CLAWBOO_AGENT_USER). `plan` prints the commands an ' +
+    'Agents as their own OS user (CLAWBOO_AGENT_USER, or a user per agent with CLAWBOO_AGENT_USERS). `plan` prints the commands an ' +
       'administrator runs once to set it up; `check` proves the setup without starting Clawboo.',
   )
   .option(
     '--user <name>',
     'The agent user name for `plan` (default: CLAWBOO_AGENT_USER, else a suggested one).',
   )
-  .action((action: string, opts: { user?: string }) => {
+  .option(
+    '--pool <n>',
+    'For `plan`: a user per agent (CLAWBOO_AGENT_USERS, Linux): how many agent users (default 8).',
+  )
+  .option('--teams <m>', 'For `plan --pool`: how many team groups (default 4).')
+  .option('--first-uid <uid>', 'For `plan --pool`: the first agent user id (default 20001).')
+  .option('--first-team-gid <gid>', 'For `plan --pool`: the first team group id (default 21001).')
+  .action((action: string, opts: AgentUserOpts) => {
     if (action !== 'plan' && action !== 'check') {
       program.error(`error: unknown agent-user action '${action}' (use plan or check)`)
     }
-    runAgentUser(action, opts.user ? ['--user', opts.user] : [])
+    runAgentUser(action, agentUserArgs(opts))
       .then((code) => process.exit(code))
       .catch(fail)
   })

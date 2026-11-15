@@ -530,7 +530,10 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
         // that just ended. A newer one means the task is being run again.
         const runId = latestRun(taskId)
         const wait: CheckWait = { turn: null, since: null, waitedMs: 0, limitReached: false }
-        const prepared: PreparedWorkCheck = async () => {
+        // Called later, outside `prepare`: everything it runs (a measure on
+        // retry, git on the history, the check) runs as the agent checked.
+        const prepared: PreparedWorkCheck = () => runAsAgent(agentId, preparedCheck)
+        const preparedCheck = async (): Promise<WorkCheckResult> => {
           if (measured)
             return runAsAgent(agentId, () =>
               check(taskId, agentId, target, measured.b, measured.h, measured.d, runId, wait),

@@ -1161,6 +1161,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               ? taskRunFolderFor(resolvedRuntime, {
                   id: runTaskId,
                   teamId: briefTask ? briefTask.teamId : teamId,
+                  // A task of no team, with a user per agent: the running agent's own folder.
+                  assigneeAgentId: targetAgentId,
                 })
               : null
           // The model a cost estimate is priced at when the run's cost events name

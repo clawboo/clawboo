@@ -28,6 +28,7 @@ import path from 'node:path'
 import { agentMkdir, agentWriteFile } from '../../apps/web/server/lib/agentUser/agentFs'
 import {
   releaseDeleted,
+  releasesSettled,
   startAgentPool,
   stopAgentPool,
 } from '../../apps/web/server/lib/agentUser/poolBoot'
@@ -304,6 +305,7 @@ async function main(): Promise<void> {
   sql.prepare("DELETE FROM agents WHERE id = 'C'").run()
   sql.prepare("DELETE FROM teams WHERE id = 'T2'").run()
   await releaseDeleted()
+  await releasesSettled()
   check("the deleted team's folder is gone", !fs.existsSync(t2), t2)
   const groupState = sql
     .prepare("SELECT state FROM team_os_groups WHERE group_name = 'clawboo-t2'")

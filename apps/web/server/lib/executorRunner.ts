@@ -378,7 +378,8 @@ function unsafeWorkspace(r: { worktreePath: string; why: string }): WorkspaceOut
  */
 async function folderForRun(
   runtimeId: string,
-  task: { id: string; teamId: string | null },
+  /** `assigneeAgentId`: whose folder a task of no team gets with a user per agent. */
+  task: { id: string; teamId: string | null; assigneeAgentId?: string | null },
 ): Promise<
   { ok: true; runDir: string | null; teamFolder: string | null } | { ok: false; reason: string }
 > {
@@ -986,7 +987,11 @@ async function runTaskInner(
   // the task's, never the server's working directory.
   const runFolder =
     acquired.ok && acquired.cwd === null
-      ? await folderForRun(runtimeId, { id: taskId, teamId: task.teamId ?? null })
+      ? await folderForRun(runtimeId, {
+          id: taskId,
+          teamId: task.teamId ?? null,
+          assigneeAgentId,
+        })
       : ({ ok: true, runDir: null, teamFolder: null } as const)
   const workspace: WorkspaceOutcome = runFolder.ok
     ? acquired

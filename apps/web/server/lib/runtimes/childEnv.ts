@@ -195,14 +195,20 @@ export const SERVER_IDENTITY_ENV_KEYS: ReadonlySet<string> = new Set([
   'CODEX_HOME',
   'HERMES_HOME',
   'CLAWBOO_AGENT_USER',
+  'CLAWBOO_AGENT_USERS',
+  'CLAWBOO_AGENT_GROUPS',
   'CLAWBOO_AGENT_SWITCH',
   'CLAWBOO_AGENT_HOST_SOCKET',
 ])
 
-/** Whether agents run as their own OS user. Read here rather than imported, so this
- *  module keeps no dependency on the agent-user code. */
+/** Whether agents run as their own OS user: one agent user, or a user per agent
+ *  (CLAWBOO_AGENT_USERS). Read here rather than imported, so this module keeps no
+ *  dependency on the agent-user code. */
 function agentUserModeOn(): boolean {
-  return (process.env['CLAWBOO_AGENT_USER'] ?? '').trim() !== ''
+  return (
+    (process.env['CLAWBOO_AGENT_USER'] ?? '').trim() !== '' ||
+    (process.env['CLAWBOO_AGENT_USERS'] ?? '').trim() !== ''
+  )
 }
 
 function isTruthyFlag(v: string | undefined): boolean {

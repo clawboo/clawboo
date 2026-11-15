@@ -230,6 +230,45 @@ describe('AgentPool', () => {
     expect(pool.running('clawboo-a1')).toBeNull()
   })
 
+  it('a host still starting when its user is stopped is never used', async () => {
+    let release: () => void = () => undefined
+    const late: AgentHostClient[] = []
+    const { pool } = makePool({
+      open: async (u, g) => {
+        await new Promise<void>((r) => (release = r))
+        const h = fakeHost(helloFor(u, g))
+        await h.client.waitForHello()
+        late.push(h.client)
+        return h.client
+      },
+    })
+    pools.push(pool)
+    const starting = pool.hostFor('clawboo-a1', null)
+    await new Promise((r) => setTimeout(r, 10))
+    pool.close('clawboo-a1', 'its agent was deleted')
+    release()
+    await expect(starting).rejects.toThrow(/stopped while its host started/)
+    expect(late[0]?.closed).not.toBeNull()
+    expect(pool.running('clawboo-a1')).toBeNull()
+  })
+
+  it("a team's group counts as held while processes that held it could not be stopped", async () => {
+    let failing = true
+    const { pool } = makePool({
+      reap: async () => {
+        if (failing) throw new Error('sudo: a password is required')
+      },
+    })
+    pools.push(pool)
+    await pool.hostFor('clawboo-a1', 'clawboo-t1')
+    pool.close('clawboo-a1', 'its team was deleted')
+    await pool.settled('clawboo-a1')
+    expect(await pool.groupMayBeHeld('clawboo-t1')).toBe(true)
+    expect(await pool.groupMayBeHeld('clawboo-t2')).toBe(false)
+    failing = false
+    expect(await pool.groupMayBeHeld('clawboo-t1')).toBe(false)
+  })
+
   it('closes a host that has had nothing to do, and keeps a busy one', async () => {
     let now = 1_000
     const { pool, reaped } = makePool({ now: () => now, idleMs: 1_000 })

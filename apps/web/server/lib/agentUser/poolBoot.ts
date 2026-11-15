@@ -24,6 +24,7 @@ import {
   finishAgentOsUserScrub,
   finishTeamOsGroupScrub,
   listAgentOsUsers,
+  listTeamOsGroups,
   teams,
 } from '@clawboo/db'
 
@@ -63,13 +64,7 @@ import {
 } from './poolShares'
 import { AGENT_SHARE_PREFIX } from './poolRoute'
 import { peekAgentPool, setActiveAgentPool } from './state'
-import {
-  currentUserName,
-  getentRun,
-  killAllAgentProcesses,
-  reapPoolUser,
-  setShareAcl,
-} from './system'
+import { currentUserName, getentRun, reapPoolUser, reapUserSync, setShareAcl } from './system'
 
 type Log = {
   info(obj: object | string, msg?: string): void
@@ -101,7 +96,8 @@ export interface PoolCheckDeps {
   /** Whether `setfacl` is there (the share roots' inherited ACL). */
   hasSetfacl(): boolean
   openHost(user: PoolUser, group: PoolGroup | null): Promise<AgentHostClient>
-  reapSync(user: PoolUser): void
+  /** Stop every process of `user`; why it could not, or null. */
+  reapSync(user: PoolUser): string | null
   /** How many hosts are checked at once. */
   concurrency?: number
 }
@@ -228,7 +224,20 @@ export async function runAgentPoolCheck(
 
   // 6. Before any host: anything a pool user still runs belongs to a server
   // that is gone.
-  for (const u of resolved.users) deps.reapSync(u)
+  for (const u of resolved.users) {
+    const why = deps.reapSync(u)
+    if (why) {
+      return fail(
+        6,
+        'stopping agents',
+        `Clawboo cannot stop the processes of ${u.name} (${why}), so it cannot make sure nothing an earlier run left behind is still running. The sudoers rule must let ${deps.serverUser} run any command as each agent user:\n${poolSudoersLines(
+          deps.serverUser,
+          resolved.users.map((x) => x.name),
+          resolved.groups.map((g) => g.name),
+        )}`,
+      )
+    }
+  }
 
   // 7 to 9, inside each user's own host. Two hosts stay up throughout, so each
   // user is also shown unable to signal another agent user's process.
@@ -432,8 +441,8 @@ export function poolCheckDepsFor(
 }
 
 /** The boot and exit stop of one user's processes: blocking, three times. */
-function reapSync(config: AgentPoolConfig, u: PoolUser): void {
-  killAllAgentProcesses({ user: u.name, switch: config.switch, socket: null })
+function reapSync(config: AgentPoolConfig, u: PoolUser): string | null {
+  return reapUserSync(config.switch, u.name)
 }
 
 export interface StartAgentPoolOptions {
@@ -466,7 +475,9 @@ export async function startAgentPool(opts: StartAgentPoolOptions): Promise<PoolC
     serverGid: typeof process.getgid === 'function' ? process.getgid() : -1,
     open: (u, g) => openPoolHost(config, u, g, env),
     reap: (u) => reapPoolUser(config.switch, u.name),
-    reapSync: (u) => reapSync(config, u),
+    reapSync: (u) => {
+      reapSync(config, u)
+    },
     log: opts.log,
   })
   setActiveAgentPool(pool)
@@ -498,32 +509,17 @@ export async function startAgentPool(opts: StartAgentPoolOptions): Promise<PoolC
   }
   setUnavailableAgentBinaries(report.unavailableRuntimes)
   poolUnavailable = report.unavailableRuntimes
-  // A user whose uid changed, or a new name with the uid of a user the records
-  // already hold: its files belong to whoever had that uid before, so it is
-  // never handed out (or kept) without a person looking.
-  const recorded = listAgentOsUsers(getDb())
-  for (const u of report.users) {
-    const same = recorded.find((r) => r.userName === u.name)
-    const twin = recorded.find(
-      (r) => r.uid === u.uid && r.userName !== u.name && r.state !== 'free',
-    )
-    const why =
-      same && same.uid !== u.uid && same.state !== 'free'
-        ? `${u.name} had uid ${same.uid} and now has ${u.uid}`
-        : twin
-          ? `${u.name} has uid ${u.uid}, which ${twin.userName} had`
-          : null
-    if (why) {
-      stopAgentPool()
-      report.ok = false
-      report.steps.push({
-        step: 2,
-        name: 'agent users',
-        level: 'fail',
-        message: `${why}, and that uid's files may be another agent's. Give it back its uid, or delete that user's agent first.`,
-      })
-      return report
-    }
+  const idProblem = recordedIdProblem(
+    report.users,
+    report.groups,
+    listAgentOsUsers(getDb()),
+    listTeamOsGroups(getDb()),
+  )
+  if (idProblem) {
+    stopAgentPool()
+    report.ok = false
+    report.steps.push({ step: 2, name: 'agent users', level: 'fail', message: idProblem })
+    return report
   }
   syncPoolRecords(report.users, report.groups)
   const pass = runAssignmentPass()
@@ -542,6 +538,47 @@ export async function startAgentPool(opts: StartAgentPoolOptions): Promise<PoolC
   return report
 }
 
+/**
+ * A pool member whose id no longer matches the records, or a new name with the
+ * id a recorded member has: its files belong to whoever had that id before, so
+ * it is never handed out (or kept) without a person looking. Users by uid,
+ * team groups by gid. Null when the setting and the records agree.
+ */
+export function recordedIdProblem(
+  users: readonly { name: string; uid: number }[],
+  groups: readonly { name: string; gid: number }[],
+  userRows: readonly { userName: string; uid: number; state: string }[],
+  groupRows: readonly { groupName: string; gid: number; state: string }[],
+): string | null {
+  const check = (
+    what: 'uid' | 'gid',
+    name: string,
+    id: number,
+    rows: readonly { name: string; id: number; state: string }[],
+  ): string | null => {
+    const same = rows.find((r) => r.name === name)
+    if (same && same.id !== id && same.state !== 'free') {
+      return `${name} had ${what} ${same.id} and now has ${id}, and the files of ${what} ${same.id} may be another agent's or team's. Give it back its ${what}, or delete what it belongs to first.`
+    }
+    const twin = rows.find((r) => r.id === id && r.name !== name && r.state !== 'free')
+    if (twin) {
+      return `${name} has ${what} ${id}, which ${twin.name} had, and that ${what}'s files may be another agent's or team's. Give it another ${what}, or delete what ${twin.name} belongs to first.`
+    }
+    return null
+  }
+  const uRows = userRows.map((r) => ({ name: r.userName, id: r.uid, state: r.state }))
+  const gRows = groupRows.map((r) => ({ name: r.groupName, id: r.gid, state: r.state }))
+  for (const u of users) {
+    const why = check('uid', u.name, u.uid, uRows)
+    if (why) return why
+  }
+  for (const g of groups) {
+    const why = check('gid', g.name, g.gid, gRows)
+    if (why) return why
+  }
+  return null
+}
+
 const apart: (() => void)[] = []
 let poolLog: Log | null = null
 let poolLayout: (() => ShareLayout) | null = null
@@ -553,9 +590,18 @@ let releasing: Promise<void> = Promise.resolve()
  * wiped and handed back (to the oldest agent or team waiting), one release at
  * a time. Does nothing without a pool.
  */
-export function releaseDeleted(): Promise<void> {
+export async function releaseDeleted(): Promise<void> {
   const log = poolLog
-  if (!peekAgentPool() || !log) return Promise.resolve()
+  if (!peekAgentPool() || !log) return
+  // At once, not behind a wipe already queued: a host that holds a team's
+  // group it should no longer hold stops before the caller answers.
+  await reconcilePoolHosts(log).catch((err: unknown) => {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Agent isolation: could not stop hosts that no longer match their agent',
+    )
+  })
+  // Wiping and handing back users and groups stays one release at a time.
   releasing = releasing
     .then(() => scrubReleased(runAssignmentPass(), log))
     .catch((err: unknown) => {
@@ -564,6 +610,10 @@ export function releaseDeleted(): Promise<void> {
         'Agent isolation: could not hand back the users of deleted agents',
       )
     })
+}
+
+/** Resolves once every queued release is done (tests, and the proof). */
+export function releasesSettled(): Promise<void> {
   return releasing
 }
 
@@ -679,7 +729,10 @@ function stillScrubbing(name: string): boolean {
  * (that user's host), then look again: anything still there keeps the user out
  * of use. Throws with what is left.
  */
-async function wipeTempFiles(client: AgentHostClient, uid: number): Promise<void> {
+export async function wipeTempFiles(
+  client: Pick<AgentHostClient, 'spawn'>,
+  uid: number,
+): Promise<void> {
   const run = (args: string[]): Promise<{ code: number | null; out: string }> =>
     new Promise((resolve) => {
       let out = ''
@@ -694,17 +747,19 @@ async function wipeTempFiles(client: AgentHostClient, uid: number): Promise<void
         if (out.length < 4096) out += d.toString()
       })
       p.once('error', () => resolve({ code: -1, out }))
-      p.once('close', (code) => resolve({ code, out }))
+      // Stopped by a signal: Node reports no code, and an empty output then
+      // proves nothing.
+      p.once('close', (code, signal) => resolve({ code: signal ? null : code, out }))
     })
   const dirs = ['/tmp', '/var/tmp', '/dev/shm', `/run/user/${uid}`].filter((d) => fs.existsSync(d))
   await run([...dirs, '-xdev', '-mindepth', '1', '-user', String(uid), '-delete'])
   const left = await run([...dirs, '-xdev', '-mindepth', '1', '-user', String(uid), '-print'])
   // `find` exits 1 whenever it meets a folder it may not enter (another user's
-  // private one), which is normal: what it prints decides. Only a find that
-  // never ran says nothing.
-  if (left.code === -1 || left.out.trim() !== '') {
+  // private one), which is normal: what it prints decides. A find that never
+  // ran, was stopped by a signal or failed otherwise proves nothing.
+  if ((left.code !== 0 && left.code !== 1) || left.out.trim() !== '') {
     throw new Error(
-      `files of uid ${uid} are left in the temporary folders: ${left.out.trim().slice(0, 300) || 'find did not run'}`,
+      `files of uid ${uid} are left in the temporary folders: ${left.out.trim().slice(0, 300) || `find did not finish (${left.code ?? 'stopped'})`}`,
     )
   }
 }
@@ -785,8 +840,12 @@ export async function scrubReleased(pass: PoolPass, log: Log): Promise<void> {
         finishAgentOsUserScrub(getDb(), lender)
       }
     }
-    // A former member's host may still hold the group: never free it then.
-    if (pool.runningHosts().some((h) => h.group?.name === name)) {
+    // A former member's host, or processes of one that could not be stopped,
+    // may still hold the group: never free it then.
+    if (
+      pool.runningHosts().some((h) => h.group?.name === name) ||
+      (await pool.groupMayBeHeld(name))
+    ) {
       log.warn(
         { group: name },
         "Agent isolation: a deleted team's group is still held; it stays out of use",
