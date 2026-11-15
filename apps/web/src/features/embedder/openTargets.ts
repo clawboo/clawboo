@@ -60,7 +60,11 @@ async function readApproval(approvalId: string): Promise<ApprovalLookup> {
       approvals?: Array<{ id?: unknown; agentId?: unknown }>
     }
     const row = (body.approvals ?? []).find((a) => a.id === approvalId)
-    if (!row) return 'gone'
+    if (!row) {
+      // The Gateway may have delivered it while the queue was being read.
+      const arrived = useApprovalsStore.getState().pendingApprovals.get(approvalId)
+      return arrived ? { agentId: arrived.agentId ?? null } : 'gone'
+    }
     return { agentId: typeof row.agentId === 'string' && row.agentId ? row.agentId : null }
   } catch {
     return null

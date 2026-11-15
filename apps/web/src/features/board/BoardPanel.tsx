@@ -384,6 +384,13 @@ interface ViewTarget {
  *  the approval a notification asked for. */
 const NEEDS_YOU_HOME = '[data-testid="calendar-needs-you-today"], [data-needs-you-home]'
 
+/** Focus is on nothing, or in Needs you itself: a notification's approval may take
+ *  it. Anywhere else (a field, a dialog, New task) it is the person's. */
+function focusIsFree(): boolean {
+  const active = document.activeElement
+  return !active || active === document.body || !!active.closest(NEEDS_YOU_HOME)
+}
+
 /** A value made safe for a quoted attribute selector. */
 function attrValue(v: string): string {
   return v.replace(/["\\]/g, '\\$&')
@@ -639,7 +646,7 @@ export function BoardPanel() {
   // once the approvals poll has it and the board has its final layout (the lane
   // drawn while the board loads gives way to the calendar, which draws the card
   // anew), so the request waits for both, a while at most. Then the card is
-  // brought into view and given focus, and outlined for a moment; a card drawn
+  // brought into view and given focus, outlined until focus moves on; a card drawn
   // anew within that while (a team switch reloads the board) is shown again. It
   // never takes focus from anything else, and the person acting on the board, or
   // a task opening, calls it off. `approvalShow` also opens "+N more" when the
@@ -667,8 +674,7 @@ export function BoardPanel() {
     const root = rootRef.current
     if (!id || !root || card?.isConnected) return null
     if (root.querySelector('[data-testid="board-skeleton"]')) return null
-    const active = document.activeElement
-    if (active && active !== document.body && !active.closest(NEEDS_YOU_HOME)) return null
+    if (!focusIsFree()) return null
     // Compared as data, not put into a selector: the id came from outside.
     for (const el of root.querySelectorAll<HTMLElement>('[data-approval-id]')) {
       if (el.dataset['approvalId'] === id) return el
@@ -678,6 +684,12 @@ export function BoardPanel() {
   const revealApprovalCard = useCallback((card: HTMLElement) => {
     approvalRef.current = { ...approvalRef.current, card }
     card.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    // Outlined while it holds the focus it was given (see globals.css): a focus
+    // from script need not show as `:focus-visible`.
+    card.setAttribute('data-revealed-focus', '')
+    card.addEventListener('focusout', () => card.removeAttribute('data-revealed-focus'), {
+      once: true,
+    })
     card.focus({ preventScroll: true })
   }, [])
   useEffect(() => () => window.clearTimeout(approvalTimerRef.current), [])
@@ -820,8 +832,10 @@ export function BoardPanel() {
           want.approvalId != null &&
           approvalRef.current.id === want.approvalId &&
           !!approvalRef.current.card?.isConnected
+        // For an approval, today's cell takes focus only when it is free: the
+        // person may have moved it on (to New task, say) while the board loaded.
         if (approval) revealApprovalCard(approval)
-        else if (!shown)
+        else if (!shown && (want.approvalId == null || focusIsFree()))
           el.querySelector<HTMLElement>('[data-testid="calendar-needs-you-today"]')?.focus({
             preventScroll: true,
           })

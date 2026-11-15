@@ -114,6 +114,7 @@ export function watchEmbedderChannel(proc: IpcProcess, env: NodeJS.ProcessEnv): 
 /** The part of `process` the signal handlers need. */
 export interface SignalProcess {
   once(signal: 'SIGINT' | 'SIGTERM', listener: () => void): unknown
+  emit(signal: 'SIGTERM'): unknown
 }
 
 export interface ServerStopDeps {
@@ -130,9 +131,15 @@ export interface ServerStopDeps {
  * One stop, however it is asked for. Asked twice (an app's own wrapper may turn
  * the same message into a SIGTERM too), it runs once. The signal handlers are
  * `once`, so a second Ctrl+C still ends the process at once, as it always has.
+ *
+ * A stop over the channel raises SIGTERM in this process rather than calling the
+ * stop itself: parts of the server end their own work on SIGTERM (the routines
+ * ticker, the approval reaper, the MCP supervisor, the OpenClaw connection, the
+ * trace exporter), and they must stop on the message as they do on the signal.
  */
 export function installServerStop(deps: ServerStopDeps): void {
   let stopping = false
+  let askedBy: string | null = null
   const stop = (why: string): void => {
     if (stopping) return
     stopping = true
@@ -143,8 +150,13 @@ export function installServerStop(deps: ServerStopDeps): void {
       .then(() => deps.exit(0))
   }
   deps.proc.once('SIGINT', () => stop('SIGINT'))
-  deps.proc.once('SIGTERM', () => stop('SIGTERM'))
-  deps.channel.onStop((reason) =>
-    stop(reason === 'message' ? 'shutdown message' : 'the IPC channel closed'),
-  )
+  deps.proc.once('SIGTERM', () => stop(askedBy ?? 'SIGTERM'))
+  deps.channel.onStop((reason) => {
+    if (stopping) return
+    const why = reason === 'message' ? 'shutdown message' : 'the IPC channel closed'
+    askedBy = why
+    deps.proc.emit('SIGTERM')
+    // Our own handler is gone only once it has run; this is the fallback.
+    stop(why)
+  })
 }

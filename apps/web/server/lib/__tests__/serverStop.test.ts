@@ -202,6 +202,25 @@ describe('installServerStop', () => {
     await vi.waitFor(() => expect(s.exit).toHaveBeenCalledTimes(1))
   })
 
+  it('raises SIGTERM for the parts that end their own work on it', async () => {
+    for (const ask of ['message', 'disconnect'] as const) {
+      const s = setup()
+      // Registered after the stop, as the routines ticker is.
+      const ticker = vi.fn()
+      s.proc.once('SIGTERM', ticker)
+      if (ask === 'message') s.proc.emit('message', { type: 'shutdown' })
+      else {
+        s.proc.connected = false
+        s.proc.emit('disconnect')
+      }
+      expect(ticker).toHaveBeenCalledTimes(1)
+      expect(s.gracefulExit).toHaveBeenCalledTimes(1)
+      expect(s.onStopping).toHaveBeenCalledWith(
+        ask === 'message' ? 'shutdown message' : 'the IPC channel closed',
+      )
+    }
+  })
+
   it('says why it stops', () => {
     const viaSignal = setup()
     viaSignal.proc.emit('SIGINT')
@@ -273,10 +292,27 @@ describe('real processes', () => {
   const made: string[] = []
   const pids: number[] = []
   const children: ChildProcess[] = []
-  afterEach(() => {
-    for (const child of children.splice(0)) if (child.exitCode === null) child.kill('SIGKILL')
-    for (const pid of pids.splice(0)) if (alive(pid)) process.kill(pid, 'SIGKILL')
-    for (const dir of made.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
+  // A child still running holds its working directory, which Windows will not
+  // delete, so each one is waited for before its folder goes.
+  afterEach(async () => {
+    await Promise.all(
+      children.splice(0).map(
+        (child) =>
+          new Promise<void>((resolve) => {
+            if (child.exitCode !== null || child.signalCode !== null) return resolve()
+            child.once('exit', () => resolve())
+            child.kill('SIGKILL')
+          }),
+      ),
+    )
+    for (const pid of pids.splice(0)) {
+      if (!alive(pid)) continue
+      process.kill(pid, 'SIGKILL')
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000 })
+    }
+    for (const dir of made.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    }
   })
 
   /** A server stand-in: the real module, with a graceful part that only reports. */
@@ -305,6 +341,9 @@ installServerStop({
   },
   onStopping: (why) => write({ event: 'stopping', why }),
 })
+// Like the routines ticker and the approval reaper: a part of the server that
+// ends its own work on SIGTERM, registered after the stop.
+process.once('SIGTERM', () => write({ event: 'subsystem' }))
 write({
   event: 'ready',
   pid: process.pid,
@@ -431,7 +470,14 @@ console.log(child.pid)
     child.send({ type: 'shutdown' })
     expect(await done).toBe(0)
     expect(stderr).toBe('')
-    expect(readLines(s.out).map((l) => l.event)).toEqual(['ready', 'stopping', 'graceful', 'exit'])
+    // The parts that end their work on SIGTERM end it on the message too.
+    expect(readLines(s.out).map((l) => l.event)).toEqual([
+      'ready',
+      'stopping',
+      'graceful',
+      'subsystem',
+      'exit',
+    ])
     expect(readLines(s.out)[1]).toMatchObject({ why: 'shutdown message' })
   }, 60_000)
 
@@ -443,6 +489,7 @@ console.log(child.pid)
     child.disconnect()
     expect(await done).toBe(0)
     expect(readLines(s.out)[1]).toMatchObject({ event: 'stopping', why: 'the IPC channel closed' })
+    expect(readLines(s.out).map((l) => l.event)).toContain('subsystem')
   }, 60_000)
 
   it('keeps running when an app that did not opt in closes the channel', async () => {
@@ -499,6 +546,7 @@ process.exitCode = 1
         'ready',
         'stopping',
         'graceful',
+        'subsystem',
         'exit',
       ])
       expect(readLines(s.out)[1]).toMatchObject({ why: 'SIGTERM' })

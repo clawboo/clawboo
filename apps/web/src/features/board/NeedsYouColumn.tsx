@@ -970,16 +970,8 @@ function Leaving({
 /** An approval's place in its list. The card animates itself; this only hands
  *  focus on when the approval is answered and its card goes. A notification can
  *  ask for one approval: the board then gives this slot focus (from script only,
- *  so it is not a Tab stop) and `revealed` outlines it for a moment. */
-function ApprovalSlot({
-  approvalId,
-  revealed,
-  children,
-}: {
-  approvalId: string
-  revealed: boolean
-  children: ReactNode
-}) {
+ *  so it is not a Tab stop) and outlines it while it keeps it. */
+function ApprovalSlot({ approvalId, children }: { approvalId: string; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const present = useFocusHandOff(ref)
   return (
@@ -988,9 +980,8 @@ function ApprovalSlot({
       tabIndex={-1}
       data-needs-you-entry=""
       data-approval-id={approvalId}
-      data-revealed={revealed ? '' : undefined}
       data-leaving={present ? undefined : ''}
-      className={revealed ? 'needs-you-revealed rounded-xl' : 'rounded-xl'}
+      className="rounded-xl"
     >
       {children}
     </div>
@@ -1063,8 +1054,7 @@ export function NeedsYouItems({
   cap?: number
   /** A task being brought into view: past the cap, it opens the rest. */
   show?: string | null
-  /** An approval being brought into view: past the cap, it opens the rest, and
-   *  its card is outlined. */
+  /** An approval being brought into view: past the cap, it opens the rest. */
   showApproval?: string | null
 }) {
   const { approvals, stuck, total, resolveTool } = model
@@ -1096,6 +1086,9 @@ export function NeedsYouItems({
     setExpanded(true)
   }
   const [approvalShownFor, setApprovalShownFor] = useState<string | null>(null)
+  // A request that has ended is forgotten, so the next one for the same approval
+  // (after Show less, say) opens the rest again.
+  if (!showApproval && approvalShownFor !== null) setApprovalShownFor(null)
   if (
     showApproval &&
     showApproval !== approvalShownFor &&
@@ -1159,11 +1152,7 @@ export function NeedsYouItems({
               its red is the consent warning, so it stays. */}
           <AnimatePresence mode="popLayout">
             {shownApprovals.map((it) => (
-              <ApprovalSlot
-                key={it.key}
-                approvalId={approvalIdOf(it)}
-                revealed={showApproval != null && approvalIdOf(it) === showApproval}
-              >
+              <ApprovalSlot key={it.key} approvalId={approvalIdOf(it)}>
                 {it.kind === 'exec' ? (
                   <InlineApprovalCard approval={it.exec} showAgentName variant="board" />
                 ) : (

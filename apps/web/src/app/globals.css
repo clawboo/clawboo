@@ -794,27 +794,12 @@ samp {
     opacity: 0;
   }
 }
-/* The approval a notification asked to see, ringed for a moment as it comes
-   into view. A ring, not an outline: `:focus` turns outlines off. With less
-   motion it stays ringed, without fading, until the person acts (ten seconds
-   at most). */
-.needs-you-revealed {
-  animation: needs-you-reveal 1600ms ease-out both;
-}
-@keyframes needs-you-reveal {
-  0%,
-  60% {
-    box-shadow: 0 0 0 2px var(--primary);
-  }
-  100% {
-    box-shadow: 0 0 0 2px transparent;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .needs-you-revealed {
-    animation: none;
-    box-shadow: 0 0 0 2px var(--primary);
-  }
+/* The approval a notification brought into view keeps an outline while it holds
+   the focus it was given. A focus from script need not match `:focus-visible`,
+   and `:focus` turns outlines off, so this rule (more specific) puts one back. */
+[data-revealed-focus]:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 /* An upcoming routine run: a dashed outline of a card, so it never reads as a

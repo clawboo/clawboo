@@ -312,6 +312,24 @@ describe('openEmbedderTarget', () => {
       })
     })
 
+    it('finds a shell approval the Gateway delivered while the queue was being read', async () => {
+      server.use(
+        http.get('/api/tools/approvals', () => {
+          // Arrives after the first look at the live queue, before the answer.
+          useApprovalsStore.setState({
+            pendingApprovals: new Map([['ex2', { id: 'ex2', agentId: 'coder' } as never]]),
+          })
+          return HttpResponse.json({ approvals: [] })
+        }),
+      )
+      await open('ex2')
+      expect(useViewStore.getState().boardNeedsYouFocus).toMatchObject({
+        teamId: 'team-a',
+        approvalId: 'ex2',
+      })
+      expect(useToastStore.getState().toasts).toEqual([])
+    })
+
     it('tells an answered approval from an unreadable queue', async () => {
       server.use(http.get('/api/tools/approvals', () => HttpResponse.json({ approvals: [] })))
       await open('ap1')
