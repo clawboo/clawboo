@@ -5,18 +5,24 @@
 // verify gate's command, a connector with local reach, a per-agent browser, a
 // long-lived runtime service, git in an agent's checkout.
 //
-// With CLAWBOO_AGENT_USER unset this is `child_process.spawn` with the caller's
-// options, nothing more. With it set, the agent host (running as the agent
-// user) starts the process, and the caller gets a ChildProcess-shaped proxy. The
-// local branch is never taken in that mode, so an agent process can only start
-// as the agent user, and a call site that bypasses this function is caught by
-// `spawnSeam.test.ts`, which lists every spawn in the server.
+// With agent isolation off this is `child_process.spawn` with the caller's
+// options, nothing more. With CLAWBOO_AGENT_USER set, the agent host (running as
+// the agent user) starts the process, and the caller gets a ChildProcess-shaped
+// proxy. With CLAWBOO_AGENT_USERS set, each agent has a host of its own, and the
+// process starts on the host of the agent it names (or, naming none, of the
+// share its working folder belongs to). The local branch is never taken in
+// either mode, so an agent process can only start as an agent user, and a call
+// site that bypasses this function is caught by `spawnSites.test.ts`, which
+// lists every spawn in the server.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 
-import { isAgentUserMode } from '../agentUser/config'
+import { spawnDeferred, type AgentHostClient } from '../agentUser/client'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { UnknownAgentError } from '../agentUser/poolAssignments'
+import { actingAgent, hostForAgent } from '../agentUser/poolRoute'
 import { activeAgentHost } from '../agentUser/state'
 import { SERVER_IDENTITY_ENV_KEYS } from './childEnv'
 
@@ -46,6 +52,12 @@ type StdioSlot = 'pipe' | 'ignore'
 
 export interface AgentSpawnOptions {
   kind: AgentSpawnKind
+  /**
+   * The agent this process works for. With a user per agent
+   * (CLAWBOO_AGENT_USERS) it runs as that agent's user; a process that names
+   * no agent (git in a checkout, a reviewer) runs for the share its `cwd` is in.
+   */
+  agentId?: string | null
   command: string
   args: readonly string[]
   cwd?: string
@@ -161,6 +173,34 @@ function failedStart(command: string, reason: string): ChildProcess {
 }
 
 /**
+ * The host a pooled process starts on: its agent's, or, for one that names no
+ * agent or a name that is no agent (a reviewer's `critic`), the agent whose
+ * work is under way (`runAsAgent`). Never some other member of a team: work a
+ * teammate wrote must not run as whichever agent happens to be first.
+ */
+function poolHostFor(opts: AgentSpawnOptions): Promise<AgentHostClient> {
+  const noAgent = (): Promise<AgentHostClient> => {
+    const ambient = actingAgent()
+    if (ambient) return hostForAgent(ambient)
+    return Promise.reject(
+      Object.assign(
+        new Error(
+          `a ${opts.kind} process names no agent, so it has no agent user to run as (each agent runs as its own user)`,
+        ),
+        { code: 'EACCES' },
+      ),
+    )
+  }
+  if (opts.agentId) {
+    return hostForAgent(opts.agentId).catch((err: unknown) => {
+      if (err instanceof UnknownAgentError) return noAgent()
+      throw err
+    })
+  }
+  return noAgent()
+}
+
+/**
  * Start an agent process: locally as today, or through the agent host as the
  * agent user. The return is typed as `ChildProcess` for the call sites that
  * hand it to code expecting one (the Agent SDK's spawn hook, stream helpers);
@@ -182,9 +222,20 @@ export function spawnAgentProcess(opts: AgentSpawnOptions): ChildProcess {
       ...(opts.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     })
   }
-  const { client } = activeAgentHost()
   const problem = agentBinaryProblem(opts.command)
   if (problem) return failedStart(opts.command, problem)
+  if (isAgentPoolMode()) {
+    return spawnDeferred(poolHostFor(opts), {
+      command: opts.command,
+      args: opts.args,
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      env: agentEnv(opts.env),
+      stdio: [stdio[0], stdio[1], stdio[2]],
+      group: detached,
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    }) as unknown as ChildProcess
+  }
+  const { client } = activeAgentHost()
   return client.spawn({
     command: opts.command,
     args: opts.args,

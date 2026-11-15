@@ -21,7 +21,7 @@ import type { Request, Response } from 'express'
 
 import { resolveStateDir } from '@clawboo/config'
 
-import { isAgentUserMode } from '../lib/agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../lib/agentUser/config'
 import { isWindows } from '../lib/platform'
 import { detectOauthProfileProviders } from '../lib/openclawEnv'
 import {
@@ -53,28 +53,35 @@ function sendEvent(res: Response, data: Record<string, unknown>): void {
 
 /** One login child per tool. A new request REPLACES the old one (kill first) —
  *  Retry semantics; two browsers racing a login would otherwise interleave. */
-const inFlight = new Map<CliLoginTool, ChildProcess>()
+const inFlight = new Map<string, ChildProcess>()
 
 /** Post-run truth: is the tool actually signed in now? Probes the real store
  *  (never trusts the exit code: `script`, for one, can exit 0 around a failed CLI).
  *  `asAgent`: the login ran as the agent user, so its store is that user's. */
-async function probeLoggedIn(tool: CliLoginTool, asAgent: boolean): Promise<boolean> {
+async function probeLoggedIn(
+  tool: CliLoginTool,
+  asAgent: boolean,
+  agentId: string | null = null,
+): Promise<boolean> {
   if (tool === 'codex') {
     invalidateCodexAuthCache()
     // A new sign-in can be a different ChatGPT plan, with different models.
     invalidateCodexModelsCache()
-    return asAgent ? isAgentCodexLoggedIn() : isCodexLoggedIn()
+    return asAgent ? isAgentCodexLoggedIn(agentId) : isCodexLoggedIn()
   }
   if (tool === 'hermes')
-    return asAgent ? isAgentHermesCodexAuthPresent() : isHermesCodexAuthPresent()
+    return asAgent ? isAgentHermesCodexAuthPresent(agentId) : isHermesCodexAuthPresent()
   return detectOauthProfileProviders(resolveStateDir()).has('openai-codex')
 }
 
 /** The store watcher's tick for a login run as the agent user: its store is in
  *  agent space, read through the agent host, so the check is asynchronous. */
-async function agentWatchTickLoggedIn(tool: 'codex' | 'hermes'): Promise<boolean> {
-  if (tool === 'hermes') return isAgentHermesCodexAuthPresent()
-  const present = await isAgentCodexLoggedIn()
+async function agentWatchTickLoggedIn(
+  tool: 'codex' | 'hermes',
+  agentId: string | null = null,
+): Promise<boolean> {
+  if (tool === 'hermes') return isAgentHermesCodexAuthPresent(agentId)
+  const present = await isAgentCodexLoggedIn(agentId)
   if (present) {
     invalidateCodexAuthCache()
     // A new sign-in can be a different ChatGPT plan, with different models.
@@ -111,6 +118,23 @@ export function cliLoginPOST(req: Request, res: Response): void {
     res.status(404).json({ error: `unknown login tool: ${String(tool)}` })
     return
   }
+  // With a user per agent (CLAWBOO_AGENT_USERS) each agent signs in as its own
+  // user, so the request names the agent; its login is that agent's alone.
+  const rawAgent = req.query['agentId']
+  const poolAgent =
+    isAgentPoolMode() && tool !== 'openclaw'
+      ? typeof rawAgent === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(rawAgent)
+        ? rawAgent
+        : ''
+      : null
+  if (poolAgent === '') {
+    res.status(400).json({
+      error:
+        'Each agent runs as its own user (CLAWBOO_AGENT_USERS), so each signs in on its own: name the agent (?agentId=).',
+    })
+    return
+  }
+  const flight = poolAgent ? `${tool}:${poolAgent}` : tool
 
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -127,7 +151,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
   const { plan } = planResult
 
   // Replace any previous in-flight login for this tool.
-  const prev = inFlight.get(tool)
+  const prev = inFlight.get(flight)
   if (prev && !prev.killed) killProcessTree(prev)
 
   sendEvent(res, {
@@ -162,6 +186,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
       const shim = buildCmdShimPlan({ command: plan.command, args: plan.args })
       child = spawnAgentProcess({
         kind: 'login',
+        agentId: poolAgent,
         command: shim.command,
         args: shim.args,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -175,6 +200,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
     } else {
       child = spawnAgentProcess({
         kind: 'login',
+        agentId: poolAgent,
         command: plan.command,
         args: plan.args,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -193,7 +219,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
     res.end()
     return
   }
-  inFlight.set(tool, child)
+  inFlight.set(flight, child)
 
   const parse = createCliLoginParser(tool)
   let buffer = ''
@@ -235,7 +261,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
   const signedIn = (): void => {
     clearInterval(watcher)
     clearTimeout(timeout)
-    if (inFlight.get(tool) === child) inFlight.delete(tool)
+    if (inFlight.get(flight) === child) inFlight.delete(flight)
     sendEvent(res, { type: 'complete', success: true, loggedIn: true })
     res.end()
     killProcessTree(child)
@@ -253,7 +279,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
     }
     if (checking) return
     checking = true
-    void agentWatchTickLoggedIn(tool).then((present) => {
+    void agentWatchTickLoggedIn(tool, poolAgent).then((present) => {
       checking = false
       if (present && !res.writableEnded) signedIn()
     })
@@ -265,7 +291,7 @@ export function cliLoginPOST(req: Request, res: Response): void {
     clearInterval(watcher)
     // Guarded delete — a late async spawn error (POSIX ENOENT) from a REPLACED
     // child must not evict its replacement's registration.
-    if (inFlight.get(tool) === child) inFlight.delete(tool)
+    if (inFlight.get(flight) === child) inFlight.delete(flight)
     sendEvent(res, { type: 'error', code: 'SPAWN_ERROR', message: err.message })
     res.end()
   })
@@ -273,11 +299,11 @@ export function cliLoginPOST(req: Request, res: Response): void {
   child.on('close', (code, signalName) => {
     clearTimeout(timeout)
     clearInterval(watcher)
-    if (inFlight.get(tool) === child) inFlight.delete(tool)
+    if (inFlight.get(flight) === child) inFlight.delete(flight)
     if (res.writableEnded) return
     void (async () => {
       // The PROBE is the truth; the exit code only shapes the failure copy.
-      const loggedIn = await probeLoggedIn(tool, asAgent).catch(() => false)
+      const loggedIn = await probeLoggedIn(tool, asAgent, poolAgent).catch(() => false)
       if (loggedIn) {
         sendEvent(res, { type: 'complete', success: true, loggedIn: true })
       } else if (signalName || code === 130) {

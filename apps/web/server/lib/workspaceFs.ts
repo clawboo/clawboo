@@ -928,7 +928,7 @@ export function agentTeamFolder(agentId: string): AgentTeamFolder | null {
     .where(eq(agents.id, agentId))
     .get()
   if (!row) return null
-  const dir = taskRunWorkdirFor(row.runtime, row.teamId)
+  const dir = taskRunWorkdirFor(row.runtime, row.teamId, process.env, agentId)
   if (!dir) return null
   return { teamId: row.teamId ?? null, path: dir, onDisk: existsSync(dir) }
 }
@@ -995,10 +995,14 @@ export function taskFolderOf(taskId: string): TaskFolder | null {
  * user's folders and says false for every one: a caller that needs it asks the
  * host with {@link taskFolderInAgentSpace} instead.
  */
-export function taskFolderOfTask(task: { id: string; teamId?: string | null }): TaskFolder | null {
+export function taskFolderOfTask(task: {
+  id: string
+  teamId?: string | null
+  assigneeAgentId?: string | null
+}): TaskFolder | null {
   let dir: string
   try {
-    dir = taskFolderPath(task.teamId, task.id)
+    dir = taskFolderPath(task.teamId, task.id, process.env, task.assigneeAgentId ?? null)
   } catch {
     return null
   }

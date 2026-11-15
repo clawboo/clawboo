@@ -1,5 +1,6 @@
 // ── Schema — tables + indexes + inferred types ─────────────────────────────
 export {
+  agentOsUsers,
   agents,
   approvalHistory,
   approvalRules,
@@ -35,6 +36,7 @@ export {
   taskWakes,
   teamChat,
   teams,
+  teamOsGroups,
   teamProfiles,
   toolCallApprovals,
   toolCallAudit,
@@ -47,8 +49,10 @@ export type {
   DbAgentInsert,
   DbApprovalHistory,
   DbApprovalHistoryInsert,
+  DbAgentOsUser,
   DbApprovalRule,
   DbApprovalRuleInsert,
+  DbTeamOsGroup,
   DbBooZeroTeamBrief,
   DbBooZeroTeamBriefInsert,
   DbBudget,
@@ -144,6 +148,9 @@ export * from './inbox'
 // ── Durable [Task Update] outbox (team chat report-ups) ──
 export * from './reportUps'
 export * from './taskWakes'
+
+// ── The agent user pool (CLAWBOO_AGENT_USERS) and its team groups ───────────
+export * from './agentOsUsers'
 
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'

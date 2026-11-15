@@ -63,6 +63,32 @@ function hasNoNewPrivs(): boolean {
   }
 }
 
+/**
+ * Throw `EACCES` unless `p` resolves inside `root` (both by their real paths).
+ * `whole`: `p` itself is followed (a listing, a realpath); otherwise its folder
+ * is, and its last part stays as named (the ops never follow a link there).
+ * A part that does not exist yet is checked through the nearest one that does.
+ */
+export function assertWithin(p: string, root: string, whole: boolean): void {
+  const realRoot = fs.realpathSync(root)
+  let probe = path.resolve(whole ? p : path.dirname(p))
+  let real: string | null = null
+  for (let i = 0; i < 64 && real === null; i++) {
+    try {
+      real = fs.realpathSync(probe)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'ENOENT') throw err
+      const up = path.dirname(probe)
+      if (up === probe) break
+      probe = up
+    }
+  }
+  const rel = real === null ? '..' : path.relative(realRoot, real)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw Object.assign(new Error(`${p} leads outside its share`), { code: 'EACCES' })
+  }
+}
+
 /** Who the host is, as the kernel says. */
 export function hostIdentity(): Omit<HelloFrame, 't' | 'v'> {
   const info = os.userInfo()
@@ -73,6 +99,7 @@ export function hostIdentity(): Omit<HelloFrame, 't' | 'v'> {
     home: info.homedir,
     pid: process.pid,
     platform: process.platform,
+    groups: typeof process.getgroups === 'function' ? process.getgroups() : [],
   }
 }
 
@@ -530,6 +557,17 @@ export function serveConnection(
     if (f['t'] !== 'req' || typeof f['id'] !== 'number') return
     const id = f['id']
     try {
+      // A share's file (a team's folder, with a user per agent): every path the
+      // request names must resolve, links followed, inside the share's root,
+      // so a link a teammate planted cannot carry the request into this user's
+      // own home or anywhere else this user may write.
+      if (typeof f['within'] === 'string' && String(f['op']).startsWith('fs.')) {
+        const paths = [f['path'], f['from'], f['to']].filter(
+          (p): p is string => typeof p === 'string',
+        )
+        for (const p of paths)
+          assertWithin(p, f['within'], f['op'] === 'fs.list' || f['op'] === 'fs.realpath')
+      }
       switch (f['op']) {
         case 'ping':
           return reply(id, {})
@@ -713,6 +751,20 @@ export function serveConnection(
               return { path: p, ok: false, code: errorCode(err) }
             }
           })
+          return reply(id, { results })
+        }
+        case 'canSignal': {
+          const pids = Array.isArray(f['pids']) ? f['pids'].slice(0, 1000) : []
+          const results = pids
+            .filter((p): p is number => typeof p === 'number' && Number.isInteger(p) && p > 1)
+            .map((pid) => {
+              try {
+                process.kill(pid, 0)
+                return { pid, ok: true }
+              } catch (err) {
+                return { pid, ok: false, code: errorCode(err) }
+              }
+            })
           return reply(id, { results })
         }
         default:

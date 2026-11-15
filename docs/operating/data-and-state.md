@@ -206,6 +206,8 @@ The move above does not run, since Clawboo cannot write in the agent user's fold
 
 With the setting on, Clawboo never falls back to the old layout: the agent user must be able to write in its work folder, or Clawboo refuses to start (see [What the startup check proves](/operating/agent-isolation#what-the-startup-check-proves)).
 
+A [user per agent](/operating/agent-isolation#a-user-per-agent) (`CLAWBOO_AGENT_USERS`, Linux only for now) lays this out differently: the work folder is the one `CLAWBOO_WORK_DIR` names and is yours, each agent's runtime homes and browser profile are under its own user's home, and nothing older is copied in.
+
 ## The runtimes folder
 
 The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK, Codex and Hermes) live in the runtimes folder, never in npm's global folder. It is the folder `CLAWBOO_RUNTIMES_DIR` names (a leading `~` is expanded), else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes` (`%USERPROFILE%\clawboo-runtimes` on Windows). Clawboo uses it by its real path, with every link resolved, and creates it on the first install.

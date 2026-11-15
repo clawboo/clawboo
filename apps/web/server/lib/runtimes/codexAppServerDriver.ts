@@ -377,6 +377,7 @@ export function createCodexAppServerDriver(
       // (the agent host is down) reads as "could not start" below.
       spawned = spawnAgentProcess({
         kind: 'runtime',
+        agentId: opts.agentId,
         command: plan.command,
         args: plan.args,
         ...(ctx.cwd != null ? { cwd: ctx.cwd } : {}),

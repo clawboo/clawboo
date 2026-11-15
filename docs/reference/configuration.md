@@ -131,6 +131,8 @@ Your agents' work lives in the work folder: `CLAWBOO_WORK_DIR`, else `<CLAWBOO_H
 
 Everything Clawboo creates in the work folder is owner-only (0700). With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) set, the work folder defaults to `<agent home>/work` and belongs to the agent user, and so do each agent's runtime home and browser profile, under `<agent home>/runtimes/` and `<agent home>/browser-profiles/` instead of `~/.clawboo`. See [With agents as their own user](/operating/data-and-state#with-agents-as-their-own-user).
 
+With [`CLAWBOO_AGENT_USERS`](/operating/agent-isolation#a-user-per-agent) (a user per agent, Linux only for now), the work folder is the one `CLAWBOO_WORK_DIR` names and is yours (0711), no agent outside a team can reach that team's folder, and an agent with no team works in `teams/_agent-<agent id>` instead of `_no-team`.
+
 ## Files in the runtimes folder
 
 The runtimes Clawboo installs for you go in the runtimes folder: `CLAWBOO_RUNTIMES_DIR`, else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes`. It must be apart from `~/.clawboo` and the work folder, or Clawboo installs nothing there and runs nothing from it. [The runtimes folder](/operating/data-and-state#the-runtimes-folder) covers how an install works and which copy Clawboo runs.

@@ -41,7 +41,7 @@ import { buildAttachConfig, mcpHttpUrl, MCP_SERVER_NAMES, type AttachScope } fro
 import type { StartOpts } from '@clawboo/executor'
 
 import { agentMkdir, agentReadFile, agentStat, agentWriteFile } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
 import { resolveRuntimeBin } from '../platform'
 import {
   agentCodexHome,
@@ -98,7 +98,7 @@ export function hasUsableCodexAuth(authPath: string): boolean {
  */
 export async function seedCodexAuth(codexHome: string): Promise<void> {
   try {
-    const src = await codexSeedSource()
+    const src = await codexSeedSource(codexHome)
     if (!src) return
     // The run home is agent space, so its side is read and written through the
     // agent-space file verbs.
@@ -122,8 +122,12 @@ export async function seedCodexAuth(codexHome: string): Promise<void> {
  * there, which is what running agents as their own user keeps from them. Null
  * when there is none.
  */
-async function codexSeedSource(): Promise<{ data: Buffer; mtimeMs: number } | null> {
-  const agentHome = agentCodexHome()
+async function codexSeedSource(
+  codexHome: string,
+): Promise<{ data: Buffer; mtimeMs: number } | null> {
+  // With a user per agent, the login of the user whose home the run's is in.
+  if (isAgentPoolMode() && !agentCodexHome({ near: codexHome })) return null
+  const agentHome = agentCodexHome({ near: codexHome })
   if (agentHome) {
     const file = path.join(agentHome, 'auth.json')
     const st = await agentStat(file)
@@ -318,11 +322,14 @@ export const CODEX_AGENT_SIGN_IN_MESSAGE =
  */
 export async function prepareCodexHome(
   ctx: RuntimeRunContext,
+  agentId: string | null = null,
 ): Promise<{ codexHome: string; managed: boolean }> {
   const managed = Boolean(ctx.homeDir)
   // The home is agent space: made and written through the agent-space file
   // verbs, which the agent host performs when agents run as their own OS user.
-  const codexHome = ctx.homeDir ?? (await makeThrowawayRuntimeHome('clawboo-codex-home-'))
+  const codexHome =
+    ctx.homeDir ??
+    (await makeThrowawayRuntimeHome('clawboo-codex-home-', { agentId, cwd: ctx.cwd ?? null }))
   if (managed) await agentMkdir(codexHome, { mode: 0o700 })
   const hasApiKey = Object.keys(ctx.apiKeyEnv ?? {}).length > 0
   const agentMode = isAgentUserMode()
@@ -372,7 +379,7 @@ export function createCodexDriver(
 ): CodexDriver {
   return createCodexAppServerDriver(opts, ctx, {
     ...deps,
-    prepareHome: () => prepareCodexHome(ctx),
+    prepareHome: () => prepareCodexHome(ctx, opts.agentId),
     fallback: () => createCodexExecDriver(opts, ctx),
   })
 }
@@ -388,8 +395,9 @@ export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): 
   let modelPinned = false
 
   return createSpawnDriver<CodexNativeEvent>({
+    agentId: opts.agentId,
     async resolve() {
-      const { codexHome, managed } = await prepareCodexHome(ctx)
+      const { codexHome, managed } = await prepareCodexHome(ctx, opts.agentId)
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
       // No model unless the agent pins one: the CLI then runs the account's own
       // default, which the backend chooses, so it cannot go stale here.

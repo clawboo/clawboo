@@ -373,7 +373,7 @@ async function driveTurn(
   // secrets vault). For Claude Code, Codex and Hermes it only sets where the run
   // starts. Native's file tools are confined to it, and its shell, when switched on
   // for that Boo, starts there and asks a person before every command.
-  const workdir = taskRunWorkdirFor(runtime, row?.teamId)
+  const workdir = taskRunWorkdirFor(runtime, row?.teamId, process.env, agentId)
 
   // The turn's hold on the agent's budget, released however the turn ends (see
   // `runHeld` below).

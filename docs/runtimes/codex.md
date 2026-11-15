@@ -90,6 +90,8 @@ Each Codex agent gets its own Codex home at `~/.clawboo/runtimes/codex/<agent id
 - copies your ChatGPT sign-in (`~/.codex/auth.json`) into the folder when the copy there is missing, unusable or older than yours. Codex refreshes the copy itself, so Clawboo never overwrites a newer one.
 - writes the folder's `config.toml`, which lists Clawboo's MCP servers. Your own `~/.codex/config.toml` is not read, and Clawboo never writes to `~/.codex`.
 
+With a [user per agent](/operating/agent-isolation#a-user-per-agent) (`CLAWBOO_AGENT_USERS`, Linux only for now), the folder is under the home of the agent's own user, and its sign-in is its own, not a copy of yours. The sign-in on the Runtimes page does not pick an agent yet, so give Codex an API key.
+
 ### Leading a team on Codex
 
 When onboarding deploys your first team on Codex (the **Sign in with ChatGPT** path), it gives the team a lead: the member with a leader role, or else its first agent. It also promotes that agent to Boo Zero, the leader that coordinates every team. It skips that promotion when you already chose a Boo Zero or have a Clawboo Native one; an OpenClaw Gateway's default agent is replaced. See [Boo Zero](/using/boo-zero).

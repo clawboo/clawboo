@@ -108,9 +108,6 @@ export async function runAgentUserCheck(
   const pass = (step: number, name: string, message: string): void => {
     steps.push({ step, name, level: 'ok', message })
   }
-  const warn = (step: number, name: string, message: string): void => {
-    steps.push({ step, name, level: 'warn', message })
-  }
   const fail = (step: number, name: string, message: string): CheckReport => {
     steps.push({ step, name, level: 'fail', message })
     if (report.client) {
@@ -242,14 +239,95 @@ export async function runAgentUserCheck(
     }
   }
 
+  // 7 to 9, inside the host.
+  const host = await runHostChecks(client, {
+    platform: deps.platform,
+    user: config.user,
+    serverUser: opts.serverUser,
+    serverPid: deps.serverPid,
+    serverHome: deps.serverHome,
+    dataDir: deps.dataDir,
+    protectedFiles: deps.protectedFiles,
+    operatorFiles: deps.operatorFiles,
+    writable: work.dir,
+    searchRoot: work.dir,
+    secretValues: deps.secretValues,
+    runtimeBinaries: deps.runtimeBinaries,
+  })
+  steps.push(...host.steps)
+  report.unavailableRuntimes.push(...host.unavailableRuntimes)
+  if (!host.ok) {
+    deps.stopHost?.(client)
+    report.client = null
+    return report
+  }
+
+  report.ok = true
+  return report
+}
+
+/** What the per-host part of the check (steps 7 to 9) needs. */
+export interface HostCheckInput {
+  platform: NodeJS.Platform
+  /** The agent user, for the messages. */
+  user: string
+  serverUser: string
+  serverPid: number
+  serverHome: string
+  dataDir: string
+  protectedFiles: string[]
+  operatorFiles: string[]
+  /** A folder the agent user must be able to write (its work folder, or its home). */
+  writable: string
+  /** Where hard links to the private files and others' setuid files are looked for. */
+  searchRoot: string
+  secretValues: string[]
+  runtimeBinaries: { runtime: string; path: string }[]
+  /** With a user per agent: the other agent users' homes, none of which it may list. */
+  otherAgentHomes?: string[]
+  /** With a user per agent: processes of other agent users it must not signal. */
+  otherAgentPids?: number[]
+}
+
+export interface HostCheckResult {
+  ok: boolean
+  steps: CheckStep[]
+  unavailableRuntimes: { runtime: string; path: string; reason: string }[]
+}
+
+/**
+ * Steps 7 to 9, run inside one agent host: the canaries, what it can see of
+ * this process, hard links and setuid files, its privileges, and the runtime
+ * binaries. Stops at the first failure. With a user per agent it also proves
+ * the host can neither list another agent user's home nor signal its processes.
+ */
+export async function runHostChecks(
+  client: AgentHostClient,
+  input: HostCheckInput,
+): Promise<HostCheckResult> {
+  const o = { ...input, signalPids: input.otherAgentPids ?? [] }
+  const steps: CheckStep[] = []
+  const unavailable: HostCheckResult['unavailableRuntimes'] = []
+  const pass = (step: number, name: string, message: string): void => {
+    steps.push({ step, name, level: 'ok', message })
+  }
+  const warn = (step: number, name: string, message: string): void => {
+    steps.push({ step, name, level: 'warn', message })
+  }
+  const fail = (step: number, name: string, message: string): HostCheckResult => {
+    steps.push({ step, name, level: 'fail', message })
+    return { ok: false, steps, unavailableRuntimes: unavailable }
+  }
+
   // 7. Canaries, as the agent user.
   const mustFail = [
-    ...deps.protectedFiles.map((p) => ({ path: p, mode: 'read' as const })),
-    { path: deps.dataDir, mode: 'list' as const },
-    ...deps.operatorFiles.map((p) => ({ path: p, mode: 'read' as const })),
+    ...o.protectedFiles.map((p) => ({ path: p, mode: 'read' as const })),
+    { path: o.dataDir, mode: 'list' as const },
+    ...o.operatorFiles.map((p) => ({ path: p, mode: 'read' as const })),
+    ...(o.otherAgentHomes ?? []).map((p) => ({ path: p, mode: 'list' as const })),
   ]
-  const shouldFail = [{ path: deps.serverHome, mode: 'list' as const }]
-  const mustPass = [{ path: work.dir, mode: 'write' as const }]
+  const shouldFail = [{ path: o.serverHome, mode: 'list' as const }]
+  const mustPass = [{ path: o.writable, mode: 'write' as const }]
   let probe
   try {
     probe = await client.request({ op: 'probe', checks: [...mustFail, ...shouldFail, ...mustPass] })
@@ -264,6 +342,13 @@ export async function runAgentUserCheck(
     // A missing answer counts as readable: the host is on the agents' side, and
     // silence must not pass for proof.
     if (!r || r.ok) {
+      if ((o.otherAgentHomes ?? []).includes(c.path)) {
+        return fail(
+          7,
+          'other agents',
+          `${o.user} can list ${c.path}, another agent user's home. Each agent user's home must be its own: run \`chmod 700 ${c.path}\` as an administrator, and start Clawboo again.`,
+        )
+      }
       const fix = c.mode === 'list' ? `chmod 700 ${c.path}` : `chmod 600 ${c.path}`
       return fail(
         7,
@@ -288,7 +373,7 @@ export async function runAgentUserCheck(
       return fail(
         7,
         'work folder',
-        `The agent user cannot create files in the work folder ${c.path} (${r?.code ?? 'no answer'}). It must be owned by ${config.user}: run \`install -d -o ${config.user} -m 700 ${c.path}\` as an administrator.`,
+        `The agent user cannot create files in the work folder ${c.path} (${r?.code ?? 'no answer'}). It must be owned by ${o.user}: run \`install -d -o ${o.user} -m 700 ${c.path}\` as an administrator.`,
       )
     }
   }
@@ -296,7 +381,7 @@ export async function runAgentUserCheck(
   // What the agent user can see of this process.
   let view
   try {
-    view = await client.request({ op: 'procView', pid: deps.serverPid })
+    view = await client.request({ op: 'procView', pid: o.serverPid })
   } catch (err) {
     return fail(
       7,
@@ -304,19 +389,17 @@ export async function runAgentUserCheck(
       `The agent host could not look at the server process: ${errMsg(err)}`,
     )
   }
-  if (deps.platform === 'linux' && (!view.environ || view.environ.ok !== false)) {
+  if (o.platform === 'linux' && (!view.environ || view.environ.ok !== false)) {
     return fail(
       7,
       'process view',
-      `The agent user can read this server's environment (/proc/${deps.serverPid}/environ). Agents must run as a different user from the server.`,
+      `The agent user can read this server's environment (/proc/${o.serverPid}/environ). Agents must run as a different user from the server.`,
     )
   }
   const visible = [view.environ?.text, view.cmdline?.text, view.psEnv?.text].filter(
     (t): t is string => typeof t === 'string',
   )
-  const leaked = deps.secretValues.filter(
-    (s) => s.length >= 8 && visible.some((t) => t.includes(s)),
-  )
+  const leaked = o.secretValues.filter((s) => s.length >= 8 && visible.some((t) => t.includes(s)))
   if (leaked.length > 0) {
     return fail(
       7,
@@ -328,7 +411,7 @@ export async function runAgentUserCheck(
   // Hard links to protected files planted under the work folder while agents
   // still ran as the server's user.
   const targets: InodeRef[] = []
-  for (const p of deps.protectedFiles) {
+  for (const p of o.protectedFiles) {
     try {
       const st = fs.statSync(p, { bigint: true })
       targets.push({ dev: String(st.dev), ino: String(st.ino) })
@@ -343,7 +426,7 @@ export async function runAgentUserCheck(
     let found
     try {
       found = await client.request(
-        { op: 'inodes', root: work.dir, targets, maxEntries: 2_000_000 },
+        { op: 'inodes', root: o.searchRoot, targets, maxEntries: 2_000_000 },
         { timeoutMs: 300_000 },
       )
     } catch (err) {
@@ -378,7 +461,7 @@ export async function runAgentUserCheck(
       return fail(
         7,
         'hard links',
-        `${config.user} cannot search ${unreadable[0]} in the work folder, so it could not be checked for hard links to Clawboo's private files or setuid files. Let ${config.user} read and enter it (\`chmod u+rx\` as its owner), or move it out of the work folder, and start Clawboo again.`,
+        `${o.user} cannot search ${unreadable[0]} in the work folder, so it could not be checked for hard links to Clawboo's private files or setuid files. Let ${o.user} read and enter it (\`chmod u+rx\` as its owner), or move it out of the work folder, and start Clawboo again.`,
       )
     }
     if (found.truncated) {
@@ -388,13 +471,13 @@ export async function runAgentUserCheck(
         return fail(
           7,
           'setuid files',
-          `The work folder ${work.dir} is too large to search completely for setuid files. Remove task checkouts you no longer need from it${deps.platform === 'linux' ? ', or install setpriv (util-linux) so the agent host runs with no_new_privs,' : ''} and start Clawboo again.`,
+          `The work folder ${o.searchRoot} is too large to search completely for setuid files. Remove task checkouts you no longer need from it${o.platform === 'linux' ? ', or install setpriv (util-linux) so the agent host runs with no_new_privs,' : ''} and start Clawboo again.`,
         )
       }
       warn(
         7,
         'hard links',
-        `The work folder ${work.dir} is too large to search completely for hard links.`,
+        `The work folder ${o.searchRoot} is too large to search completely for hard links.`,
       )
     }
   }
@@ -404,6 +487,28 @@ export async function runAgentUserCheck(
     'the agent user cannot read the data folder, the vault, the key, settings or the token',
   )
 
+  // Another agent's processes must refuse its signals.
+  if (o.signalPids.length > 0) {
+    let sig
+    try {
+      sig = await client.request({ op: 'canSignal', pids: [...o.signalPids] })
+    } catch (err) {
+      return fail(7, 'other agents', `The agent host could not run the checks: ${errMsg(err)}`)
+    }
+    const res = Array.isArray(sig.results) ? sig.results : []
+    for (const pid of o.signalPids) {
+      const r = res.find((x) => x && x.pid === pid)
+      // Silence counts as reachable, as for the canaries.
+      if (!r || r.ok || r.code !== 'EPERM') {
+        return fail(
+          7,
+          'other agents',
+          `${o.user} can signal process ${pid}, which belongs to another agent user. Agent users must be ordinary, separate users.`,
+        )
+      }
+    }
+  }
+
   // 8. No way for the agent user to become anyone else: actually tried, as the
   // agent user, and sudo's listing read as well. A sudoers default can hide the
   // listing while the rules still work, and a rule for one command (a shell as
@@ -411,7 +516,7 @@ export async function runAgentUserCheck(
   let priv
   try {
     priv = await client.request(
-      { op: 'privCheck', serverUser: opts.serverUser },
+      { op: 'privCheck', serverUser: o.serverUser },
       { timeoutMs: 60_000 },
     )
   } catch (err) {
@@ -426,14 +531,14 @@ export async function runAgentUserCheck(
     return fail(
       8,
       'agent privileges',
-      `${escalation.what === 'sudo -l' ? `${config.user} has sudo rules it can use without a password` : `${config.user} can run \`${String(escalation.what)}\``}. The agent user must not be able to become any other user: remove its sudo and doas rules (\`sudo -l -U ${config.user}\` lists sudo's).`,
+      `${escalation.what === 'sudo -l' ? `${o.user} has sudo rules it can use without a password` : `${o.user} can run \`${String(escalation.what)}\``}. The agent user must not be able to become any other user: remove its sudo and doas rules (\`sudo -l -U ${o.user}\` lists sudo's).`,
     )
   }
   if (priv.crontab === 'allowed') {
     warn(
       8,
       'scheduled jobs',
-      `${config.user} may schedule its own jobs with crontab, which would run after Clawboo stops its agents. Add ${config.user} to /etc/cron.deny and /etc/at.deny.`,
+      `${o.user} may schedule its own jobs with crontab, which would run after Clawboo stops its agents. Add ${o.user} to /etc/cron.deny and /etc/at.deny.`,
     )
   }
   // Under no_new_privs sudo and doas refuse to run before they read a rule, so
@@ -443,35 +548,34 @@ export async function runAgentUserCheck(
     warn(
       8,
       'agent privileges',
-      `not checked: the agent host runs with no_new_privs, under which sudo will not run, so ${config.user}'s sudo and doas rules could not be tried. Agents cannot use them either, but a job scheduled with cron or at could. As an administrator, make sure \`sudo -l -U ${config.user}\` lists nothing.`,
+      `not checked: the agent host runs with no_new_privs, under which sudo will not run, so ${o.user}'s sudo and doas rules could not be tried. Agents cannot use them either, but a job scheduled with cron or at could. As an administrator, make sure \`sudo -l -U ${o.user}\` lists nothing.`,
     )
   } else {
     pass(8, 'agent privileges', 'none')
   }
 
   // 9. Runtime binaries: shown, not refused.
-  if (deps.runtimeBinaries.length > 0) {
+  if (o.runtimeBinaries.length > 0) {
     try {
       const res = await client.request({
         op: 'canExec',
-        paths: deps.runtimeBinaries.map((b) => b.path),
+        paths: o.runtimeBinaries.map((b) => b.path),
       })
       const out = Array.isArray(res.results) ? res.results : []
-      for (const b of deps.runtimeBinaries) {
+      for (const b of o.runtimeBinaries) {
         const r = out.find((x) => x && x.path === b.path)
         if (r && r.ok) continue
-        const reason = `${b.path} is not available to ${config.user} (${r?.code ?? 'no answer'}). Install it where every user can run it, such as /usr/local or /opt.`
-        report.unavailableRuntimes.push({ runtime: b.runtime, path: b.path, reason })
+        const reason = `${b.path} is not available to ${o.user} (${r?.code ?? 'no answer'}). Install it where every user can run it, such as /usr/local or /opt.`
+        unavailable.push({ runtime: b.runtime, path: b.path, reason })
         warn(9, 'runtime binaries', `${b.runtime}: ${reason}`)
       }
     } catch (err) {
       warn(9, 'runtime binaries', `could not check: ${errMsg(err)}`)
     }
   }
-  if (report.unavailableRuntimes.length === 0) pass(9, 'runtime binaries', 'available')
+  if (unavailable.length === 0) pass(9, 'runtime binaries', 'available')
 
-  report.ok = true
-  return report
+  return { ok: true, steps, unavailableRuntimes: unavailable }
 }
 
 function errMsg(err: unknown): string {

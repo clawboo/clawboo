@@ -28,7 +28,8 @@ import { resolveClawbooDir } from '@clawboo/config'
 import { assertSafeTaskId } from '@clawboo/worktrees'
 
 import { agentMkdir } from '../agentUser/agentFs'
-import { isAgentUserMode } from '../agentUser/config'
+import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
+import { AGENT_SHARE_PREFIX } from '../agentUser/poolRoute'
 import { stayingTeamFolder } from '../workDirJournal'
 import { workDirInUse, workLayout } from '../workDir'
 import { sanitizeAgentId } from './identityHome'
@@ -47,6 +48,21 @@ const TEAM_WORKDIR_RUNTIMES: ReadonlySet<string> = new Set([
 /** The shared folder for task runs that belong to no team. The leading `_` keeps
  *  it apart from real team ids. */
 export const NO_TEAM_SEGMENT = '_no-team'
+
+/**
+ * The folder of no team, for `agentId`: the shared `_no-team`, or with a user
+ * per agent (CLAWBOO_AGENT_USERS) a folder of that agent's own (`_agent-<id>`),
+ * since no other agent may reach its files.
+ */
+export function noTeamSegmentFor(agentId: string | null | undefined): string {
+  if (!isAgentPoolMode()) return NO_TEAM_SEGMENT
+  if (!agentId) {
+    throw new Error(
+      'each agent runs as its own user (CLAWBOO_AGENT_USERS), so a folder of no team needs its agent',
+    )
+  }
+  return `${AGENT_SHARE_PREFIX}${sanitizeAgentId(agentId)}`
+}
 
 /** Where team folders go: `<work folder>/teams`, by its real path, or the old
  *  `<clawboo home>/workspaces` when the install keeps the old layout. */
@@ -115,9 +131,11 @@ export function taskRunWorkdirFor(
   runtime: string | null | undefined,
   teamId: string | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  /** The agent, for a folder of no team with a user per agent. */
+  agentId: string | null = null,
 ): string | null {
   if (!runtime || !TEAM_WORKDIR_RUNTIMES.has(runtime)) return null
-  return teamWorkdirPath(teamId || NO_TEAM_SEGMENT, env)
+  return teamWorkdirPath(teamId || noTeamSegmentFor(agentId), env)
 }
 
 /** The folder inside a team folder that holds its task folders. */
@@ -134,8 +152,13 @@ export function taskFolderPath(
   teamId: string | null | undefined,
   taskId: string,
   env: NodeJS.ProcessEnv = process.env,
+  /** The task's agent, for a task of no team with a user per agent. */
+  assigneeId: string | null = null,
 ): string {
-  const root = path.join(teamWorkdirPath(teamId || NO_TEAM_SEGMENT, env), TASK_FOLDERS_SEGMENT)
+  const root = path.join(
+    teamWorkdirPath(teamId || noTeamSegmentFor(assigneeId), env),
+    TASK_FOLDERS_SEGMENT,
+  )
   const prefix = root.endsWith(path.sep) ? root : root + path.sep
   const dir = path.resolve(root, assertSafeTaskId(taskId))
   if (!dir.startsWith(prefix)) {
@@ -164,13 +187,14 @@ export interface TaskRunFolder {
  */
 export function taskRunFolderFor(
   runtime: string | null | undefined,
-  task: { id: string; teamId?: string | null },
+  task: { id: string; teamId?: string | null; assigneeAgentId?: string | null },
   env: NodeJS.ProcessEnv = process.env,
 ): TaskRunFolder | null {
   if (!runtime || !TEAM_WORKDIR_RUNTIMES.has(runtime)) return null
+  const assignee = task.assigneeAgentId ?? null
   return {
-    dir: taskFolderPath(task.teamId, task.id, env),
-    teamFolder: teamWorkdirPath(task.teamId || NO_TEAM_SEGMENT, env),
+    dir: taskFolderPath(task.teamId, task.id, env, assignee),
+    teamFolder: teamWorkdirPath(task.teamId || noTeamSegmentFor(assignee), env),
   }
 }
 

@@ -2,7 +2,7 @@
 // stop processes: user lookup, the launcher socket's ownership, and "stop every
 // agent process" (design 4.8).
 
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFile, execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -98,4 +98,77 @@ export function killAllAgentProcesses(
     if (!res.error) ran = true
   }
   return ran
+}
+
+// ── A user per agent (CLAWBOO_AGENT_USERS) ──────────────────────────────
+
+/** `getent <db> <key>`'s output, or null when there is no such entry. */
+export function getentRun(args: string[]): string | null {
+  try {
+    return execFileSync('getent', args, { encoding: 'utf8', timeout: 5_000 })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Stop every process of one pool user (`kill -KILL -1` as that user, three
+ * times), without blocking: one agent's stop must not hold up the server.
+ * Resolves once done; rejects when the switch itself failed every time (no
+ * sudo, a rule gone), since then nothing was stopped. `kill` finding nothing
+ * left to stop is not a failure.
+ */
+export function reapPoolUser(
+  sw: AgentUserConfig['switch'],
+  user: string,
+  run: typeof execFile = execFile,
+): Promise<void> {
+  const once = (): Promise<string | null> =>
+    new Promise((resolve) => {
+      run(
+        sw,
+        ['-n', '-u', user, '--', 'kill', '-KILL', '-1'],
+        { timeout: 5_000, env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin' } },
+        (err, _stdout, stderr) => {
+          const text = String(stderr ?? '')
+          const code = (err as { code?: unknown } | null)?.code
+          const switchFailed =
+            !!err &&
+            (typeof code === 'string' ||
+              /^(sudo|doas):/m.test(text) ||
+              (err as { killed?: boolean }).killed === true)
+          resolve(switchFailed ? text.trim() || (err as Error).message : null)
+        },
+      )
+    })
+  return (async () => {
+    const failures: string[] = []
+    for (let i = 0; i < 3; i++) {
+      const why = await once()
+      if (why) failures.push(why)
+    }
+    if (failures.length === 3) {
+      throw new Error(`could not stop the processes of ${user}: ${failures[0]}`)
+    }
+  })()
+}
+
+/**
+ * Give a share root its inherited ACL (Linux `setfacl`): the share's group may
+ * read, write and enter everything made inside, whatever the maker's umask, and
+ * nobody else may. The folder is the server's own, just made.
+ */
+export function setShareAcl(
+  dir: string,
+  gid: number,
+  run: typeof execFile = execFile,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    run(
+      'setfacl',
+      ['-m', `g:${gid}:rwx,d:g:${gid}:rwx,d:m::rwx,d:o::-`, '--', dir],
+      { timeout: 10_000 },
+      (err) => (err ? reject(err) : resolve()),
+    )
+  })
 }

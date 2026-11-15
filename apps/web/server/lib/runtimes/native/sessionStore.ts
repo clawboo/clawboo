@@ -16,7 +16,7 @@ import { getSessionBySourceId, sessions, type ClawbooDb } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
 import { isAgentUserMode } from '../../agentUser/config'
-import { runtimeHomesRoot } from '../identityHome'
+import { runtimeHomeRelative } from '../identityHome'
 import type { NeutralMessage } from './providers/types'
 
 const SOURCE_ID = 'clawboo-native'
@@ -37,8 +37,8 @@ const SOURCE_ID = 'clawboo-native'
  */
 function transcriptHome(homeDir: string): string | null {
   if (!isAgentUserMode()) return homeDir
-  const rel = path.relative(runtimeHomesRoot(), path.resolve(homeDir))
-  if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null
+  const rel = runtimeHomeRelative(homeDir)
+  if (!rel) return null
   return path.join(path.resolve(resolveClawbooDir(), 'runtimes'), rel)
 }
 

@@ -1363,6 +1363,56 @@ export const approvalRules = sqliteTable(
 export type DbApprovalRule = typeof approvalRules.$inferSelect
 export type DbApprovalRuleInsert = typeof approvalRules.$inferInsert
 
+// ─── agent_os_users / team_os_groups ──────────────────────────────────────────
+// The agent user pool (CLAWBOO_AGENT_USERS) and its team groups
+// (CLAWBOO_AGENT_GROUPS). See src/agentOsUsers.ts.
+
+export const agentOsUsers = sqliteTable(
+  'agent_os_users',
+  {
+    userName: text('user_name').primaryKey(),
+    uid: integer('uid').notNull(),
+    poolOrder: integer('pool_order').notNull().default(0),
+    /** 0 once the setting no longer names this user: nobody new gets it. */
+    inPool: integer('in_pool').notNull().default(1),
+    /** free | assigned | scrubbing */
+    state: text('state').notNull().default('free'),
+    /** The agent it belongs to; kept while it is scrubbed. */
+    agentId: text('agent_id'),
+    assignedAt: integer('assigned_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('uniq_agent_os_users_agent')
+      .on(t.agentId)
+      .where(sql`state = 'assigned'`),
+  ],
+)
+
+export type DbAgentOsUser = typeof agentOsUsers.$inferSelect
+
+export const teamOsGroups = sqliteTable(
+  'team_os_groups',
+  {
+    groupName: text('group_name').primaryKey(),
+    gid: integer('gid').notNull(),
+    poolOrder: integer('pool_order').notNull().default(0),
+    inPool: integer('in_pool').notNull().default(1),
+    /** free | assigned | scrubbing */
+    state: text('state').notNull().default('free'),
+    teamId: text('team_id'),
+    assignedAt: integer('assigned_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('uniq_team_os_groups_team')
+      .on(t.teamId)
+      .where(sql`state = 'assigned'`),
+  ],
+)
+
+export type DbTeamOsGroup = typeof teamOsGroups.$inferSelect
+
 // ─── team_chat ────────────────────────────────────────────────────────────────
 // The durable group-chat room substrate (mixed-runtime peer chat): every team
 // member posts as a NAMED PEER into one room. Distinct from the leader-orchestrated

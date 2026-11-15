@@ -56,6 +56,8 @@ export interface ExecRunResult {
 export interface ExecRunOptions {
   argv: string[]
   cwd: string
+  /** The agent whose command it is: with a user per agent it runs as that user. */
+  agentId?: string | null
   signal: AbortSignal
   timeoutMs?: number
   /** Injected in tests. Defaults to the allowlisted connector environment. */
@@ -99,6 +101,7 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
       // which is the exact property this tier exists to refuse.
       child = spawnAgentProcess({
         kind: 'tool',
+        agentId: opts.agentId ?? null,
         command: program ?? '',
         args,
         cwd: opts.cwd,

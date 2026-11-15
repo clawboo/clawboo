@@ -9,7 +9,8 @@ import { ownedRuntimeBin, ownedRuntimeLaunch } from '../runtimeFolder'
 import { resolveAgentSdkBinary } from '../runtimes/agentSdkBinary'
 import { secretValuesForExposureCheck } from '../secretsVault'
 import { startAgentUser } from './boot'
-import { AgentUserConfigError } from './config'
+import { AgentUserConfigError, isAgentPoolMode } from './config'
+import { startAgentPool } from './poolBoot'
 
 type Log = Parameters<typeof startAgentUser>[0]['log']
 
@@ -68,11 +69,14 @@ export function gatherCheckInputs(): {
  */
 export async function bootAgentIsolation(log: Log): Promise<boolean> {
   try {
-    const report = await startAgentUser({ log, ...gatherCheckInputs() })
+    const pool = isAgentPoolMode()
+    const report = pool
+      ? await startAgentPool({ log, ...gatherCheckInputs() })
+      : await startAgentUser({ log, ...gatherCheckInputs() })
     if (report.ok) return true
     const failed = report.steps.find((s) => s.level === 'fail')
     log.error(
-      `SECURITY: refusing to start. Agent isolation (CLAWBOO_AGENT_USER) check ${failed?.step ?? '?'} (${failed?.name ?? 'unknown'}) failed: ${failed?.message ?? 'no detail'}`,
+      `SECURITY: refusing to start. Agent isolation (${pool ? 'CLAWBOO_AGENT_USERS' : 'CLAWBOO_AGENT_USER'}) check ${failed?.step ?? '?'} (${failed?.name ?? 'unknown'}) failed: ${failed?.message ?? 'no detail'}`,
     )
     return false
   } catch (err) {

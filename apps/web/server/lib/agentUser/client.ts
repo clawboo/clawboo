@@ -82,12 +82,17 @@ export class RemoteAgentProcess extends EventEmitter {
   /** @internal Which of this process's streams are full. The host holds all
    *  of its output while any one is, and is let go once every one has drained. */
   readonly held = new Set<'out' | 'err'>()
-  private readonly client: AgentHostClient
+  private client: AgentHostClient | null
   private readonly group: boolean
+  /** Frames written before the host was there (a deferred spawn), sent once it is. */
+  private queued: ServerToHostFrame[] | null = null
+  /** A stop asked for before the host was there. */
+  private stopBeforeStart: 'kill' | 'tree' | null = null
 
-  constructor(client: AgentHostClient, opts: RemoteSpawnOptions) {
+  constructor(client: AgentHostClient | null, opts: RemoteSpawnOptions) {
     super()
     this.client = client
+    if (!client) this.queued = []
     this.group = opts.group
     this.id = `p${++procSeq}`
     this.spawnfile = opts.command
@@ -95,20 +100,44 @@ export class RemoteAgentProcess extends EventEmitter {
     this.stdout = opts.stdio[1] === 'pipe' ? new PassThrough() : null
     this.stderr = opts.stdio[2] === 'pipe' ? new PassThrough() : null
     const id = this.id
+    const send = (frame: ServerToHostFrame): void => this.send(frame)
     this.stdin =
       opts.stdio[0] === 'pipe'
         ? new Writable({
             write(chunk: Buffer | string, enc, cb) {
               const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc)
-              client.sendRaw({ t: 'in', proc: id, data: buf.toString('base64') })
+              send({ t: 'in', proc: id, data: buf.toString('base64') })
               cb()
             },
             final(cb) {
-              client.sendRaw({ t: 'in-end', proc: id })
+              send({ t: 'in-end', proc: id })
               cb()
             },
           })
         : null
+  }
+
+  /** @internal A frame for the host: sent now, or once the host is there. */
+  send(frame: ServerToHostFrame): void {
+    if (this.queued) {
+      this.queued.push(frame)
+      return
+    }
+    this.client?.sendRaw(frame)
+  }
+
+  /** @internal The host of a deferred spawn is there: send what waited. */
+  _attach(client: AgentHostClient): 'kill' | 'tree' | null {
+    this.client = client
+    const queued = this.queued ?? []
+    this.queued = null
+    for (const f of queued) client.sendRaw(f)
+    return this.stopBeforeStart
+  }
+
+  /** @internal A stop asked for before the host was there, if any. */
+  get stopRequestedBeforeStart(): 'kill' | 'tree' | null {
+    return this.stopBeforeStart
   }
 
   /** Signal the process (not its tree; `killProcessTree` asks for that). */
@@ -116,6 +145,10 @@ export class RemoteAgentProcess extends EventEmitter {
     const name = typeof signal === 'number' ? (signal === 9 ? 'SIGKILL' : 'SIGTERM') : signal
     if (this.closed || this.exitCode !== null || this.signalCode !== null) return false
     this.killed = true
+    if (!this.client) {
+      this.stopBeforeStart ??= 'kill'
+      return true
+    }
     this.client.request({ op: 'signal', proc: this.id, signal: name }).catch(() => {
       /* the host is gone, and the process with it */
     })
@@ -131,6 +164,10 @@ export class RemoteAgentProcess extends EventEmitter {
     // started has no group.
     if (this.closed && (!this.group || this.pid === undefined)) return
     if (!this.closed) this.killed = true
+    if (!this.client) {
+      this.stopBeforeStart = 'tree'
+      return
+    }
     this.client.request({ op: 'killTree', proc: this.id, graceMs }).catch(() => {
       /* the host is gone, and the process with it */
     })
@@ -263,11 +300,11 @@ export class AgentHostClient {
   /** Send a request and wait for its reply. */
   request<R extends HostRequest>(
     req: R,
-    opts: { timeoutMs?: number } = {},
+    opts: { timeoutMs?: number; within?: string } = {},
   ): Promise<HostReplies[R['op'] & HostOp]> {
     return new Promise((resolve, reject) => {
       this.requestSync(
-        req,
+        opts.within ? ({ ...req, within: opts.within } as unknown as HostRequest) : req,
         resolve as (v: Record<string, unknown>) => void,
         reject,
         opts.timeoutMs ?? 30_000,
@@ -311,9 +348,44 @@ export class AgentHostClient {
     this.sendRaw({ t: 'req', id, ...req } as ServerToHostFrame)
   }
 
+  /** How many processes this host started are still running. */
+  get liveProcesses(): number {
+    return this.procs.size
+  }
+
+  /** Processes running plus requests waiting for an answer. */
+  get busy(): number {
+    return this.procs.size + this.pending.size
+  }
+
   /** Ask the host to start a process. Returns at once, like `child_process.spawn`. */
   spawn(opts: RemoteSpawnOptions): RemoteAgentProcess {
     const proc = new RemoteAgentProcess(this, opts)
+    this.startOn(proc, opts)
+    return proc
+  }
+
+  /**
+   * Start a process created before its host was there (`spawnDeferred`). A stop
+   * asked for meanwhile means it never starts: it fails as aborted.
+   */
+  adopt(proc: RemoteAgentProcess, opts: RemoteSpawnOptions): void {
+    if (proc.closed) return
+    const stop = proc.stopRequestedBeforeStart
+    if (stop) {
+      proc.emit('error', abortError())
+      proc._failedStart()
+      return
+    }
+    // Registered before the queued stdin goes out, so nothing it sends back is lost.
+    this.startOn(proc, opts, () => proc._attach(this))
+  }
+
+  private startOn(
+    proc: RemoteAgentProcess,
+    opts: RemoteSpawnOptions,
+    afterRequest?: () => void,
+  ): void {
     this.procs.set(proc.id, proc)
     const failStart = (err: Error): void => {
       if (proc.closed) return
@@ -323,7 +395,7 @@ export class AgentHostClient {
     }
     if (opts.signal?.aborted) {
       queueMicrotask(() => failStart(abortError()))
-      return proc
+      return
     }
     this.requestSync(
       {
@@ -358,6 +430,7 @@ export class AgentHostClient {
       // Starting a process is quick; a slow answer means the host is stuck.
       30_000,
     )
+    afterRequest?.()
     if (opts.signal) {
       const onAbort = (): void => {
         if (proc.closed) return
@@ -367,7 +440,6 @@ export class AgentHostClient {
       opts.signal.addEventListener('abort', onAbort, { once: true })
       proc.once('close', () => opts.signal?.removeEventListener('abort', onAbort))
     }
-    return proc
   }
 
   /** Whether the host answers a ping within `timeoutMs`. */
@@ -549,6 +621,13 @@ function parseHello(f: Record<string, unknown>): HelloFrame | null {
   const user = str('user')
   const home = str('home')
   const platform = str('platform')
+  const rawGroups = f['groups']
+  const groups =
+    Array.isArray(rawGroups) &&
+    rawGroups.length <= 1024 &&
+    rawGroups.every((g) => typeof g === 'number' && Number.isInteger(g) && g >= 0)
+      ? (rawGroups as number[])
+      : null
   if (
     v === null ||
     uid === null ||
@@ -556,11 +635,12 @@ function parseHello(f: Record<string, unknown>): HelloFrame | null {
     pid === null ||
     user === null ||
     home === null ||
-    platform === null
+    platform === null ||
+    groups === null
   ) {
     return null
   }
-  return { t: 'hello', v, uid, gid, user, home, pid, platform }
+  return { t: 'hello', v, uid, gid, user, home, pid, platform, groups }
 }
 
 function abortError(): Error {
@@ -568,6 +648,39 @@ function abortError(): Error {
     name: 'AbortError',
     code: 'ABORT_ERR',
   })
+}
+
+/**
+ * Start a process on a host that may not be running yet: an agent's own host,
+ * started on its first need. Returns at once, like `child_process.spawn`;
+ * stdin written meanwhile is held and sent once the host is there, and a stop
+ * asked for meanwhile means the process never starts. A host that cannot be
+ * started fails the process the way a failed spawn does (`error`, then
+ * `close`).
+ */
+export function spawnDeferred(
+  host: Promise<AgentHostClient>,
+  opts: RemoteSpawnOptions,
+): RemoteAgentProcess {
+  const proc = new RemoteAgentProcess(null, opts)
+  host.then(
+    (client) => client.adopt(proc, opts),
+    (err: unknown) => {
+      if (proc.closed) return
+      const e = err instanceof Error ? err : new Error(String(err))
+      const code = (e as { code?: unknown }).code
+      proc.emit(
+        'error',
+        Object.assign(new Error(`spawn ${opts.command}: ${e.message}`), {
+          code: typeof code === 'string' ? code : 'EAGENTHOST',
+          syscall: `spawn ${opts.command}`,
+          path: opts.command,
+        }),
+      )
+      proc._failedStart()
+    },
+  )
+  return proc
 }
 
 // ── Starting or reaching the host ───────────────────────────────────────
@@ -591,12 +704,21 @@ export function startHostViaSwitch(opts: {
   script: string
   /** A command the host is started under, such as `setpriv --no-new-privs`. */
   prefix?: string[]
+  /** The group to run with instead of the user's own (`sudo -g`): a pooled
+   *  agent's team group. doas has no such option, so it refuses one. */
+  group?: string | null
   spawnImpl?: typeof spawn
 }): { transport: HostTransport; child: ChildProcess } {
   const run = [...(opts.prefix ?? []), opts.node, opts.script]
+  if (opts.group && opts.switch !== 'sudo') {
+    throw new AgentHostError(
+      `doas cannot start a host with the group ${opts.group}; team folders need sudo (CLAWBOO_AGENT_SWITCH=sudo)`,
+      'ENOTSUP',
+    )
+  }
   const args =
     opts.switch === 'sudo'
-      ? ['-n', '-u', opts.user, '-H', '--', ...run]
+      ? ['-n', '-u', opts.user, ...(opts.group ? ['-g', opts.group] : []), '-H', '--', ...run]
       : ['-n', '-u', opts.user, '--', ...run]
   const child = (opts.spawnImpl ?? spawn)(opts.switch, args, {
     stdio: ['pipe', 'pipe', 'pipe'],

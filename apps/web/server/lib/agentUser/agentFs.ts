@@ -14,10 +14,92 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { appendNoFollow, readBounded, statType, toStat, writeAtomic } from '../../agentHost/fsOps'
-import { isAgentUserMode } from './config'
+import { isAgentPoolMode, isAgentUserMode } from './config'
 import { AgentHostError } from './client'
-import { MAX_READ_BYTES, MAX_WRITE_BYTES, type FsEntry, type FsStat } from './protocol'
+import {
+  MAX_READ_BYTES,
+  MAX_WRITE_BYTES,
+  type FsEntry,
+  type FsStat,
+  type HostOp,
+  type HostReplies,
+  type HostRequest,
+} from './protocol'
+import type { AgentHostClient } from './client'
+import { hostForPath, ownerOfPathNow } from './poolRoute'
+import {
+  emptyFolderVia,
+  ensurePoolFolder,
+  listStructural,
+  poolSpot,
+  removeEmptiedRoot,
+  removeEmptyStructural,
+} from './poolShares'
 import { activeAgentHost } from './state'
+
+/** The host that may touch `p`: the one agent host, or with a user per agent
+ *  the host of whoever owns `p`. */
+async function hostFor(p: string): Promise<AgentHostClient> {
+  if (isAgentPoolMode()) return hostForPath(p)
+  return activeAgentHost().client
+}
+
+/** Send `req` to the host that may touch `p`. Inside a share, the host checks
+ *  that `p` resolves inside the share's root. */
+async function ask<R extends HostRequest>(
+  p: string,
+  req: R,
+  opts: { timeoutMs?: number } = {},
+): Promise<HostReplies[R['op'] & HostOp]> {
+  const client = await hostFor(p)
+  const spot = isAgentPoolMode() ? poolSpot(p) : null
+  return client.request(req, spot?.kind === 'share' ? { ...opts, within: spot.root } : opts)
+}
+
+async function askRename(from: string, to: string): Promise<void> {
+  const client = await hostForRename(from, to)
+  const spot = isAgentPoolMode() ? poolSpot(from) : null
+  await client.request(
+    { op: 'fs.rename', from, to },
+    spot?.kind === 'share' ? { within: spot.root } : {},
+  )
+}
+
+/** A rename stays with one owner: across two it would hand one agent's file to
+ *  another, so it is refused as a move across devices. */
+async function hostForRename(from: string, to: string): Promise<AgentHostClient> {
+  if (isAgentPoolMode()) {
+    const a = ownerOfPathNow(from)
+    const b = ownerOfPathNow(to)
+    if (!a || !b || JSON.stringify(a) !== JSON.stringify(b)) {
+      throw Object.assign(new Error(`${from} and ${to} belong to different agents`), {
+        code: 'EXDEV',
+      })
+    }
+  }
+  return hostFor(from)
+}
+
+/**
+ * The mode a file or folder in agent space is made with. Inside a share (a
+ * team's folders, with a user per agent) the owner's bits are given to the
+ * group too: the share's group is the team, and its root keeps everyone else
+ * out. Elsewhere `mode` as asked.
+ */
+function shareMode(p: string, mode: number): number {
+  if (!isAgentPoolMode() || poolSpot(p)?.kind !== 'share') return mode
+  return mode | ((mode & 0o700) >> 3)
+}
+
+/** Whether a share root is there (the server may look: its parent is the server's). */
+function poolSpotExists(root: string): boolean {
+  try {
+    fs.lstatSync(root)
+    return true
+  } catch {
+    return false
+  }
+}
 
 function code(err: unknown): string | undefined {
   return (err as { code?: string } | null)?.code
@@ -44,7 +126,10 @@ export async function agentMkdir(dir: string, opts: { mode?: number } = {}): Pro
     }
     return
   }
-  await activeAgentHost().client.request({ op: 'fs.mkdir', path: dir, mode })
+  // With a user per agent the server makes the work folder's own folders and
+  // each share's root; a host of the share makes what is inside.
+  if (isAgentPoolMode() && (await ensurePoolFolder(dir)) === 'made') return
+  await ask(dir, { op: 'fs.mkdir', path: dir, mode: shareMode(dir, mode) })
 }
 
 /** Write a whole file by a fresh name renamed into place (default mode 0600). */
@@ -62,11 +147,11 @@ export async function agentWriteFile(
   }
   const mode = (opts.mode ?? 0o600) & 0o777
   if (!isAgentUserMode()) return writeAtomic(file, buf, mode)
-  await activeAgentHost().client.request({
+  await ask(file, {
     op: 'fs.write',
     path: file,
     data: buf.toString('base64'),
-    mode,
+    mode: shareMode(file, mode),
   })
 }
 
@@ -88,11 +173,11 @@ export async function agentAppendFile(
   }
   const mode = (opts.mode ?? 0o600) & 0o777
   if (!isAgentUserMode()) return appendNoFollow(file, buf, mode)
-  await activeAgentHost().client.request({
+  await ask(file, {
     op: 'fs.append',
     path: file,
     data: buf.toString('base64'),
-    mode,
+    mode: shareMode(file, mode),
   })
 }
 
@@ -115,7 +200,7 @@ export async function agentReadFile(
       throw err
     }
   }
-  const res = await activeAgentHost().client.request({
+  const res = await ask(file, {
     op: 'fs.read',
     path: file,
     maxBytes: max,
@@ -134,8 +219,24 @@ export async function agentRemove(target: string): Promise<void> {
     await fs.promises.rm(target, { recursive: true, force: true })
     return
   }
+  if (isAgentPoolMode()) {
+    const spot = poolSpot(target)
+    if (spot?.kind === 'structural') {
+      throw Object.assign(new Error(`${target} is one of the work folder's own folders`), {
+        code: 'EPERM',
+      })
+    }
+    if (spot?.kind === 'share' && path.resolve(target) === spot.root) {
+      // The host empties the root; its folder sits in one of the server's, so
+      // the root itself goes last, by the server, once empty.
+      if (!poolSpotExists(target)) return
+      await emptyFolderVia(await hostFor(target), target, target)
+      removeEmptiedRoot(target)
+      return
+    }
+  }
   // A whole checkout can take a while to remove on a busy machine.
-  await activeAgentHost().client.request({ op: 'fs.rm', path: target }, { timeoutMs: 10 * 60_000 })
+  await ask(target, { op: 'fs.rm', path: target }, { timeoutMs: 10 * 60_000 })
 }
 
 /**
@@ -151,7 +252,17 @@ export async function agentRemoveEmptyDir(dir: string): Promise<void> {
     await fs.promises.rmdir(dir)
     return
   }
-  await activeAgentHost().client.request({ op: 'fs.rmdir', path: dir })
+  if (isAgentPoolMode()) {
+    const spot = poolSpot(dir)
+    if (
+      spot?.kind === 'structural' ||
+      (spot?.kind === 'share' && path.resolve(dir) === spot.root)
+    ) {
+      removeEmptyStructural(dir)
+      return
+    }
+  }
+  await ask(dir, { op: 'fs.rmdir', path: dir })
 }
 
 /** Rename within agent space. */
@@ -160,7 +271,7 @@ export async function agentRename(from: string, to: string): Promise<void> {
     await fs.promises.rename(from, to)
     return
   }
-  await activeAgentHost().client.request({ op: 'fs.rename', from, to })
+  await askRename(from, to)
 }
 
 /** What is at a path, without following a link there. Null when nothing is. */
@@ -173,7 +284,15 @@ export async function agentStat(p: string): Promise<FsStat | null> {
       throw err
     }
   }
-  const res = await activeAgentHost().client.request({ op: 'fs.stat', path: p })
+  if (isAgentPoolMode() && poolSpot(p)?.kind === 'structural') {
+    try {
+      return toStat(await fs.promises.lstat(path.resolve(p)))
+    } catch (err) {
+      if (code(err) === 'ENOENT') return null
+      throw err
+    }
+  }
+  const res = await ask(p, { op: 'fs.stat', path: p })
   // The host is on the agents' side: a reply without the field is not "nothing there".
   if (res.stat === null) return null
   if (!isFsStat(res.stat)) throw new AgentHostError('the agent host sent a malformed stat')
@@ -187,7 +306,9 @@ export async function agentStat(p: string): Promise<FsStat | null> {
  */
 export async function agentRealpath(p: string): Promise<string> {
   if (!isAgentUserMode()) return fs.promises.realpath(p)
-  const res = await activeAgentHost().client.request({ op: 'fs.realpath', path: p })
+  if (isAgentPoolMode() && poolSpot(p)?.kind === 'structural')
+    return fs.promises.realpath(path.resolve(p))
+  const res = await ask(p, { op: 'fs.realpath', path: p })
   if (typeof res.path !== 'string' || !path.isAbsolute(res.path) || res.path.length > 4096) {
     throw new AgentHostError('the agent host sent a malformed path')
   }
@@ -201,7 +322,8 @@ export async function agentList(
 ): Promise<{ entries: FsEntry[]; truncated: boolean }> {
   const max = Math.max(0, Math.min(opts.max ?? 10_000, 100_000))
   if (!isAgentUserMode()) return listDirLocal(dir, max)
-  const res = await activeAgentHost().client.request({ op: 'fs.list', path: dir, max })
+  if (isAgentPoolMode() && poolSpot(dir)?.kind === 'structural') return listStructural(dir, max)
+  const res = await ask(dir, { op: 'fs.list', path: dir, max })
   if (!Array.isArray(res.entries) || !res.entries.every(isFsEntry)) {
     throw new AgentHostError('the agent host sent a malformed listing')
   }

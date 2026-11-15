@@ -41,6 +41,7 @@ import {
   noteCallEnd,
   noteCallStart,
   desktopDriverListingEnv,
+  pooledConnectorRefusal,
   type AgentBrowserSpawn,
 } from './agentBrowsers'
 import { maskFilledValues } from '../logins/filledValues'
@@ -416,6 +417,11 @@ async function performConnect(
     launch.transport === 'stdio'
       ? resolveConnectorCredentials(def.slug, def.authInputs ?? [])
       : null
+  const refusal =
+    launch.transport === 'stdio'
+      ? pooledConnectorRefusal(def.displayName, declared, Boolean(launch.perAgentDisplay))
+      : null
+  if (refusal) throw new Error(refusal)
   const asAgent = declared ? agentUserConnectorStart('connector', declared) : null
 
   const plan: ConnectorSpawnPlan =

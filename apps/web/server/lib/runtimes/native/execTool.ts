@@ -212,7 +212,7 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
         // program has to pass more before this server looks at it at all (see
         // `resolveAgentProgram`); a refusal says why, so the model can adapt.
         const forAgent = isAgentUserMode()
-          ? await resolveAgentProgram(verdict.program, childPath())
+          ? await resolveAgentProgram(verdict.program, childPath(), deps.agentId)
           : null
         if (forAgent && !forAgent.ok) return { output: forAgent.message, isError: true }
         const resolved = forAgent
@@ -297,7 +297,12 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
         }
 
         try {
-          const res = await runApprovedCommand({ argv: finalArgv, cwd, signal })
+          const res = await runApprovedCommand({
+            argv: finalArgv,
+            cwd,
+            signal,
+            agentId: deps.agentId,
+          })
           return { output: describe(res), isError: res.exitCode !== 0 }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
