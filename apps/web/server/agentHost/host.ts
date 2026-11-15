@@ -29,6 +29,19 @@ import {
   writeAtomic,
 } from './fsOps'
 import {
+  beneathAppend,
+  beneathAvailable,
+  beneathList,
+  beneathMkdir,
+  beneathRead,
+  beneathRealpath,
+  beneathRename,
+  beneathRm,
+  beneathRmdir,
+  beneathStat,
+  beneathWrite,
+} from './beneath'
+import {
   AGENT_HOST_PROTOCOL_VERSION,
   MAX_LIST_REPLY_CHARS,
   MAX_READ_BYTES,
@@ -116,6 +129,86 @@ function assertNoLinkBelow(p: string, root: string): void {
         code: 'EACCES',
       })
     }
+  }
+}
+
+/** The parts of `p` below the share's spelled root; refused outside it. */
+function partsBelow(p: string, root: string): string[] {
+  const rel = path.relative(root, p)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw Object.assign(new Error(`${p} is outside its share`), { code: 'EACCES' })
+  }
+  return rel.split(path.sep).filter(Boolean)
+}
+
+/** A share's `fs.*` request, carried out through folder descriptors (Linux). */
+async function beneathOp(
+  f: Record<string, unknown>,
+  root: string,
+  realRoot: string,
+): Promise<Record<string, unknown>> {
+  const parts = (key: string): string[] => partsBelow(String(f[key]), root)
+  const mode = Number(f['mode']) & 0o777
+  switch (f['op']) {
+    case 'fs.read': {
+      const max = Number(f['maxBytes'])
+      const off = Number(f['offset'])
+      try {
+        const r = beneathRead(
+          realRoot,
+          parts('path'),
+          Number.isFinite(max) && max >= 0 ? max : MAX_READ_BYTES,
+          Number.isInteger(off) && off > 0 ? off : 0,
+        )
+        return {
+          missing: false,
+          data: r.data.toString('base64'),
+          size: r.size,
+          truncated: r.truncated,
+        }
+      } catch (err) {
+        if (errorCode(err) === 'ENOENT') return { missing: true }
+        throw err
+      }
+    }
+    case 'fs.write': {
+      const data = Buffer.from(String(f['data'] ?? ''), 'base64')
+      if (data.length > MAX_WRITE_BYTES)
+        throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
+      beneathWrite(realRoot, parts('path'), data, mode, true)
+      return {}
+    }
+    case 'fs.append': {
+      const data = Buffer.from(String(f['data'] ?? ''), 'base64')
+      if (data.length > MAX_WRITE_BYTES)
+        throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
+      beneathAppend(realRoot, parts('path'), data, mode)
+      return {}
+    }
+    case 'fs.mkdir':
+      beneathMkdir(realRoot, parts('path'), mode)
+      return {}
+    case 'fs.rm':
+      await beneathRm(realRoot, parts('path'))
+      return {}
+    case 'fs.rmdir':
+      beneathRmdir(realRoot, parts('path'))
+      return {}
+    case 'fs.rename':
+      beneathRename(realRoot, parts('from'), parts('to'))
+      return {}
+    case 'fs.stat':
+      return { stat: beneathStat(realRoot, parts('path')) }
+    case 'fs.realpath':
+      return { path: beneathRealpath(realRoot, parts('path')) }
+    case 'fs.list': {
+      const max = Math.max(0, Math.min(Number(f['max']) || 0, 100_000))
+      return beneathList(realRoot, parts('path'), max)
+    }
+    default:
+      throw Object.assign(new Error(`${String(f['op'])} is not a share's file operation`), {
+        code: 'ENOSYS',
+      })
   }
 }
 
@@ -599,8 +692,19 @@ export function serveConnection(
         for (const p of paths)
           assertWithin(p, f['within'], f['op'] === 'fs.list' || f['op'] === 'fs.realpath')
         confined = fs.realpathSync(f['within'])
-        // Removing and renaming go by name (Node has no openat): no part of
-        // the path below the root may be a link when they start.
+        if (beneathAvailable()) {
+          // Linux: every step below the root through folder descriptors, so a
+          // folder a teammate swaps for a link mid-operation cannot redirect it.
+          return reply(id, await beneathOp(f, f['within'], confined))
+        }
+        if (process.platform === 'linux') {
+          throw Object.assign(
+            new Error("a share's file needs /proc/self/fd, which this system does not have"),
+            { code: 'EACCES' },
+          )
+        }
+        // Elsewhere (a user per agent runs on Linux only; this is for tests),
+        // by name, checked before and after.
         if (f['op'] === 'fs.rm' || f['op'] === 'fs.rename' || f['op'] === 'fs.rmdir') {
           for (const p of paths) assertNoLinkBelow(p, f['within'])
         }

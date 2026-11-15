@@ -24,6 +24,8 @@ EXTERNALS=(--external:better-sqlite3 --external:ws --external:pino --external:pi
   --log-level=warning "${EXTERNALS[@]}" --outfile="$OUT/proof.cjs"
 "$ESBUILD" "$HERE/poolProof.ts" --bundle --platform=node --format=cjs --target=node22 \
   --log-level=warning "${EXTERNALS[@]}" --outfile="$OUT/pool-proof.cjs"
+"$ESBUILD" "$HERE/beneathProof.ts" --bundle --platform=node --format=cjs --target=node22 \
+  --log-level=warning --outfile="$OUT/beneath-proof.cjs"
 if [ -f "$ROOT/apps/web/dist/server.js" ]; then cp "$ROOT/apps/web/dist/server.js" "$OUT/server.js"; fi
 cp "$HERE/fake-runtime.sh" "$HERE/fake-mcp.mjs" "$HERE/serverBoot.mjs" "$OUT/"
 cp "$ROOT/apps/web/server/agentHost/clawboo-launch.sh" "$OUT/clawboo-launch"
@@ -110,6 +112,9 @@ AS_SERVER='cd /home/clawboo && exec setpriv --reuid=10001 --regid=10001 --init-g
 
 scenario "pool: each agent its own user; homes, profiles, displays, signals and team folders walled" \
   docker run "${COMMON[@]}" "${POOL[@]}" "$IMAGE" sh -c "$AS_SERVER node /proof/pool-proof.cjs"
+
+scenario "pool: share operations stay beneath the share's root, even through a swapped folder" \
+  docker run "${COMMON[@]}" --user 10001 "$IMAGE" node /proof/beneath-proof.cjs
 
 scenario "pool: a pool user whose home another can list makes the check refuse" \
   docker run "${COMMON[@]}" "${POOL[@]}" "$IMAGE" sh -c \

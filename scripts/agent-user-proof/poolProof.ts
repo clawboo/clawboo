@@ -25,7 +25,12 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { agentMkdir, agentWriteFile } from '../../apps/web/server/lib/agentUser/agentFs'
+import {
+  agentMkdir,
+  agentRemove,
+  agentWriteFile,
+} from '../../apps/web/server/lib/agentUser/agentFs'
+import { runAsAgent } from '../../apps/web/server/lib/agentUser/poolRoute'
 import {
   releaseDeleted,
   releasesSettled,
@@ -289,6 +294,37 @@ async function main(): Promise<void> {
     path.dirname(path.dirname(path.dirname(runtimeIdentityHomePath('codex', 'A')))),
   ])
   check("B cannot list A's home, though they share a team", aHomeFromB.code !== 0, aHomeFromB)
+
+  // A teammate swaps a folder of the team for a link into another teammate's
+  // home: what the server then does there on that teammate's behalf goes
+  // nowhere near that home.
+  const t1tasks = path.join(t1, 'tasks')
+  await agentMkdir(t1tasks)
+  const aHome = path.dirname(path.dirname(path.dirname(runtimeIdentityHomePath('codex', 'A'))))
+  await agentWriteFile(path.join(aHome, 'keep.txt'), 'mine')
+  const swap = await runAs('B', 'sh', [
+    '-c',
+    `mv ${JSON.stringify(t1tasks)} ${JSON.stringify(`${t1tasks}.old`)} && ln -s ${JSON.stringify(aHome)} ${JSON.stringify(t1tasks)}`,
+  ])
+  check("B swaps the team's tasks folder for a link into A's home", swap.code === 0, swap)
+  const codeOf = (p: Promise<unknown>): Promise<string | null> =>
+    p.then(
+      () => null,
+      (e: unknown) => (e as { code?: string }).code ?? 'ERR',
+    )
+  const wrote = await codeOf(
+    runAsAgent('A', () => agentWriteFile(path.join(t1tasks, 'planted.sh'), 'x')),
+  )
+  const removed = await codeOf(runAsAgent('A', () => agentRemove(path.join(t1tasks, 'keep.txt'))))
+  const aStill = await runAs('A', 'sh', [
+    '-c',
+    `test ! -e ${JSON.stringify(path.join(aHome, 'planted.sh'))} && test -f ${JSON.stringify(path.join(aHome, 'keep.txt'))}`,
+  ])
+  check(
+    "writing and removing through it as A are refused, and A's home is untouched",
+    wrote !== null && removed !== null && aStill.code === 0,
+    { wrote, removed, aStill },
+  )
 
   // A deleted agent's user is wiped before the next agent gets it, and a
   // deleted team's folder is gone before its group is handed out again.

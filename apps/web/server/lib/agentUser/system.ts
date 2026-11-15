@@ -111,71 +111,101 @@ export function getentRun(args: string[]): string | null {
   }
 }
 
+/** Whether stderr from `<switch> -u <user> -- ...` is the switch refusing
+ *  (sudo's "a password is required", "Sorry, user ... is not allowed"). */
+export function switchRefused(stderr: string): boolean {
+  return (
+    /^(sudo|doas):/m.test(stderr) ||
+    /Sorry, user /.test(stderr) ||
+    /not allowed to execute/.test(stderr)
+  )
+}
+
+const SWITCH_ENV = (): NodeJS.ProcessEnv => ({
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin',
+})
+
 /**
  * Stop every process of one pool user (`kill -KILL -1` as that user, three
  * times), without blocking: one agent's stop must not hold up the server.
- * Resolves once done; rejects when the switch itself failed every time (no
- * sudo, a rule gone), since then nothing was stopped. `kill` finding nothing
- * left to stop is not a failure.
+ * First the switch is tried with `true`, which cannot fail on its own: a
+ * switch that will not run it cannot run `kill` either, and that rejects
+ * (nothing was stopped). `kill` finding nothing left to stop is no failure,
+ * but the switch refusing `kill` itself is.
  */
 export function reapPoolUser(
   sw: AgentUserConfig['switch'],
   user: string,
   run: typeof execFile = execFile,
 ): Promise<void> {
-  const once = (): Promise<string | null> =>
+  const call = (args: string[]): Promise<{ failed: string | null }> =>
     new Promise((resolve) => {
       run(
         sw,
-        ['-n', '-u', user, '--', 'kill', '-KILL', '-1'],
-        { timeout: 5_000, env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin' } },
-        (err, _stdout, stderr) => {
+        ['-n', '-u', user, '--', ...args],
+        { timeout: 5_000, env: SWITCH_ENV() },
+        (err, _out, stderr) => {
           const text = String(stderr ?? '')
-          const code = (err as { code?: unknown } | null)?.code
-          const switchFailed =
-            !!err &&
-            (typeof code === 'string' ||
-              /^(sudo|doas):/m.test(text) ||
-              (err as { killed?: boolean }).killed === true)
-          resolve(switchFailed ? text.trim() || (err as Error).message : null)
+          if (!err) return resolve({ failed: null })
+          const c = (err as { code?: unknown }).code
+          if (
+            typeof c === 'string' ||
+            (err as { killed?: boolean }).killed ||
+            (err as { signal?: unknown }).signal
+          ) {
+            return resolve({ failed: text.trim() || (err as Error).message })
+          }
+          resolve({
+            failed: switchRefused(text)
+              ? text.trim()
+              : args[0] === 'true'
+                ? text.trim() || `exited ${String(c)}`
+                : null,
+          })
         },
       )
     })
   return (async () => {
-    const failures: string[] = []
+    const probe = await call(['true'])
+    if (probe.failed) throw new Error(`could not stop the processes of ${user}: ${probe.failed}`)
     for (let i = 0; i < 3; i++) {
-      const why = await once()
-      if (why) failures.push(why)
-    }
-    if (failures.length === 3) {
-      throw new Error(`could not stop the processes of ${user}: ${failures[0]}`)
+      const r = await call(['kill', '-KILL', '-1'])
+      if (r.failed) throw new Error(`could not stop the processes of ${user}: ${r.failed}`)
     }
   })()
 }
 
 /**
  * `kill -KILL -1` as `user`, three times, blocking (boot and exit). Returns
- * why the switch could not run it every time (sudo missing, a rule that does
- * not allow it), or null; `kill` finding nothing left to stop is no failure.
+ * why it could not be done (the switch will not run `true` as that user, or
+ * refuses `kill`), or null; `kill` finding nothing left to stop is no failure.
  */
 export function reapUserSync(
   sw: AgentUserConfig['switch'],
   user: string,
   run: typeof spawnSync = spawnSync,
 ): string | null {
-  const failures: string[] = []
-  for (let i = 0; i < 3; i++) {
-    const res = run(sw, ['-n', '-u', user, '--', 'kill', '-KILL', '-1'], {
+  const call = (args: string[]): { status: number | null; failed: string | null } => {
+    const res = run(sw, ['-n', '-u', user, '--', ...args], {
       encoding: 'utf8',
       timeout: 5_000,
-      env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin:/usr/sbin:/sbin' },
+      env: SWITCH_ENV(),
     })
     const stderr = String(res.stderr ?? '')
-    if (res.error) failures.push(res.error.message)
-    else if (res.signal) failures.push(`${sw} was stopped by ${res.signal}`)
-    else if (/^(sudo|doas):/m.test(stderr)) failures.push(stderr.trim())
+    if (res.error) return { status: null, failed: res.error.message }
+    if (res.signal) return { status: null, failed: `${sw} was stopped by ${res.signal}` }
+    if (res.status !== 0 && switchRefused(stderr))
+      return { status: res.status, failed: stderr.trim() }
+    return { status: res.status, failed: null }
   }
-  return failures.length === 3 ? failures[0]! : null
+  const probe = call(['true'])
+  if (probe.failed) return probe.failed
+  if (probe.status !== 0) return `${sw} could not run a command as ${user} (exit ${probe.status})`
+  for (let i = 0; i < 3; i++) {
+    const r = call(['kill', '-KILL', '-1'])
+    if (r.failed) return r.failed
+  }
+  return null
 }
 
 /**
