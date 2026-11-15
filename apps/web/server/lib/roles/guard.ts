@@ -29,6 +29,7 @@ import { getDb } from '../db'
 import {
   accessEnded,
   guestTeams,
+  isGuestOnly,
   permissionsOf,
   type PersonAccess,
   type Permission,
@@ -232,7 +233,34 @@ export function decideRole(
     if (key !== null && bodyField(req, key) === undefined) continue
     if (!inTeams(reach)) return { ok: false, reason: 'outside-teams' }
   }
+  if (rule.guestCheck) {
+    const onTeams = (teamId: string | null): boolean => teamId !== null && teams.has(teamId)
+    if (!rule.guestCheck(req, db, onTeams)) return { ok: false, reason: 'outside-teams' }
+  }
   return { ok: true, scope: { teams } }
+}
+
+/** The longest a timer may wait (Node clamps anything longer to 1 ms). */
+const MAX_TIMER_MS = 2 ** 31 - 1
+
+/**
+ * End a guest's response when their access ends. A stream (a chat's live
+ * tail, say) passes the guard once and then stays open, so without this it
+ * would go on past `access_until`. Destroying the response closes the
+ * connection, which runs the stream's own cleanup. A deadline further off than
+ * a timer can wait ends the stream at the timer's limit instead, and the
+ * client's reconnect is checked afresh.
+ */
+function endAtGuestDeadline(res: Response, access: PersonAccess, now: number): void {
+  if (!isGuestOnly(access) || access.until === null) return
+  const wait = Math.max(0, Math.min(access.until * 1000 - now, MAX_TIMER_MS))
+  const timer = setTimeout(() => {
+    if (!res.writableEnded) res.destroy()
+  }, wait)
+  timer.unref?.()
+  const clear = (): void => clearTimeout(timer)
+  res.on('finish', clear)
+  res.on('close', clear)
 }
 
 /** The rule a route's guard applies, kept on the guard so a test can read the
@@ -252,6 +280,7 @@ export function roleGuard(rule: RouteRule): RequestHandler {
       return
     }
     if (decision.scope) req.roleScope = decision.scope
+    if (req.access) endAtGuestDeadline(res, req.access, Date.now())
     next()
   }
   Object.defineProperty(guard, GUARD_RULE, { value: rule })

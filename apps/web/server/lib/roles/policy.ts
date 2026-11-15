@@ -170,6 +170,10 @@ export function accessFromClaims(
     until = rawUntil
   }
 
+  // A guest's access always ends: a guest-only token without its end is refused,
+  // rather than read as access for as long as the sign-in front keeps minting.
+  if (roles.length === 1 && roles[0] === 'guest' && until === null) return null
+
   const label = cleanText(claims[ROLE_LABEL_CLAIM], MAX_LABEL_CHARS)
   return { roles, approve, teams, until, label, service }
 }
@@ -179,9 +183,10 @@ export function isGuestOnly(access: PersonAccess): boolean {
   return access.roles.length === 1 && access.roles[0] === 'guest'
 }
 
-/** True when a guest's `access_until` has passed. Never true for anyone else. */
+/** True when a guest's `access_until` has passed, or a guest has none (which the
+ *  token check already refuses). Never true for anyone else. */
 export function accessEnded(access: PersonAccess, nowMs: number): boolean {
-  return isGuestOnly(access) && access.until !== null && nowMs >= access.until * 1000
+  return isGuestOnly(access) && (access.until === null || nowMs >= access.until * 1000)
 }
 
 /** Everything the person may do right now. Empty for a token with no known role

@@ -145,9 +145,21 @@ describe('roles enforced', () => {
 
   it('limits a guest to the teams in their token', async () => {
     await start('enforce')
-    const guest = { role: 'guest', teams: ['team-a'], roleLabel: 'Expert' }
+    const guest = {
+      role: 'guest',
+      teams: ['team-a'],
+      roleLabel: 'Expert',
+      access_until: Math.floor(Date.now() / 1000) + 3600,
+    }
     expect((await send('GET', '/api/teams/team-a/rooms', guest)).status).toBe(200)
     expect((await send('GET', '/api/teams/team-b/rooms', guest)).status).toBe(403)
+  })
+
+  it('refuses a guest token with no end, as it refuses any malformed one', async () => {
+    await start('enforce')
+    const res = await send('GET', '/api/teams/team-a/rooms', { role: 'guest', teams: ['team-a'] })
+    expect(res.status).toBe(401)
+    expect(res.body['reason']).toBe('claims')
   })
 
   it('refuses a token whose claims beside the role are malformed, as the lane refuses any bad token', async () => {

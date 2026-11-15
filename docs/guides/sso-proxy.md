@@ -225,23 +225,23 @@ Seeing and doing the work covers the teams, agents, board, chats, rooms, task fo
 
 - **Roles add up.** A role claim that lists `owner` and `operator` gets what both get. A word Clawboo does not know, such as your provider's `offline_access`, is ignored. A token with no role Clawboo knows reaches only `GET /api/access/identity`, which says so.
 - **An answer that lasts is the owner's.** "Allow always" on an approval, and a connector grant made to act without asking (`approvalPolicy: "never"`), need the owner, so an operator can make agents ask more but never less. A grant that never asks needs both roles, owner and operator.
-- **A guest's limits** hold while guest is the person's one role. A guest reaches a route that names one of their teams, an agent or a task on one of them, or a chat of one of them, and four lists that Clawboo cuts down to their teams: `GET /api/teams`, `GET /api/agents`, `GET /api/board` and `GET /api/tools/approvals`. What a guest's write names in its body must be on one of their teams too: the parent of a new task, the agent it is for, the task it waits on. Everything else is refused, and so is every request once `access_until` has passed.
+- **A guest's limits** hold while guest is the person's one role. A guest reaches a route that names one of their teams, an agent or a task on one of them, or a chat of one of them, and four lists that Clawboo cuts down to their teams: `GET /api/teams`, `GET /api/agents`, `GET /api/board` and `GET /api/tools/approvals`. What a guest's write names in its body must be on one of their teams too: the parent of a new task, the agent it is for, the task it waits on. So must the work a guest's cancel or close carries along: the tasks waiting on a cancelled one, and the open work under a request. Everything else is refused, and so is every request once `access_until` has passed. A stream a guest has open, such as a chat's live view, closes then too.
 - **The Gateway WebSocket** opens only for a person who both runs the server and answers approvals, standing ones included: an `owner` who is an `operator` too. OpenClaw's own commands travel on it, its approvals and "Allow always" among them, and are not checked one by one. Where the owner and the operator are different people, OpenClaw's Gateway is out of reach while roles are enforced.
 - **What decides whether anyone is asked needs both roles too.** An agent's command posture (`POST /api/exec-settings`) and OpenClaw's own settings (`PATCH /api/system/openclaw-config`, `POST /api/system/configure-openclaw`, `POST /api/system/auto-configure-openclaw`) can make agents ask less, so they need a person who is owner and operator. Bringing back a revoked grant that never asks needs the owner.
 - **A route Clawboo does not list** is the operator's.
 
 The claims beside the role:
 
-| Claim          | Type                          | What it sets                                                                       |
-| -------------- | ----------------------------- | ---------------------------------------------------------------------------------- |
-| `approve`      | boolean                       | A member may answer approvals                                                      |
-| `teams`        | list of team ids              | The teams a guest reaches: at most 64 ids of at most 128 characters. None: no team |
-| `access_until` | seconds since 1970 (a number) | When a guest's access ends. Not the token's own `exp`                              |
-| `roleLabel`    | text                          | How the person's role reads on screen, such as Expert. Never used for a decision   |
-| `svc`          | boolean                       | The token is a program's, not a person's (see below)                               |
-| `rv`           | `1`                           | The version of these claims. Left out, it reads as 1                               |
+| Claim          | Type                          | What it sets                                                                         |
+| -------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `approve`      | boolean                       | A member may answer approvals                                                        |
+| `teams`        | list of team ids              | The teams a guest reaches: at most 64 ids of at most 128 characters. None: no team   |
+| `access_until` | seconds since 1970 (a number) | When a guest's access ends: a guest's token must carry it. Not the token's own `exp` |
+| `roleLabel`    | text                          | How the person's role reads on screen, such as Expert. Never used for a decision     |
+| `svc`          | boolean                       | The token is a program's, not a person's (see below)                                 |
+| `rv`           | `1`                           | The version of these claims. Left out, it reads as 1                                 |
 
-The whole token may take at most 16 KiB. A claim that is there but malformed refuses the token with `claims`, as any bad token is: a `teams` that is not a list of ids, or lists more than 64, an `approve` or `svc` that is not true or false, or an `rv` this version of Clawboo does not know. For a guest, a `teams` left out or empty reaches no team.
+The whole token may take at most 16 KiB. A claim that is there but malformed refuses the token with `claims`, as any bad token is: a `teams` that is not a list of ids, or lists more than 64, an `approve` or `svc` that is not true or false, or an `rv` this version of Clawboo does not know. For a guest, a `teams` left out or empty reaches no team, and a token with no `access_until` is refused.
 
 **A service token** (`"svc": true`) is for a program of your sign-in front's own, such as its health checks or its scheduler, rather than for a person. It gets its role's permissions, but it is never a person: nothing records it as one, every write that needs a person refuses it, and it never answers or makes an approval, whatever its role. It never opens the Gateway WebSocket. While roles are off, `svc` is not read.
 

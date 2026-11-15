@@ -13,7 +13,17 @@
 // in the path, an agent's team, a task's team, a list the handler filters).
 // Anything else is refused for a guest, whatever their permissions say.
 
-import { getGrant } from '@clawboo/db'
+import {
+  capabilityGrants,
+  getDependents,
+  getGrant,
+  getTask,
+  grantKey,
+  mainTaskState,
+  type ClawbooDb,
+  type GrantIdentity,
+} from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request } from 'express'
 
 import { getDb } from '../db'
@@ -68,6 +78,10 @@ export interface RouteRule {
    *  in `guestMayNotSend` refuses a guest's request outright. */
   guestAlso?: readonly GuestReach[]
   guestMayNotSend?: readonly string[]
+  /** What a guest's request reaches beyond the task it names, such as the
+   *  tasks a cancel carries along: false refuses it. `inTeams` says whether a
+   *  team is one of the guest's. */
+  guestCheck?: (req: Request, db: ClawbooDb, inTeams: (teamId: string | null) => boolean) => boolean
   /** A spawned runtime's own call on one of the four MCP mounts, which names no
    *  person: the access gate already let it in by its attach token. */
   runtime?: true
@@ -108,6 +122,60 @@ const ASKS_LESS = (): Need => 'standing'
 function standingIf(field: string, ...values: string[]) {
   return (req: Request): Need | null =>
     values.includes(String(bodyOf(req)[field])) ? 'standing' : null
+}
+
+/** A grant sent without a policy keeps the one it has, so re-granting a revoked
+ *  grant that never asks brings it back that way: the owner's to do, as the
+ *  resume is. */
+function grantNeverAsks(req: Request): Need | null {
+  const body = bodyOf(req)
+  if (body['approvalPolicy'] === 'never') return 'standing'
+  if (body['approvalPolicy'] !== undefined) return null
+  const { subjectKind, capabilityKind } = body
+  if (typeof subjectKind !== 'string' || typeof capabilityKind !== 'string') return null
+  const text = (key: string): string | null =>
+    typeof body[key] === 'string' ? (body[key] as string) : null
+  const identity = {
+    subjectKind,
+    subjectId: text('subjectId'),
+    capabilityKind,
+    connectorId: text('connectorId'),
+    capabilityId: text('capabilityId'),
+  } as GrantIdentity
+  const row = getDb()
+    .select({ approvalPolicy: capabilityGrants.approvalPolicy })
+    .from(capabilityGrants)
+    .where(eq(capabilityGrants.grantKey, grantKey(identity)))
+    .get()
+  return row?.approvalPolicy === 'never' ? 'standing' : null
+}
+
+/** The tasks a cancel or a close carries along with the one it names: the
+ *  waiting dependents a cancel cancels, and the open work under a request that
+ *  closes. A guest's move reaches them all, so they must all be on the guest's
+ *  teams. */
+function cascadeStaysInTeams(
+  req: Request,
+  db: ClawbooDb,
+  inTeams: (teamId: string | null) => boolean,
+  status: unknown,
+): boolean {
+  const taskId = typeof req.params['taskId'] === 'string' ? req.params['taskId'] : ''
+  if (status !== 'cancelled' && status !== 'done') return true
+  const reached: Array<string | null> = []
+  if (status === 'cancelled') {
+    // getDependents reads raw rows (snake_case columns), so each one's team comes
+    // from its mapped row.
+    for (const dep of getDependents(db, taskId)) {
+      if (dep.status === 'todo' || dep.status === 'backlog') {
+        reached.push(getTask(db, dep.id)?.teamId ?? null)
+      }
+    }
+  }
+  for (const id of mainTaskState(db, taskId)?.subtaskIds ?? []) {
+    reached.push(getTask(db, id)?.teamId ?? null)
+  }
+  return reached.every(inTeams)
 }
 
 /** POST /api/capabilities/:action is four routes in one. */
@@ -324,7 +392,11 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
     guest: task(),
     guestAlso: [{ by: 'body-agent', key: 'assigneeAgentId' }],
   },
-  'PATCH /api/board/:taskId': work(task()),
+  'PATCH /api/board/:taskId': {
+    need: 'work',
+    guest: task(),
+    guestCheck: (req, db, inTeams) => cascadeStaysInTeams(req, db, inTeams, bodyOf(req)['status']),
+  },
   // A comment can name the agent it is from; a guest's names one of their teams.
   'POST /api/board/:taskId/comments': {
     need: 'work',
@@ -354,7 +426,11 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
     guest: task(),
     guestAlso: [{ by: 'body-task', key: 'dependsOnTaskId' }],
   },
-  'POST /api/board/:taskId/cancel-dependents': work(task()),
+  'POST /api/board/:taskId/cancel-dependents': {
+    need: 'work',
+    guest: task(),
+    guestCheck: (req, db, inTeams) => cascadeStaysInTeams(req, db, inTeams, 'cancelled'),
+  },
   'POST /api/board/:taskId/workspace/handoff': work(task()),
   'GET /api/board/:taskId/workspace/detail': see(task()),
   'GET /api/board/:taskId/preview': see(task()),
@@ -411,7 +487,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'PUT /api/connectors/:slug/config': setup,
   'GET /api/grants': accounts,
   // A grant that never asks lets agents act on an account without anyone's yes.
-  'POST /api/grants': { need: 'setup', more: standingIf('approvalPolicy', 'never') },
+  'POST /api/grants': { need: 'setup', more: grantNeverAsks },
   'POST /api/grants/:id/revoke': accounts,
   // Undoing a revoke brings back what the grant allowed, a grant that never asks
   // included: that one is the owner's to bring back.

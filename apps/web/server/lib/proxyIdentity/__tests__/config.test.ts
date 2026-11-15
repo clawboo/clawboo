@@ -579,6 +579,11 @@ describe('roles', () => {
     expect(refusal()).toMatch(/proxyIdentityRoles is enforce but proxyIdentity is on/)
   })
 
+  it('refuse to start with no lane at all, rather than apply to nobody', () => {
+    vi.stubEnv('CLAWBOO_PROXY_IDENTITY_ROLES', 'enforce')
+    expect(refusal()).toMatch(/proxyIdentityRoles is enforce but proxyIdentity is off/)
+  })
+
   it('refuse a setting they do not know', () => {
     stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'strict' })
     expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)

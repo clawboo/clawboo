@@ -267,6 +267,16 @@ function textSetting(key: OperatorKey): string | null {
  */
 export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
   const mode = effectiveSetting('proxyIdentity').value as ProxyIdentityMode
+  // Roles decide what a person may do only when every request names one. Checked
+  // before the lane's own `off`, so roles asked for with no lane at all stop the
+  // server rather than quietly applying to nobody.
+  const roles = effectiveSetting('proxyIdentityRoles').value as ProxyIdentityRoles
+  if (roles === 'enforce' && mode !== 'required') {
+    fail(
+      `proxyIdentityRoles is enforce but proxyIdentity is ${mode}. Set proxyIdentity to ` +
+        'required, so that every request names a person whose role can be checked.',
+    )
+  }
   if (mode === 'off') return null
 
   const lane = 'The proxy identity lane'
@@ -317,16 +327,6 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
     ['proxyIdentityRoleClaim', roleClaim],
   ] as const) {
     if (!CLAIM_PATH.test(value)) fail(`${key} must be a claim name such as name or role.`)
-  }
-
-  // Roles decide what a person may do only when every request names one: in
-  // `on` a request without a token still gets in, with no person and no role.
-  const roles = effectiveSetting('proxyIdentityRoles').value as ProxyIdentityRoles
-  if (roles === 'enforce' && mode !== 'required') {
-    fail(
-      'proxyIdentityRoles is enforce but proxyIdentity is on. Set proxyIdentity to required, ' +
-        'so that every request names a person whose role can be checked.',
-    )
   }
 
   return {

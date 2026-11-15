@@ -11,6 +11,8 @@ import {
   agents,
   createRoom,
   createTask,
+  linkDep,
+  revokeGrant,
   taskQuestions,
   teams,
   upsertGrant,
@@ -164,6 +166,29 @@ describe('decideRole', () => {
         expect(decide(key, { access: access(['owner']) }).ok, key).toBe(false)
         expect(decide(key, { access: access(['owner', 'operator']) }).ok, key).toBe(true)
       }
+    })
+
+    it('re-grants a revoked grant that never asks only with the owner, even with no policy sent', () => {
+      const identity = {
+        subjectKind: 'agent',
+        subjectId: 'a1',
+        capabilityKind: 'connector',
+        connectorId: 'c-regrant',
+        capabilityId: null,
+      } as const
+      const id = upsertGrant(db, {
+        ...identity,
+        mode: 'write',
+        approvalPolicy: 'never',
+        origin: 'operator',
+      }).id
+      revokeGrant(db, id, null)
+      const regrant = (body: Record<string, unknown>, roles: Role[]) =>
+        decide('POST /api/grants', { access: access(roles), body: { ...identity, ...body } }).ok
+      expect(regrant({}, ['operator'])).toBe(false)
+      expect(regrant({}, ['owner', 'operator'])).toBe(true)
+      expect(regrant({ approvalPolicy: 'risk' }, ['operator'])).toBe(true)
+      expect(regrant({ connectorId: 'c-new' }, ['operator'])).toBe(true)
     })
 
     it('brings back a revoked grant that never asks only with the owner', () => {
@@ -411,6 +436,48 @@ describe('decideRole', () => {
       ).toBe(false)
     })
 
+    it('refuses a cancel or a close that would carry along work of another team', () => {
+      // A task of another team waits on the guest's task: cancelling it would cancel that one.
+      linkDep(db, taskInOther, taskInT)
+      expect(
+        decide('POST /api/board/:taskId/cancel-dependents', {
+          access: guest,
+          params: { taskId: taskInT },
+        }),
+      ).toEqual({ ok: false, reason: 'outside-teams' })
+      const move = (status: string) =>
+        decide('PATCH /api/board/:taskId', {
+          access: guest,
+          params: { taskId: taskInT },
+          body: { status },
+        }).ok
+      expect(move('cancelled')).toBe(false)
+      expect(move('in_progress')).toBe(true)
+
+      // A request whose open work sits on another team cannot be closed by a guest.
+      const request = createTask(db, { title: 'Menu photos', teamId: 'T', mainTaskLead: 'a1' }).id
+      createTask(db, { title: 'Ad copy', teamId: 'OTHER', parentTaskId: request })
+      const close = (status: string) =>
+        decide('PATCH /api/board/:taskId', {
+          access: guest,
+          params: { taskId: request },
+          body: { status },
+        }).ok
+      expect(close('done')).toBe(false)
+      expect(close('cancelled')).toBe(false)
+    })
+
+    it('lets a guest cancel work whose dependents are all on their team', () => {
+      const second = createTask(db, { title: 'Edit photos', teamId: 'T' }).id
+      linkDep(db, second, taskInT)
+      expect(
+        decide('POST /api/board/:taskId/cancel-dependents', {
+          access: guest,
+          params: { taskId: taskInT },
+        }).ok,
+      ).toBe(true)
+    })
+
     it('pauses only what is on their team', () => {
       expect(
         decide('POST /api/pauses', { access: guest, body: { kind: 'agent', id: 'a1' } }).ok,
@@ -510,7 +577,10 @@ describe('roleGuard', () => {
     } as unknown as Request
     let status = 200
     let body: unknown
+    const heard: Record<string, () => void> = {}
+    const destroy = vi.fn()
     const res = {
+      writableEnded: false,
       status(code: number) {
         status = code
         return this
@@ -522,11 +592,50 @@ describe('roleGuard', () => {
         body = b
         return this
       },
+      on(event: string, fn: () => void) {
+        heard[event] = fn
+        return this
+      },
+      destroy,
     } as unknown as Response
     const next = vi.fn() as unknown as NextFunction
     roleGuard(ruleToUse)(req, res, next)
-    return { req, status, body, next: next as unknown as ReturnType<typeof vi.fn> }
+    return { req, status, body, next: next as unknown as ReturnType<typeof vi.fn>, heard, destroy }
   }
+
+  describe("a guest's open stream", () => {
+    afterEach(() => vi.useRealTimers())
+
+    it('is closed when their access ends', () => {
+      vi.useFakeTimers()
+      const until = Date.now() / 1000 + 2
+      const out = run(
+        'enforce',
+        { need: 'see', guest: { by: 'any' } },
+        access(['guest'], { teams: ['T'], until }),
+      )
+      expect(out.next).toHaveBeenCalledOnce()
+      vi.advanceTimersByTime(1_999)
+      expect(out.destroy).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(2)
+      expect(out.destroy).toHaveBeenCalledOnce()
+    })
+
+    it('is left alone once the response has finished, and for anyone but a guest', () => {
+      vi.useFakeTimers()
+      const until = Date.now() / 1000 + 2
+      const done = run(
+        'enforce',
+        { need: 'see', guest: { by: 'any' } },
+        access(['guest'], { teams: ['T'], until }),
+      )
+      done.heard['finish']?.()
+      const member = run('enforce', { need: 'see' }, access(['member'], { until }))
+      vi.advanceTimersByTime(5_000)
+      expect(done.destroy).not.toHaveBeenCalled()
+      expect(member.destroy).not.toHaveBeenCalled()
+    })
+  })
 
   it('passes every request through while roles are off', () => {
     const out = run('off', { need: 'system' }, null)
@@ -545,7 +654,7 @@ describe('roleGuard', () => {
     const out = run(
       'enforce',
       { need: 'see', guest: { by: 'list' } },
-      access(['guest'], { teams: ['T'] }),
+      access(['guest'], { teams: ['T'], until: Date.now() / 1000 + 3600 }),
     )
     expect(out.next).toHaveBeenCalledOnce()
     expect(inRoleScope(out.req, 'T')).toBe(true)

@@ -83,14 +83,16 @@ describe('accessFromClaims', () => {
   })
 
   it('takes a team id of up to 128 characters and refuses a longer one', () => {
-    expect(accessFromClaims('guest', { teams: ['t'.repeat(128)] })?.teams).toHaveLength(1)
-    expect(accessFromClaims('guest', { teams: ['t'.repeat(129)] })).toBeNull()
+    const end = { access_until: 1_795_000_000 }
+    expect(accessFromClaims('guest', { teams: ['t'.repeat(128)], ...end })?.teams).toHaveLength(1)
+    expect(accessFromClaims('guest', { teams: ['t'.repeat(129)], ...end })).toBeNull()
   })
 
   it('takes up to 64 teams and refuses more', () => {
     const teams = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`)
-    expect(accessFromClaims('guest', { teams: teams(64) })?.teams).toHaveLength(64)
-    expect(accessFromClaims('guest', { teams: teams(65) })).toBeNull()
+    const end = { access_until: 1_795_000_000 }
+    expect(accessFromClaims('guest', { teams: teams(64), ...end })?.teams).toHaveLength(64)
+    expect(accessFromClaims('guest', { teams: teams(65), ...end })).toBeNull()
   })
 
   it('reads a token without a version as version 1, and refuses one it does not know', () => {
@@ -107,13 +109,23 @@ describe('accessFromClaims', () => {
   })
 
   it("reads a guest's end only from access_until, never from until", () => {
-    expect(accessFromClaims('guest', { until: 1 })?.until).toBeNull()
+    // `until` is not the claim: a guest-only token naming only it has no end, and is refused.
+    expect(accessFromClaims('guest', { until: 1 })).toBeNull()
     expect(accessFromClaims('guest', { access_until: 1 })?.until).toBe(1)
   })
 
+  it('refuses a guest-only token with no end, and reads one for anyone else', () => {
+    expect(accessFromClaims('guest', { teams: ['t-1'] })).toBeNull()
+    expect(accessFromClaims(['member', 'guest'], { teams: ['t-1'] })?.until).toBeNull()
+    expect(accessFromClaims('owner', {})?.until).toBeNull()
+  })
+
   it('cleans a label and drops one that is not text', () => {
-    expect(accessFromClaims('guest', { roleLabel: '  Ex\u0007pert ' })?.label).toBe('Expert')
-    expect(accessFromClaims('guest', { roleLabel: 7 })?.label).toBeNull()
+    const end = { access_until: 1_795_000_000 }
+    expect(accessFromClaims('guest', { roleLabel: '  Ex\u0007pert ', ...end })?.label).toBe(
+      'Expert',
+    )
+    expect(accessFromClaims('guest', { roleLabel: 7, ...end })?.label).toBeNull()
   })
 })
 
@@ -143,7 +155,10 @@ describe('permissionsOf', () => {
   })
 
   it('never lets a guest approve, whatever the token says', () => {
-    expect(perms(access({ roles: ['guest'], approve: true }))).toEqual(['see', 'work'])
+    expect(perms(access({ roles: ['guest'], approve: true, until: NOW / 1000 + 60 }))).toEqual([
+      'see',
+      'work',
+    ])
   })
 
   it('adds roles up', () => {
@@ -187,6 +202,8 @@ describe('permissionsOf', () => {
     ])
     expect(perms(access({ roles: ['guest'], teams: ['t'], until }), NOW)).toEqual([])
     expect(accessEnded(access({ roles: ['guest'], until }), NOW)).toBe(true)
+    // A guest with no end at all is treated as ended: the token check refuses one anyway.
+    expect(accessEnded(access({ roles: ['guest'] }), NOW)).toBe(true)
     // A broader role is not cut off by `until`: the claim is a guest's limit.
     expect(perms(access({ roles: ['member'], until }), NOW)).toEqual(['see', 'work'])
     expect(accessEnded(access({ roles: ['member', 'guest'], until }), NOW)).toBe(false)
