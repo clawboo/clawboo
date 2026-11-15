@@ -239,6 +239,7 @@ describe('on', () => {
       body: {
         proxyIdentity: 'on',
         appLink: false,
+        roles: 'off',
         person: { id: 'user-42', name: 'Ada', role: 'admin' },
         you: { id: 'user-42', name: 'Ada', role: 'admin' },
       },
@@ -252,6 +253,7 @@ describe('on', () => {
       body: {
         proxyIdentity: 'on',
         appLink: false,
+        roles: 'off',
         person: null,
         you: { id: 'local', name: 'You', role: null },
       },
@@ -565,6 +567,7 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
       body: {
         proxyIdentity: 'on',
         appLink: true,
+        roles: 'off',
         person: { id: 'account:u-7', name: 'Grace', role: null },
         you: { id: 'account:u-7', name: 'Grace', role: null },
       },

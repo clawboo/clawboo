@@ -17,6 +17,7 @@ import { decideApproval } from '../lib/approvalDecision'
 import { personFromAppLink, personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { redactJsonString, redactValue } from '../lib/redact'
+import { inRoleScope, roleScopeOf, teamOfAgent, teamOfTask } from '../lib/roles/guard'
 
 // GET /api/tools — every builtin tool + its availability verdict (server-
 // evaluated from the process env), for the greyed-node view.
@@ -39,13 +40,23 @@ export function toolsListGET(_req: Request, res: Response): void {
 }
 
 // GET /api/tools/approvals?status=pending — the pending tool-approval queue.
-export function toolsApprovalsGET(_req: Request, res: Response): void {
+export function toolsApprovalsGET(req: Request, res: Response): void {
   try {
     const db = getDb()
     // Redact-on-display: the args summary (JSON text) is scrubbed at write time; mask
     // its credential-shaped keys again at the rendering boundary (defense in depth).
     // The task's title goes with its id, so the card can say what the call is for.
-    const approvals = listPendingApprovals(db).map((a) => ({
+    // A guest sees an approval only when its task, or else its agent, is on one of
+    // their teams (lib/roles): one with neither names no team, so it stays hidden.
+    const visible = roleScopeOf(req)
+      ? listPendingApprovals(db).filter((a) =>
+          inRoleScope(
+            req,
+            a.taskId ? teamOfTask(db, a.taskId) : a.agentId ? teamOfAgent(db, a.agentId) : null,
+          ),
+        )
+      : listPendingApprovals(db)
+    const approvals = visible.map((a) => ({
       ...a,
       argsSummary: redactJsonString(a.argsSummary),
       taskTitle: a.taskId ? (getTask(db, a.taskId)?.title ?? null) : null,

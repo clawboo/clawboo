@@ -31,6 +31,7 @@ import {
 import { ACCOUNT_PERSON_PREFIX, isAccountPerson } from '@clawboo/board-core'
 import type { PersonRef } from '@clawboo/protocol'
 
+import { accessFromClaims, type PersonAccess } from '../roles/policy'
 import type { ProxyIdentityConfig } from './config'
 
 /** Asymmetric signatures only. */
@@ -86,7 +87,13 @@ export type AssertionRefusal =
   | 'keys-unavailable'
 
 export type AssertionResult =
-  { ok: true; person: PersonRef } | { ok: false; reason: AssertionRefusal }
+  | {
+      ok: true
+      person: PersonRef
+      /** What the token's role claims grant. Only with roles enforced. */
+      access?: PersonAccess
+    }
+  | { ok: false; reason: AssertionRefusal }
 
 export interface AssertionInput {
   token: string
@@ -296,8 +303,15 @@ export function createAssertionVerifier(
       cleanText(claimAt(payload, config.nameClaim), MAX_NAME_CHARS) ??
       cleanText(payload['email'], MAX_NAME_CHARS) ??
       cleanText(payload['preferred_username'], MAX_NAME_CHARS)
-    const role = roleOf(claimAt(payload, config.roleClaim))
-    return { ok: true, person: { id: sub, name, role } }
+    const roleValue = claimAt(payload, config.roleClaim)
+    const role = roleOf(roleValue)
+    const person = { id: sub, name, role }
+    if (config.roles !== 'enforce') return { ok: true, person }
+    // A claim beside the role that is there but malformed refuses the token: a
+    // `teams` that is not a list must never read as every team.
+    const access = accessFromClaims(roleValue, payload)
+    if (!access) return { ok: false, reason: 'claims' }
+    return { ok: true, person, access }
   }
 
   return { verify }

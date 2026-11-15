@@ -26,6 +26,7 @@ import { releaseDeleted } from '../lib/agentUser/poolBoot'
 import { actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
+import { inRoleScope } from '../lib/roles/guard'
 import { emitEvent } from '../lib/obs'
 import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardChange'
 import { legacyTeamFolderPath, teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
@@ -104,13 +105,20 @@ export function teamsGET(req: Request, res: Response): void {
     // Tell the client which teams the SERVER orchestrator owns (native, Gateway-free)
     // so `GroupChatPanel` renders them via the REST + SSE thin-client path instead of
     // the browser board-orchestration path. OpenClaw teams read false → legacy path.
-    const teamsWithFlag = rows.map((t) => ({
-      ...t,
-      serverOrchestrated: resolveServerOrchestrated(db, t.id),
-      chatClearedAt: chatClearedAt(db, t.id),
-    }))
+    // A guest gets only the teams their role names (lib/roles), and only those
+    // teams' agents.
+    const teamsWithFlag = rows
+      .filter((t) => inRoleScope(req, t.id))
+      .map((t) => ({
+        ...t,
+        serverOrchestrated: resolveServerOrchestrated(db, t.id),
+        chatClearedAt: chatClearedAt(db, t.id),
+      }))
 
-    res.json({ teams: teamsWithFlag, assignments })
+    res.json({
+      teams: teamsWithFlag,
+      assignments: assignments.filter((a) => inRoleScope(req, a.teamId)),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

@@ -154,6 +154,14 @@ export const OPERATOR_KEYS = {
     env: 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM',
     userEditable: false,
   },
+  /** Whether the role a token carries decides what the person may do: `off`
+   *  (the role is only recorded) or `enforce` (lib/roles). */
+  proxyIdentityRoles: {
+    kind: 'choice',
+    env: 'CLAWBOO_PROXY_IDENTITY_ROLES',
+    userEditable: false,
+    choices: ['off', 'enforce'],
+  },
   // Where Clawboo Native sends each provider's requests, its key check and its
   // model list, for model traffic that goes through a gateway or company proxy
   // (lib/providerBaseUrls). Only an administrator sets these: a base URL
@@ -187,6 +195,7 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   proxyIdentityMaxLifetime: 60,
   proxyIdentityNameClaim: 'name',
   proxyIdentityRoleClaim: 'role',
+  proxyIdentityRoles: 'off',
   anthropicBaseUrl: null,
   openaiBaseUrl: null,
   openrouterBaseUrl: null,

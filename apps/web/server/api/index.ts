@@ -7,6 +7,7 @@ import {
 import { Router, type Router as RouterType } from 'express'
 
 import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
+import { withRouteRules } from '../lib/roles/guard'
 
 import { settingsGET, settingsPOST } from './settings'
 import { accessIdentityGET, accessLaunchCodePOST } from './access'
@@ -257,7 +258,10 @@ import {
 // `/API/settings` too, while that comment promised the opposite. The access gate
 // folds case before its own /api/ test, so nothing slipped past it, but the
 // router and the gate should not disagree about what a path is.
-const router: RouterType = Router({ caseSensitive: true })
+// Every route below gets the role check its rule names (lib/roles/rules), put in
+// front of its handlers as it is registered. A pass-through unless an
+// administrator enforces roles behind a sign-in proxy.
+const router: RouterType = withRouteRules(Router({ caseSensitive: true }))
 
 // Rate ceilings first, so every route below inherits the general one. See
 // ../lib/rateLimit for why the numbers are where they are; the strict tier is

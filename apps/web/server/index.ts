@@ -118,8 +118,10 @@ import {
   loadProxyIdentityConfig,
   operatorFileReplaceable,
   proxyIdentityFileWarning,
+  rolesModeOf,
   type ProxyIdentityConfig,
 } from './lib/proxyIdentity/config'
+import { upgradeAllowedForRoles } from './lib/roles/guard'
 import { createIdentityLane, type LaneSource } from './lib/proxyIdentity/lane'
 import { createAssertionVerifier } from './lib/proxyIdentity/verifier'
 import { agents, costRecords } from '@clawboo/db'
@@ -386,6 +388,15 @@ async function main() {
     const fileWarning = proxyIdentityFileWarning()
     if (fileWarning) log.warn(fileWarning)
   }
+  // Whether the role a token carries decides what its person may do. Read by
+  // every route's role guard (lib/roles/guard) and by the WebSocket upgrade.
+  const rolesMode = rolesModeOf(proxyIdentityConfig)
+  if (rolesMode === 'enforce') {
+    log.info(
+      'Roles enforced: each request may do only what the role in its token allows. ' +
+        'A token with no role this engine knows can only ask who it names.',
+    )
+  }
 
   // ── Same-origin guard (CSWSH / DNS-rebinding / cross-site CSRF) ────────────
   // Always-on Origin + Host + Sec-Fetch-Site allowlist, independent of the token
@@ -491,6 +502,8 @@ async function main() {
   app.locals['basePath'] = basePath
   // POST /api/access/launch-code mints its one-time sign-in codes from this gate.
   app.locals['accessGate'] = accessGate
+  // Every route's role guard reads it (lib/roles/guard).
+  app.locals['rolesMode'] = rolesMode
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
   // of it. The guards below protect a request whose path is under `/api/` and
@@ -628,6 +641,12 @@ async function main() {
         if (socket.destroyed) return
         if (!decision.ok) {
           socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        // The Gateway socket's messages are not checked one by one, so with
+        // roles enforced only a person who may run the whole system opens it.
+        if (!upgradeAllowedForRoles(rolesMode, decision)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
           return
         }
         proxy.handleUpgrade(req, socket, head)

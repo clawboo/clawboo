@@ -492,6 +492,7 @@ The file is a JSON object of the keys below. Clawboo reads it once at startup an
 | `proxyIdentityMaxLifetime` | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` |
 | `proxyIdentityNameClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   |
 | `proxyIdentityRoleClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   |
+| `proxyIdentityRoles`       | `off` or `enforce`        | `CLAWBOO_PROXY_IDENTITY_ROLES`        |
 | `anthropicBaseUrl`         | URL                       | `ANTHROPIC_BASE_URL`                  |
 | `openaiBaseUrl`            | URL                       | `OPENAI_BASE_URL`                     |
 | `openrouterBaseUrl`        | URL                       | `OPENROUTER_BASE_URL`                 |
@@ -609,7 +610,15 @@ The claim with the person's name. When the token has none, Clawboo uses `email`,
 - Default: `role`
 - Example: `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM=groups`
 
-The claim with the person's role. A list is joined with commas. The role is recorded with the person, never enforced. Operator file key: `proxyIdentityRoleClaim`.
+The claim with the person's role. A list is joined with commas. The role is recorded with the person, and decides what they may do only while [`CLAWBOO_PROXY_IDENTITY_ROLES`](#clawboo_proxy_identity_roles) is `enforce`. Operator file key: `proxyIdentityRoleClaim`.
+
+### CLAWBOO_PROXY_IDENTITY_ROLES
+
+- Type: `off` or `enforce`
+- Default: `off`
+- Example: `CLAWBOO_PROXY_IDENTITY_ROLES=enforce`
+
+With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
 
 ## Provider keys
 

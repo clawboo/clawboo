@@ -158,7 +158,7 @@ The box is exactly as strong as opening the link. It sends the code the way the 
 | An `/api/` request without a valid cookie  | `401` ``{"error":"Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.","gate":"clawboo-access"}`` |
 | `POST /api/access/launch-code` with cookie | `200` `{"gated":true,"code":"…","expiresAt":…,"expiresInMs":120000}`, or `{"gated":false}` on a server with no token                                                                  |
 
-**One secret, full access.** Everyone who has the token can do everything you can, and so can anyone who has a live one-time link. There are no accounts, roles or per-person revocation. Behind a sign-in proxy, the [proxy identity lane](#signed-identity-from-a-sign-in-proxy) can record who each person is, but it does not limit what anyone can do. To rotate the token, change the variable, or delete `~/.clawboo/access-token`, and restart the server; every browser then signs in again.
+**One secret, full access.** Everyone who has the token can do everything you can, and so can anyone who has a live one-time link. There are no accounts or per-person revocation. Behind a sign-in proxy, the [proxy identity lane](#signed-identity-from-a-sign-in-proxy) can record who each person is, and, with [roles](/guides/sso-proxy#roles) enforced, limit what each person may do. To rotate the token, change the variable, or delete `~/.clawboo/access-token`, and restart the server; every browser then signs in again.
 
 **Agents do not receive it.** Clawboo removes `STUDIO_ACCESS_TOKEN` from the environment of the coding runtimes, Clawboo Native shell commands and connectors it starts, and the per-install token is never in any environment. The exception is an OpenClaw Gateway that you start from the dashboard: it inherits the server's whole environment, so it gets a `STUDIO_ACCESS_TOKEN` you set, but not the per-install token. A program running as you can still read the token file. Clawboo's own agents reach the MCP servers another way:
 
@@ -198,7 +198,7 @@ Off by default. With a sign-in proxy in front of Clawboo, such as Cloudflare Acc
 - **The person check.** A person the lane verified passes [the person check](#the-person-check) on every person write, from a script as well as from the dashboard.
 - **An app that starts Clawboo.** Separately from the proxy, an app that starts Clawboo itself, such as the desktop app, can hand it an Ed25519 public key in `CLAWBOO_APP_LINK_PUBLIC_KEY` and sign its own requests for its own people, whose ids start with `account:`, which a proxy may then not name. Clawboo reads that key from the environment only, never the operator file. Such a person passes the person check like a proxy's, but only on the routes the app signs for (sending work to an agent or a team, answering an approval, checking its link), and cannot answer an approval with `allow_always`: a copied key cannot create grants, change who is asked about what, or change a setting. Whoever holds the app's private key can sign as any of its people, so the key is only as safe as the app keeps it. [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) has the details.
 
-What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced (no route checks a role yet); the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user owns, can write or can replace through a folder above it would let an agent swap the key, which the server warns about at startup (on Windows, whenever the settings come from the file, since it cannot check who can change it there). The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
+What it does not change: everyone who gets through the proxy can still do everything, since roles are only recorded, unless an administrator enforces them (`proxyIdentityRoles: enforce`, see [Roles](/guides/sso-proxy#roles)); the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user owns, can write or can replace through a folder above it would let an agent swap the key, which the server warns about at startup (on Windows, whenever the settings come from the file, since it cannot check who can change it there). The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
 
 ## The person check
 
@@ -424,11 +424,11 @@ The rules in short; [Reach Clawboo from another machine](/guides/self-host-secur
 
 ## Limits of this model
 
-- **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access. A sign-in proxy's identity tokens add names to what people do, not permissions.
+- **One person, one secret.** There are no user accounts, and the token gives full access. A sign-in proxy's identity tokens add names to what people do, and, with [roles](/guides/sso-proxy#roles) enforced, decide what each may do.
 - **A person's writes on a local install are a speed bump.** See [What counts as a person](#what-counts-as-a-person).
 - **One store for the whole install.** All teams share one database and one vault, and each key name holds one value for the whole install.
 - **Local code is trusted.** Anything running as your user can read Clawboo's files, the token file among them, and so use its API, the person check included. [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) (from 0.7.0) moves agents other than OpenClaw's out of that group.
-- **Roles are not enforced.** A sign-in proxy's token can carry a role, which Clawboo records. No route refuses a person for their role yet.
+- **Roles are off by default.** A sign-in proxy's token can carry a role, which Clawboo records. Only with `proxyIdentityRoles: enforce` does a route refuse a person for their role, and then only through the API: an agent running as Clawboo's own user can still change the database directly unless it runs as [its own user](/operating/agent-isolation).
 
 ## Related
 

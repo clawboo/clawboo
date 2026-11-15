@@ -83,6 +83,7 @@ import { eq } from 'drizzle-orm'
 import { actingPerson, actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, readStatesOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
+import { inRoleScope } from '../lib/roles/guard'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
@@ -136,7 +137,11 @@ export function boardListGET(req: Request, res: Response): void {
     const db = getDb()
     const teamId = typeof req.query['teamId'] === 'string' ? req.query['teamId'] : undefined
     if (req.query['ready'] === 'true') {
-      res.json({ tasks: getReadyTasks(db, teamId ? { teamId } : {}) })
+      res.json({
+        tasks: getReadyTasks(db, teamId ? { teamId } : {}).filter((t) =>
+          inRoleScope(req, t.teamId),
+        ),
+      })
       return
     }
     const status =
@@ -159,7 +164,13 @@ export function boardListGET(req: Request, res: Response): void {
                   db,
                   withJobStopped(
                     db,
-                    withAttention(db, listTasks(db, { teamId, status, includeDropped })),
+                    withAttention(
+                      db,
+                      // A guest gets only the tasks of the teams their role names.
+                      listTasks(db, { teamId, status, includeDropped }).filter((t) =>
+                        inRoleScope(req, t.teamId),
+                      ),
+                    ),
                   ),
                 ),
               ),
