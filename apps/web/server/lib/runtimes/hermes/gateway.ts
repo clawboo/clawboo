@@ -68,6 +68,9 @@ export const EXIT_GRACE_DEFAULT_MS = 5_000
 export const EXIT_GRACE_MAX_MS = 8_000
 /** After the SIGKILL at exit, how long to wait for the process to go. */
 const EXIT_KILL_WAIT_MS = 1_000
+/** killProcessTree's grace (SIGTERM, then SIGKILL to the group) for a gateway a
+ *  failed start lets go of. */
+const FAILED_START_GRACE_MS = 3_000
 /** Waits between restarts after unplanned exits, in order; the last repeats. */
 const RESTART_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000]
 /** Up this long, a gateway's earlier crashes are forgiven. */
@@ -131,6 +134,8 @@ export interface HermesGatewayDeps {
   now?: () => number
   startTimeoutMs?: number
   stopGraceMs?: number
+  /** killProcessTree's grace for a gateway a failed start lets go of. */
+  failedStartGraceMs?: number
   backoffMs?: readonly number[]
 }
 
@@ -253,7 +258,12 @@ function settlesWithin(p: Promise<void>, ms: number): Promise<boolean> {
  * is left in its process group is killed either way.
  */
 async function seeOutForExit(proc: ChildProcess, graceMs: number): Promise<void> {
-  if (proc.exitCode !== null || proc.signalCode !== null) return
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    // Its leader is gone, but a member of its group may have outlived the
+    // SIGTERM, with killProcessTree's SIGKILL still a timer that ends with us.
+    killProcessTreeNow(proc)
+    return
+  }
   const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()))
   const done = await settlesWithin(exited, graceMs)
   killProcessTreeNow(proc)
@@ -299,8 +309,10 @@ export class HermesGatewaySupervisor {
   /** Set once the server has begun to exit: no gateway starts after it. */
   private exiting = false
   /** Gateways a failed start let go of while they still ran: they have had
-   *  killProcessTree's SIGTERM, and its SIGKILL is a timer that ends with this
-   *  process, so the exit stop sees them out too. Each leaves on its exit. */
+   *  killProcessTree's SIGTERM, and its SIGKILL to their group is a timer that
+   *  ends with this process, so the exit stop sees them out too. Each is kept
+   *  until that SIGKILL has landed, not just until its own exit: a member of
+   *  its group can outlive the SIGTERM. */
   private readonly leaving = new Set<ChildProcess>()
   private stopInFlight: Promise<void> | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
@@ -614,9 +626,18 @@ export class HermesGatewaySupervisor {
       // the grace, then SIGKILL), and killProcessTree's SIGTERM would read to
       // Hermes as a crash. A start that times out during that grace gets here.
       if (!this.exiting && proc && proc.exitCode === null && proc.signalCode === null) {
+        const graceMs = this.deps.failedStartGraceMs ?? FAILED_START_GRACE_MS
         this.leaving.add(proc)
-        proc.once('exit', () => this.leaving.delete(proc))
-        killProcessTree(proc)
+        proc.once('exit', () => {
+          // On Windows taskkill /T /F has already taken the tree, and a pid
+          // there is soon handed out again.
+          if (isWindows) {
+            this.leaving.delete(proc)
+            return
+          }
+          setTimeout(() => this.leaving.delete(proc), graceMs).unref()
+        })
+        killProcessTree(proc, { graceMs })
       }
       log.warn({ reason }, 'hermes gateway did not start')
       throw new Error(reason)

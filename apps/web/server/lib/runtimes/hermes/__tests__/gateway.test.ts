@@ -512,6 +512,29 @@ describe('HermesGatewaySupervisor', () => {
       }
     })
 
+    it("kills what is left of a failed start's group, though its leader exited on the SIGTERM", async () => {
+      healthy = false
+      // killProcessTree's SIGKILL to the group is still a pending timer.
+      const gw = make({ startTimeoutMs: 100, failedStartGraceMs: 60_000 })
+      await expect(gw.ensureRunning()).rejects.toThrow()
+      for (let i = 0; i < 50 && procs[0]!.exitCode === null && procs[0]!.signalCode === null; i++)
+        await new Promise((r) => setTimeout(r, 5))
+      expect(procs[0]!.signalCode).toBe('SIGKILL')
+      expect(await gw.stopForExit(300)).toBe('not-running')
+      // The group is swept: a member that outlived the SIGTERM goes with it.
+      expect((procs[0] as unknown as FakeProcLike).sweeps).toBe(1)
+    })
+
+    it("lets a failed start's gateway go once its group's SIGKILL has landed", async () => {
+      healthy = false
+      const gw = make({ startTimeoutMs: 100, failedStartGraceMs: 50 })
+      await expect(gw.ensureRunning()).rejects.toThrow()
+      await new Promise((r) => setTimeout(r, 200))
+      expect(await gw.stopForExit(300)).toBe('not-running')
+      // Its pid may belong to another group by now: nothing is sent to it.
+      expect((procs[0] as unknown as FakeProcLike).sweeps).toBeUndefined()
+    })
+
     it('on Windows, where Node has no SIGINT to send, kills the tree at once', async () => {
       const gw = make()
       await gw.ensureRunning()
