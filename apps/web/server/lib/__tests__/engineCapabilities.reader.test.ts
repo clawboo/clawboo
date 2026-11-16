@@ -6,8 +6,12 @@ import { generateKeyPairSync } from 'node:crypto'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 import { buildEngineCapabilities } from '../engineCapabilities'
-import { resetOperatorSettings } from '../operatorSettings'
+import { OPERATOR_KEYS, OPERATOR_SETTINGS_ENV, resetOperatorSettings } from '../operatorSettings'
 
 const proxyPem = generateKeyPairSync('ed25519')
   .publicKey.export({ format: 'pem', type: 'spki' })
@@ -16,10 +20,21 @@ const readerPem = generateKeyPairSync('ed25519')
   .publicKey.export({ format: 'pem', type: 'spki' })
   .toString()
 
-beforeEach(() => resetOperatorSettings())
+// Nothing from the shell or an operator file on this computer may decide the
+// flags: an empty home, no named operator file, every operator variable blank.
+let home = ''
+beforeEach(() => {
+  home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-capability-flags-'))
+  vi.stubEnv('HOME', home)
+  vi.stubEnv('CLAWBOO_HOME', home)
+  vi.stubEnv(OPERATOR_SETTINGS_ENV, '')
+  for (const spec of Object.values(OPERATOR_KEYS)) vi.stubEnv(spec.env, '')
+  resetOperatorSettings()
+})
 afterEach(() => {
   resetOperatorSettings()
   vi.unstubAllEnvs()
+  rmSync(home, { recursive: true, force: true })
 })
 
 describe('capability flags for the reader key and the liveness probe', () => {

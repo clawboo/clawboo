@@ -11,7 +11,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 import { createDb, type ClawbooDb } from '@clawboo/db'
-import { SignJWT, UnsecuredJWT, type JWK, type JWTPayload } from 'jose'
+import { createLocalJWKSet, SignJWT, UnsecuredJWT, type JWK, type JWTPayload } from 'jose'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { ProxyIdentityConfig } from '../config'
@@ -609,6 +609,28 @@ describe('the reader key', () => {
     const alone = createAssertionVerifier(config(), { now: () => NOW_MS })
     const again = await sign(claims({ sub: 'reader:companion' }))
     expect((await alone.verify({ token: again, method: 'GET', path: '/api/board' })).ok).toBe(true)
+  })
+})
+
+describe("a sign-in proxy's verifier beside the reader key", () => {
+  const reader = generateKeyPairSync('ed25519')
+
+  it('refuses a token a refused key signed, whatever it claims, and takes the rest', async () => {
+    // The proxy's key set holds the reader key too, as a JWKS URL could.
+    const v = createAssertionVerifier(config(), {
+      now: () => NOW_MS,
+      getKey: createLocalJWKSet({
+        keys: [jwkOf(ed.publicKey, 'p-1'), jwkOf(reader.publicKey, 'p-2')],
+      }),
+      refuseKeysIn: { keys: [jwkOf(reader.publicKey)] },
+    })
+    const posing = await sign(claims(), reader.privateKey, 'EdDSA', 'p-2')
+    expect(await v.verify({ token: posing, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'shared-key',
+    })
+    const person = await sign(claims(), ed.privateKey, 'EdDSA', 'p-1')
+    expect((await v.verify({ token: person, method: 'GET', path: '/api/board' })).ok).toBe(true)
   })
 })
 

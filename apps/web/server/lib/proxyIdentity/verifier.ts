@@ -52,7 +52,13 @@ import { ACCOUNT_PERSON_PREFIX, isAccountPerson } from '@clawboo/board-core'
 import type { PersonRef } from '@clawboo/protocol'
 
 import { accessFromClaims, type PersonAccess } from '../roles/policy'
-import { READER_SUBJECT_PREFIX, sharesKey, type ProxyIdentityConfig } from './config'
+import {
+  READER_SUBJECT_PREFIX,
+  keyFingerprintOf,
+  keyFingerprints,
+  sharesKey,
+  type ProxyIdentityConfig,
+} from './config'
 
 /** Asymmetric signatures only. */
 export const ALLOWED_ALGORITHMS = [
@@ -157,6 +163,11 @@ export interface VerifierOptions {
    *  URL, whose keys cannot be compared with the reader key at startup
    *  (config.ts). Throws when the set cannot be fetched. */
   personKeySet?: () => Promise<JSONWebKeySet>
+  /** For a sign-in proxy's verifier beside a reader key: keys whose tokens it
+   *  refuses, whatever they claim (the reader's). Set when the proxy publishes a
+   *  JWKS URL, which could come to hold the reader key: a token that key signed
+   *  would otherwise pass for a person. */
+  refuseKeysIn?: JSONWebKeySet
 }
 
 /** A path without its query or fragment, exactly as written. */
@@ -283,6 +294,8 @@ export function createAssertionVerifier(
   // The proxy key set the shared-key check last compared, and what it found: the
   // set is the same object until it is fetched again.
   let lastPersonSet: JSONWebKeySet | null = null
+  // The keys this verifier never takes a token from, by fingerprint.
+  const refusedKeys = opts.refuseKeysIn ? keyFingerprints(opts.refuseKeysIn) : null
   let lastShared = false
 
   // jti -> when it stops mattering (epoch ms), oldest first.
@@ -314,8 +327,9 @@ export function createAssertionVerifier(
 
     const at = now()
     let payload: JWTPayload
+    let signedBy: unknown
     try {
-      ;({ payload } = await jwtVerify(token, getKey, {
+      const verified = await jwtVerify(token, getKey, {
         algorithms: [...ALLOWED_ALGORITHMS],
         issuer: config.issuer,
         audience: config.audience,
@@ -323,9 +337,19 @@ export function createAssertionVerifier(
         currentDate: new Date(at),
         requiredClaims: requestBound ? ['sub', 'exp', 'iat', 'jti', 'htm', 'htu'] : ['sub', 'exp'],
         ...(requestBound ? { maxTokenAge: config.maxLifetimeSeconds } : {}),
-      }))
+      })
+      payload = verified.payload
+      signedBy = (verified as { key?: unknown }).key
     } catch (err) {
       return { ok: false, reason: refusalOf(err) }
+    }
+    // A token one of the refused keys signed (the reader key, published by a
+    // sign-in proxy's JWKS URL as well) is never a person's: checked on the key
+    // that verified it, so it holds after every refetch of the set. A key that
+    // cannot be read is refused too.
+    if (refusedKeys) {
+      const print = keyFingerprintOf(signedBy)
+      if (print === null || refusedKeys.has(print)) return { ok: false, reason: 'shared-key' }
     }
 
     const sub = cleanText(payload.sub, MAX_ID_CHARS)

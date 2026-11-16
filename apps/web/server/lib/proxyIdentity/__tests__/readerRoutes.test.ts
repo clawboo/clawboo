@@ -44,6 +44,16 @@ describe('readerMayRead', () => {
     }
   })
 
+  it('takes the event stream with GET only, never HEAD', () => {
+    const stream = `/api/obs/stream?kinds=${READER_EVENT_KINDS}&afterSeq=0`
+    expect(readerMayRead(req(stream))).toBe(true)
+    expect(readerMayRead(req(stream, { method: 'HEAD' }))).toBe(false)
+    // The rest of the list still takes HEAD.
+    expect(
+      readerMayRead(req(`/api/obs/events?kinds=${READER_EVENT_KINDS}&limit=1`, { method: 'HEAD' })),
+    ).toBe(true)
+  })
+
   it('needs the router to read the same path', () => {
     expect(readerMayRead(req('/api/teams', { path: '/api/teams' }))).toBe(true)
     expect(readerMayRead(req('/api/teams', { path: '/api/settings' }))).toBe(false)

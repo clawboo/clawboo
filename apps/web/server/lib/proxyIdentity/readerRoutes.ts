@@ -3,7 +3,8 @@
 // (proxyIdentityReaderPublicKey); they are no person's act, so they never set a
 // person and never pass the person check.
 //
-// Each is a GET (or HEAD) on one exact path with one exact query shape. Every
+// Each is a GET (or HEAD; the event stream GET only) on one exact path with one
+// exact query shape. Every
 // reading of the path (see @clawboo/gateway-proxy's request-path) must be the
 // route's path itself, so no letter case, trailing slash, dot segment or
 // backslash reaches another route. The query is checked twice: as the URL
@@ -63,9 +64,12 @@ export const READER_ROUTES: readonly ReaderRoute[] = [
   { path: '/api/tools/approvals', shape: (q) => exactly(q, { status: 'pending' }) },
   // The live tail of approvals asked and answered, resumed from a `seq`: the
   // `afterSeq` query, or an EventSource's `Last-Event-ID` header in its place.
+  // GET only: a HEAD would open a stream that sends nothing and never ends, its
+  // poll running until the client lets go of the socket.
   {
     path: '/api/obs/stream',
     shape: (q, req) => {
+      if (String(req.method ?? 'GET').toUpperCase() !== 'GET') return false
       if (q.get('kinds') !== READER_EVENT_KINDS || !onlyKeys(q, ['kinds', 'afterSeq'])) {
         return false
       }

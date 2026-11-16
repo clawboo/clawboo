@@ -30,7 +30,7 @@
 // the proxy's keys nor the app link's: a key that signs reads must never be able
 // to sign a person.
 
-import { createPublicKey, type webcrypto } from 'node:crypto'
+import { createPublicKey, KeyObject, type webcrypto } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -486,7 +486,7 @@ export function loadPersonCheck(proxy: ProxyIdentityConfig | null): PersonCheckM
 /** The same key material, however it was written (PEM or JWK, any `kid`). A key
  *  Clawboo cannot read (in a set someone else publishes) is left out: it cannot
  *  be a key the reader setting holds, which Clawboo has read. */
-function keyFingerprints(jwks: JSONWebKeySet): Set<string> {
+export function keyFingerprints(jwks: JSONWebKeySet): Set<string> {
   const out = new Set<string>()
   for (const k of jwks.keys) {
     try {
@@ -500,6 +500,19 @@ function keyFingerprints(jwks: JSONWebKeySet): Set<string> {
     }
   }
   return out
+}
+
+/** The fingerprint `keyFingerprints` gives, of a key a verifier resolved (a
+ *  CryptoKey or a KeyObject), or null when it is not a key Clawboo can read. */
+export function keyFingerprintOf(key: unknown): string | null {
+  try {
+    const object = key instanceof KeyObject ? key : KeyObject.from(key as webcrypto.CryptoKey)
+    const pub = object.type === 'private' ? createPublicKey(object) : object
+    if (pub.type !== 'public') return null
+    return pub.export({ type: 'spki', format: 'der' }).toString('base64')
+  } catch {
+    return null
+  }
 }
 
 /** Whether two key sets hold the same key material, whatever each calls it. */

@@ -169,6 +169,35 @@ describe('identitySources', () => {
       ).toEqual({ ok: false, reason: 'keys-unavailable' })
     })
 
+    it("refuses a person token the reader key signed, while the URL's set holds it", async () => {
+      const url = await serve([jwk(proxyKey.publicKey, 'p-1'), jwk(readerKey.publicKey, 'p-2')])
+      const p = proxy({ source: 'jwks-url', url })
+      const sources = identitySources(identityConfigs(p, null, reader()), p, { db: () => db })
+      // Signed with the reader key, for the proxy's issuer, naming a person.
+      const posing = await token(
+        readerKey.privateKey,
+        'https://proxy.example.com',
+        'clawboo',
+        'user-42',
+        'p-2',
+      )
+      expect(
+        await sources[0]!.verifier.verify({ token: posing, method: 'GET', path: '/api/teams' }),
+      ).toEqual({ ok: false, reason: 'shared-key' })
+      // The proxy's own key still signs its people.
+      const person = await token(
+        proxyKey.privateKey,
+        'https://proxy.example.com',
+        'clawboo',
+        'user-42',
+        'p-1',
+      )
+      expect(
+        (await sources[0]!.verifier.verify({ token: person, method: 'GET', path: '/api/teams' }))
+          .ok,
+      ).toBe(true)
+    })
+
     it('takes a reader token when the proxy keeps keys of its own', async () => {
       const url = await serve([jwk(proxyKey.publicKey, 'p-1')])
       const p = proxy({ source: 'jwks-url', url })

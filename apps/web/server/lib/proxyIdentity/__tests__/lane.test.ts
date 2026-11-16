@@ -1008,7 +1008,11 @@ describe('the reader key', () => {
       for (const target of READS) {
         for (const method of ['GET', 'HEAD']) {
           const res = await get(target, { ...PAGE, ...(await byReader(method, target)) }, method)
-          expect(res.status, `${mode} roles=${roles} ${method} ${target}`).toBe(200)
+          // The event stream is GET only: a HEAD would open a stream that never ends.
+          const streamHead = method === 'HEAD' && target.startsWith('/api/obs/stream')
+          expect(res.status, `${mode} roles=${roles} ${method} ${target}`).toBe(
+            streamHead ? 403 : 200,
+          )
           if (method === 'GET' && target !== '/api/system/live') {
             expect(res.body, target).toEqual({
               reader: 'reader:companion',
