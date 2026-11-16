@@ -40,6 +40,9 @@ export const HOLD_TTL_MAX_MS = 15 * 60_000
 export const HOLD_OWNER_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/
 /** The owner id of the in-app update's own hold. Reserved: no client places or releases it. */
 export const SELF_UPDATE_HOLD_OWNER = 'self-update'
+/** The owner id of the hold a stopping server places on itself, so no run starts
+ *  while it waits for its runs to end. Reserved like the update's. */
+export const SERVER_STOP_HOLD_OWNER = 'server-stop'
 /** The longest reason a holder may give. */
 export const HOLD_REASON_MAX = 200
 

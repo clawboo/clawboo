@@ -1295,6 +1295,44 @@ async function main() {
   }
   log(`✓ the dashboard on :${clawbooPort} is the server this run spawned (api-port.txt agrees)`)
 
+  // The start marker beside it names the same server, with every field of the
+  // contract an app that runs Clawboo reads (docs/reference/configuration.md,
+  // "Start marker"), and its pid is a live process.
+  const markerFile = path.join(tmpDir, '.clawboo', 'api-port.json')
+  let marker = null
+  try {
+    marker = JSON.parse(await fs.readFile(markerFile, 'utf8'))
+  } catch {
+    /* reported below */
+  }
+  const markerFields = [
+    'port',
+    'pid',
+    'startedAt',
+    'bootAt',
+    'pidNamespace',
+    'initStart',
+    'version',
+  ]
+  const missing = marker ? markerFields.filter((f) => !(f in marker)) : markerFields
+  let markerPidAlive = false
+  try {
+    process.kill(marker?.pid, 0)
+    markerPidAlive = Number.isInteger(marker?.pid) && marker.pid > 0
+  } catch {
+    /* reported below */
+  }
+  if (!marker || missing.length > 0 || marker.port !== clawbooPort || !markerPidAlive) {
+    fail(
+      `${markerFile} does not name the server on :${clawbooPort}: ` +
+        (marker
+          ? `port ${marker.port}, pid ${marker.pid} (alive: ${markerPidAlive}), missing ${missing.join(', ') || 'nothing'}`
+          : 'missing or unreadable'),
+    )
+    return
+  }
+  log(`✓ api-port.json names the server on :${clawbooPort} (pid ${marker.pid}, ${marker.version})`)
+
   // 12. Test 1: GET / returns SPA HTML
   const root = await httpGet(`${openedUrl}/`)
   if (!root.ok) {

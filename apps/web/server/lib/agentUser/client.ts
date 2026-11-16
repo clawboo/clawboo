@@ -155,7 +155,8 @@ export class RemoteAgentProcess extends EventEmitter {
     return true
   }
 
-  /** Stop the process and everything it started (SIGTERM, then SIGKILL after `graceMs`). */
+  /** Stop the process and everything it started (SIGTERM, then SIGKILL after
+   *  `graceMs`; with a `graceMs` of 0, SIGKILL alone). */
   killTree(graceMs = 3_000): void {
     // A group outlives its leader: a member with output of its own (a browser's
     // helper) can still run after this process closed, and the host keeps such

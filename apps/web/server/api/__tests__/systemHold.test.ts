@@ -129,6 +129,18 @@ describe('/api/system/hold', () => {
     ).toEqual(['self-update'])
   })
 
+  it("keeps a stopping server's own owner id for the stop alone", async () => {
+    const placed = await hold({ owner: 'server-stop' })
+    expect(placed.status).toBe(400)
+    expect(String(placed.body['error'])).toMatch(/stopping server/)
+    expect(engineHold().isHeld()).toBe(false)
+
+    engineHold().place('server-stop', { reason: 'stop' })
+    const refused = await release('server-stop')
+    expect(refused.status).toBe(403)
+    expect(engineHold().isHeld()).toBe(true)
+  })
+
   it('uses the default time to live when none is named', async () => {
     const placed = engineHoldStateSchema.parse((await hold({ owner: 'plain' })).body)
     expect(placed.holds[0]!.expiresAt - placed.holds[0]!.heldAt).toBe(60_000)

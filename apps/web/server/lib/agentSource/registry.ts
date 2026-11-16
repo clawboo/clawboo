@@ -211,14 +211,17 @@ export function gatewayProxyUpstreamSettings(): { url: string; token: string } {
   return { url: settings.gatewayUrl, token: settings.gatewayToken }
 }
 
-let shutdownWired = false
-function wireShutdown(): void {
-  if (shutdownWired) return
-  shutdownWired = true
-  const stop = (): void => {
-    void singleton?.stop()
+/**
+ * Close the OpenClaw connection for a stop of the server. Called by the server's
+ * graceful stop, never from a signal listener of its own: one wired at module
+ * load heard a SIGTERM sent while the server was still booting, before this
+ * registry existed, and was spent, so the real stop never closed the connection.
+ * Nothing when no registry was made. Never rejects.
+ */
+export async function stopRegistry(): Promise<void> {
+  try {
+    await singleton?.stop()
+  } catch {
+    // Best effort: the process is about to exit, which closes the socket anyway.
   }
-  process.once('SIGTERM', stop)
-  process.once('SIGINT', stop)
 }
-wireShutdown()

@@ -102,10 +102,20 @@ describe('stopDashboard', () => {
     expect(outcome).toEqual({ status: 'stopped', port: PORT, pid: PID, forced: false })
   })
 
+  it("waits out the whole of the server's own stop before it sends SIGKILL", async () => {
+    const kill = vi.fn()
+    // The server keeps its port for its whole stop: up to about 11 s (the Hermes
+    // gateway's planned stop, then the trace flush), then the checkpoint.
+    const outcome = await stopDashboard(PORT, deps({ kill, probe: probeAliveFor(120) }))
+
+    expect(outcome).toEqual({ status: 'stopped', port: PORT, pid: PID, forced: false })
+    expect(kill.mock.calls).toEqual([[PID, 'SIGTERM']])
+  })
+
   it('escalates to SIGKILL when SIGTERM is ignored', async () => {
     const kill = vi.fn()
-    // Alive through the whole 4s SIGTERM window, then dies after SIGKILL.
-    const outcome = await stopDashboard(PORT, deps({ kill, probe: probeAliveFor(40) }))
+    // Alive through the whole 15 s SIGTERM window, then dies after SIGKILL.
+    const outcome = await stopDashboard(PORT, deps({ kill, probe: probeAliveFor(150) }))
 
     expect(outcome).toEqual({ status: 'stopped', port: PORT, pid: PID, forced: true })
     expect(kill.mock.calls).toEqual([
@@ -123,7 +133,7 @@ describe('stopDashboard', () => {
 
     const outcome = await stopDashboard(
       PORT,
-      deps({ kill, findListenerPid, probe: probeAliveFor(40) }),
+      deps({ kill, findListenerPid, probe: probeAliveFor(150) }),
     )
 
     expect(outcome).toEqual({ status: 'still-alive', port: PORT, pid: PID })

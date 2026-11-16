@@ -114,15 +114,43 @@ export async function initOtel(): Promise<void> {
       },
     }
 
-    const shutdown = (): void => {
+    // A server that stops is flushed by `shutdownOtel`, from its graceful stop.
+    // This covers a process that simply runs out of work (a script).
+    process.once('beforeExit', () => {
       void sdkRef?.shutdown?.().catch(() => {})
-    }
-    process.once('SIGTERM', shutdown)
-    process.once('beforeExit', shutdown)
+    })
   } catch (err) {
     // SDK absent (lean bundled CLI) or init failed → event-log-only.
     tracer = null
     initFailure = classifyOtelInitError(err)
+  }
+}
+
+/** How long a stop of the server waits for the trace exporter to flush. */
+export const OTEL_SHUTDOWN_WAIT_MS = 2_000
+
+/**
+ * Flush and stop the trace exporter, for a stop of the server, waiting at most
+ * `waitMs` (an unreachable collector would otherwise hold the stop for the
+ * exporter's own 10 s timeout). Called by the server's graceful stop, not from
+ * a SIGTERM listener of its own: that one never ran on Ctrl+C, and was not
+ * awaited before the process exited. Nothing when the exporter never started.
+ * Never rejects.
+ */
+export async function shutdownOtel(waitMs: number = OTEL_SHUTDOWN_WAIT_MS): Promise<void> {
+  const sdk = sdkRef
+  if (!sdk?.shutdown) return
+  sdkRef = null
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      sdk.shutdown().catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, waitMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
   }
 }
 

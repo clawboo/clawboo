@@ -10,7 +10,7 @@ import { getDb } from '../../db'
 import { markInstallInUse, ownedRuntimeProblem } from '../../runtimeFolder'
 import type { RuntimeRunContext } from '../types'
 import { expireOrphanedHermesApprovals } from './approvals'
-import { HermesGatewaySupervisor } from './gateway'
+import { HermesGatewaySupervisor, hermesExitGraceMs, type HermesExitOutcome } from './gateway'
 import { createHermesGatewayDriver } from './gatewayDriver'
 import { managedHermesCommand } from './install'
 import type { HermesJobsBackend } from '../../scheduleSource/hermesGatewayJobsScheduleSource'
@@ -87,6 +87,28 @@ export function hermesGateway(): HermesGatewaySupervisor {
     })
   }
   return supervisor
+}
+
+/**
+ * The server is stopping: give the gateway its planned stop (SIGINT, then up to
+ * `CLAWBOO_HERMES_STOP_GRACE_MS`, then SIGKILL; see `stopForExit`). The server
+ * runs this beside its wait for the other runtime children, not after it.
+ *
+ * The supervisor is made only when something first needs Hermes, so a server
+ * that never started a gateway has none, and this does nothing and waits for
+ * nothing. It never makes one.
+ */
+export function stopHermesGatewayForExit(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<HermesExitOutcome> {
+  if (!supervisor) return Promise.resolve('not-running')
+  return supervisor.stopForExit(hermesExitGraceMs(env))
+}
+
+/** The synchronous last resort at exit: SIGINT only, no wait (see
+ *  `signalForExit`). Nothing when no supervisor was ever made. */
+export function signalHermesGatewayForExit(): void {
+  supervisor?.signalForExit()
 }
 
 /** Tests only: use this supervisor instead. */

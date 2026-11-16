@@ -20,6 +20,7 @@ import {
   HOLD_TTL_MAX_MS,
   HOLD_TTL_MIN_MS,
   SELF_UPDATE_HOLD_OWNER,
+  SERVER_STOP_HOLD_OWNER,
   engineHold,
 } from '../lib/engineHold'
 import { runSlots } from '../lib/runSlots'
@@ -86,6 +87,11 @@ export function systemHoldPOST(req: Request, res: Response): void {
     res.status(400).json({ error: `${owner} is the in-app update's own owner id. Pick another.` })
     return
   }
+  // The stopping server's own hold must outlast its stop: no client lifts it.
+  if (owner === SERVER_STOP_HOLD_OWNER) {
+    res.status(400).json({ error: `${owner} is a stopping server's own owner id. Pick another.` })
+    return
+  }
   let ttlMs = HOLD_TTL_DEFAULT_MS
   if (body.ttlSeconds !== undefined) {
     const ttl = body.ttlSeconds
@@ -121,6 +127,12 @@ export function systemHoldDELETE(req: Request, res: Response): void {
   if (owner === SELF_UPDATE_HOLD_OWNER) {
     res.status(403).json({
       error: `${owner} is the in-app update's own hold. It ends with the update.`,
+    })
+    return
+  }
+  if (owner === SERVER_STOP_HOLD_OWNER) {
+    res.status(403).json({
+      error: `${owner} is a stopping server's own hold. It ends with the server.`,
     })
     return
   }
