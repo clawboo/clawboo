@@ -26,6 +26,8 @@
 // closes the env vector only. Saying otherwise would be the kind of claim this
 // codebase refuses to make elsewhere, and it should not start here.
 
+import path from 'node:path'
+
 /**
  * Variables a process needs to run at all, on any platform.
  *
@@ -114,9 +116,27 @@ const NPM_PASSTHROUGH = [
   'NPM_CONFIG_UPDATE_NOTIFIER',
 ]
 
+/**
+ * Python's bytecode settings, which carry no credential: whether Python writes
+ * `__pycache__/*.pyc` files at all, and the folder it writes them under instead
+ * of beside each source file. A connector can run Python without anyone asking
+ * for it: `npx` of a package that pulls a native part (`fsevents`, say) runs
+ * `node-gyp`, which runs python3, and Python then writes bytecode into the
+ * install tree of the npm that started it. That npm can belong to nvm, to
+ * Homebrew, or to an app that runs Clawboo on a Node of its own, whose files
+ * should not change under it.
+ */
+const PYTHON_PASSTHROUGH = ['PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX']
+
 /** Every name that may pass through, in one frozen set for the test to assert against. */
 export const CONNECTOR_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
-  new Set([...POSIX_PASSTHROUGH, ...WINDOWS_PASSTHROUGH, ...PROXY_PASSTHROUGH, ...NPM_PASSTHROUGH]),
+  new Set([
+    ...POSIX_PASSTHROUGH,
+    ...WINDOWS_PASSTHROUGH,
+    ...PROXY_PASSTHROUGH,
+    ...NPM_PASSTHROUGH,
+    ...PYTHON_PASSTHROUGH,
+  ]),
 ) as ReadonlySet<string>
 
 export interface ConnectorEnvOptions {
@@ -139,6 +159,52 @@ export interface ConnectorEnvOptions {
    * for a command a person approved to run as they configured it.
    */
   npmUpdateCheck?: 'off' | 'inherit'
+  /**
+   * Python's bytecode files. `'off'` sets `PYTHONDONTWRITEBYTECODE=1` unless
+   * the operator's environment already sets `PYTHONDONTWRITEBYTECODE` or
+   * `PYTHONPYCACHEPREFIX`, which then pass through as they are: a Python that
+   * a connector's npm install runs (node-gyp, for a native part) would
+   * otherwise write `__pycache__` folders into npm's own install tree.
+   * `'inherit'` passes the operator's settings through and adds nothing.
+   *
+   * Left unset, it follows `command`: `'off'` for a connector started through
+   * npm ({@link launchesThroughNpm}), `'inherit'` for any other launcher, so a
+   * `uvx` connector keeps the bytecode uv's environments cache between starts.
+   * With no `command` it is `'off'`. A command a person approved passes
+   * `'inherit'`, to run as they configured it.
+   */
+  pythonBytecode?: 'off' | 'inherit'
+  /** The program that starts the connector, which decides `pythonBytecode`
+   *  when that is left unset. */
+  command?: string
+  /** The platform `command` is read for. Defaults to this one; set in tests. */
+  platform?: NodeJS.Platform
+}
+
+/** The programs a connector starts through npm by, by file name. */
+const NPM_LAUNCHERS: readonly string[] = ['npx', 'npm', 'node']
+/** The same on Windows, where they also come as `.cmd` and `.exe` files. */
+const NPM_LAUNCHERS_WINDOWS: readonly string[] = [
+  ...NPM_LAUNCHERS,
+  'npx.cmd',
+  'npm.cmd',
+  'node.exe',
+]
+
+/**
+ * Whether `command` starts a connector through npm: its file name is `npx`,
+ * `npm` or `node`, whatever folder it is in, so a full path to a Node bundled
+ * inside an app counts. On Windows `npx.cmd`, `npm.cmd` and `node.exe` count
+ * too, in any case, as Windows reads file names.
+ */
+export function launchesThroughNpm(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform === 'win32') {
+    return NPM_LAUNCHERS_WINDOWS.includes(path.win32.basename(command).toLowerCase())
+  }
+  return NPM_LAUNCHERS.includes(path.posix.basename(command))
 }
 
 /**
@@ -162,6 +228,19 @@ export function connectorChildEnv(opts: ConnectorEnvOptions = {}): Record<string
     !('NPM_CONFIG_UPDATE_NOTIFIER' in env)
   ) {
     env['npm_config_update_notifier'] = 'false'
+  }
+
+  const pythonBytecode =
+    opts.pythonBytecode ??
+    (opts.command === undefined || launchesThroughNpm(opts.command, opts.platform)
+      ? 'off'
+      : 'inherit')
+  if (
+    pythonBytecode === 'off' &&
+    !('PYTHONDONTWRITEBYTECODE' in env) &&
+    !('PYTHONPYCACHEPREFIX' in env)
+  ) {
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
   }
 
   // Declared credentials last. An empty value is dropped rather than passed as

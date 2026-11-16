@@ -189,6 +189,9 @@ export const SERVER_IDENTITY_ENV_KEYS: ReadonlySet<string> = new Set([
   'KRB5CCNAME',
   'CLAWBOO_HOME',
   'CLAWBOO_WORK_DIR',
+  // Where the server user's Python reads and writes bytecode. An agent user's
+  // Python writing there could plant bytecode the server user then runs.
+  'PYTHONPYCACHEPREFIX',
   // Runtime homes the operator set for their own use point into their home. A
   // run is given its own home explicitly, which is kept.
   'CLAUDE_CONFIG_DIR',

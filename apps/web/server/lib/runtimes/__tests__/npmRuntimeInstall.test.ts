@@ -148,6 +148,55 @@ describe('npmChildEnv', () => {
     expect(env['npm_config_registry']).toBe('https://registry.example')
     expect(env['PATH']).toBe(['/opt/node-24/bin', '/usr/bin'].join(path.delimiter))
   })
+
+  it('turns Python’s bytecode off, so a native build writes nothing into npm’s own folder', () => {
+    // node-gyp runs python3, which would otherwise write __pycache__ folders
+    // into the install tree of the npm that runs it.
+    const env = npmChildEnv({ PATH: '/usr/bin' }, '/opt/node-24/bin/node', 'darwin')
+    expect(env['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
+
+  it('leaves a bytecode setting the server has alone, and reads an empty one as none', () => {
+    const own = npmChildEnv(
+      { PATH: '/usr/bin', PYTHONDONTWRITEBYTECODE: 'yes' },
+      '/opt/node-24/bin/node',
+      'linux',
+    )
+    expect(own['PYTHONDONTWRITEBYTECODE']).toBe('yes')
+
+    const prefix = npmChildEnv(
+      { PATH: '/usr/bin', PYTHONPYCACHEPREFIX: '/var/cache/pyc' },
+      '/opt/node-24/bin/node',
+      'linux',
+    )
+    expect(prefix['PYTHONPYCACHEPREFIX']).toBe('/var/cache/pyc')
+    expect('PYTHONDONTWRITEBYTECODE' in prefix).toBe(false)
+
+    const empty = npmChildEnv(
+      { PATH: '/usr/bin', PYTHONDONTWRITEBYTECODE: '' },
+      '/opt/node-24/bin/node',
+      'linux',
+    )
+    expect(empty['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
+
+  it('matches the setting’s name in any case on Windows only', () => {
+    const win = npmChildEnv(
+      { Path: 'C:\\Windows', PythonPycachePrefix: 'C:\\pyc' },
+      'C:\\nodejs\\node.exe',
+      'win32',
+    )
+    expect(win['PythonPycachePrefix']).toBe('C:\\pyc')
+    expect(Object.keys(win).some((k) => k.toUpperCase() === 'PYTHONDONTWRITEBYTECODE')).toBe(false)
+
+    // On POSIX another case is another variable, which Python never reads.
+    const posix = npmChildEnv(
+      { PATH: '/usr/bin', pythonpycacheprefix: '/x' },
+      '/opt/node-24/bin/node',
+      'linux',
+    )
+    expect(posix['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
 })
 
 describe('npmInstallArgs', () => {

@@ -115,13 +115,28 @@ export function isHostedAgentProcess(p: unknown): p is HostedAgentProcess {
  * still holds the server's own value: it was inherited, not chosen, whichever
  * env builder the call site used. A caller that sets one on purpose (an
  * isolated HOME for a runtime) sets a different value, and keeps it.
+ *
+ * The server's own Python bytecode folder (`PYTHONPYCACHEPREFIX`) is one of
+ * those. Dropping it gives way to `PYTHONDONTWRITEBYTECODE=1`, so an agent
+ * user's Python writes no bytecode at all where the server's would have
+ * written it elsewhere.
  */
 function agentEnv(env: AgentSpawnOptions['env']): Record<string, string> {
   const out: Record<string, string> = {}
+  let droppedPycachePrefix = false
   for (const [k, v] of Object.entries(env)) {
     if (typeof v !== 'string') continue
-    if (SERVER_IDENTITY_ENV_KEYS.has(k.toUpperCase()) && process.env[k] === v) continue
+    if (SERVER_IDENTITY_ENV_KEYS.has(k.toUpperCase()) && process.env[k] === v) {
+      if (k.toUpperCase() === 'PYTHONPYCACHEPREFIX') droppedPycachePrefix = true
+      continue
+    }
     out[k] = v
+  }
+  if (
+    droppedPycachePrefix &&
+    !Object.keys(out).some((k) => k.toUpperCase() === 'PYTHONDONTWRITEBYTECODE')
+  ) {
+    out['PYTHONDONTWRITEBYTECODE'] = '1'
   }
   return out
 }

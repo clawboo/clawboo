@@ -6,6 +6,8 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { connectorChildEnv } from '@clawboo/mcp'
+
 import { buildChildEnv } from '../../runtimes/childEnv'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import { killProcessTree } from '../../runtimes/killTree'
@@ -148,6 +150,43 @@ describe.runIf(posix)('spawnAgentProcess with agent isolation on', () => {
     expect(runtimeIdentityHomePath('codex', 'a1')).toBe('/var/lib/clawboo-agent/runtimes/codex/a1')
   })
 
+  it("swaps the server's Python bytecode folder for no bytecode in a hosted child", async () => {
+    // An agent user's Python writing into the server user's bytecode folder
+    // could plant code the server user's Python then runs.
+    h = startInProcessHost()
+    const hello = await h.client.waitForHello()
+    setActiveAgentHost({
+      client: h.client,
+      hello,
+      config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
+    })
+    vi.stubEnv('PYTHONPYCACHEPREFIX', '/Users/operator/.cache/pycache')
+    vi.stubEnv('PYTHONDONTWRITEBYTECODE', '')
+    const seen: Record<string, string>[] = []
+    const orig = h.client.spawn.bind(h.client)
+    vi.spyOn(h.client, 'spawn').mockImplementation((req) => {
+      seen.push({ ...req.env })
+      return orig(req)
+    })
+    const env = connectorChildEnv({ npmUpdateCheck: 'inherit', pythonBytecode: 'inherit' })
+    expect(env['PYTHONPYCACHEPREFIX']).toBe('/Users/operator/.cache/pycache')
+    const p = spawnAgentProcess({ kind: 'tool', command: '/bin/echo', args: ['x'], env })
+    await closed(p)
+    expect(seen[0]?.['PYTHONPYCACHEPREFIX']).toBeUndefined()
+    expect(seen[0]?.['PYTHONDONTWRITEBYTECODE']).toBe('1')
+
+    // A folder a caller chose on purpose, not the server's own, is kept.
+    const own = spawnAgentProcess({
+      kind: 'tool',
+      command: '/bin/echo',
+      args: ['x'],
+      env: { PATH: '/usr/bin:/bin', PYTHONPYCACHEPREFIX: '/var/lib/clawboo-agent/pyc' },
+    })
+    await closed(own)
+    expect(seen[1]?.['PYTHONPYCACHEPREFIX']).toBe('/var/lib/clawboo-agent/pyc')
+    expect(seen[1]?.['PYTHONDONTWRITEBYTECODE']).toBeUndefined()
+  })
+
   it("leaves the server user's identity and private locations out of a child's environment", () => {
     vi.stubEnv('HOME', '/Users/operator')
     vi.stubEnv('TMPDIR', '/var/folders/xx/T/')
@@ -155,7 +194,9 @@ describe.runIf(posix)('spawnAgentProcess with agent isolation on', () => {
     vi.stubEnv('CLAWBOO_HOME', '/Users/operator/.clawboo')
     vi.stubEnv('CLAWBOO_SECRETS_MASTER_KEY', 'k')
     vi.stubEnv('OPENAI_API_KEY', 'sk-ambient')
+    vi.stubEnv('PYTHONPYCACHEPREFIX', '/Users/operator/.cache/pycache')
     const env = buildChildEnv({ CODEX_HOME: '/var/lib/clawboo-agent/runtimes/codex/a1' })
+    expect(env['PYTHONPYCACHEPREFIX']).toBeUndefined()
     expect(env['HOME']).toBeUndefined()
     expect(env['TMPDIR']).toBeUndefined()
     expect(env['SSH_AUTH_SOCK']).toBeUndefined()
