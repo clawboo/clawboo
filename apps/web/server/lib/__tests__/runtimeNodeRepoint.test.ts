@@ -227,7 +227,9 @@ describe('a runtime whose Node is gone', () => {
       },
       env,
     )
-    const helperBefore = await readFile(path.join(base, 'runtimes', 'bin', 'helper'), 'utf8')
+    // `helper.cmd` on Windows.
+    const helperFile = path.join(base, 'runtimes', 'bin', launcherFileName('helper'))
+    const helperBefore = await readFile(helperFile, 'utf8')
     await unlink(old)
 
     const moved = repointRuntimeNode('openclaw', env, { execPath: next, version: 'v24.16.2' })
@@ -235,7 +237,7 @@ describe('a runtime whose Node is gone', () => {
     expect(moved?.launchers['openclaw']).toEqual({ command: next, args: [script] })
     expect(moved?.launchers['helper']).toEqual({ command: other, args: [] })
     expect(readRuntimeInstall('openclaw', env)).toEqual(moved)
-    expect(await readFile(path.join(base, 'runtimes', 'bin', 'helper'), 'utf8')).toBe(helperBefore)
+    expect(await readFile(helperFile, 'utf8')).toBe(helperBefore)
     expect(strayTemps()).toEqual([])
   })
 
