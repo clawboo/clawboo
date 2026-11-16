@@ -7,7 +7,7 @@
 // way (no fatal checks).
 
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { runBootProbe } from '../bootProbe'
 import { getDb, getDbPath, resetDb } from '../db'
-import { writeApiPortFile } from '../portUtils'
+import { getStartMarkerPath, writeApiPortFile, writeStartMarker } from '../portUtils'
 
 const itPosix = process.platform === 'win32' ? it.skip : it
 
@@ -108,10 +108,26 @@ describe('runBootProbe (fresh install)', () => {
     expect(report.fatal).not.toContain('masterKeyBootSentinel') // degrade, never fatal
   })
 
-  it('matches the api-port file when it agrees with the listening port', async () => {
+  it('matches the api-port file when it and the start marker agree with the listening port', async () => {
     writeApiPortFile(18793)
+    writeStartMarker(18793, '0.9.0')
     const report = await runBootProbe({ port: 18793 })
     expect(checkById(report, 'apiPortFileMatches')?.ok).toBe(true)
+  })
+
+  it('degrades apiPortFileMatches when the start marker is missing or names another server', async () => {
+    writeApiPortFile(18793)
+    const missing = await runBootProbe({ port: 18793 })
+    expect(checkById(missing, 'apiPortFileMatches')).toMatchObject({
+      ok: false,
+      message: 'start marker api-port.json is absent, server is on 18793',
+    })
+    writeStartMarker(18793, '0.9.0')
+    const marker = JSON.parse(await readFile(getStartMarkerPath(), 'utf8'))
+    await writeFile(getStartMarkerPath(), JSON.stringify({ ...marker, pid: process.pid + 1 }))
+    const other = await runBootProbe({ port: 18793 })
+    expect(checkById(other, 'apiPortFileMatches')?.ok).toBe(false)
+    expect(other.fatal).toEqual([])
   })
 
   it('degrades apiPortFileMatches when the file disagrees with the port', async () => {

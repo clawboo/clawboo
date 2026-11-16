@@ -284,11 +284,18 @@ interface Proc {
   group: boolean
 }
 
-/** Stop one child and everything it started: SIGTERM, then SIGKILL after the grace. */
+/**
+ * Stop one child and everything it started: SIGTERM, then SIGKILL after the
+ * grace. With no grace, SIGKILL at once and no SIGTERM: the server's
+ * `killProcessTreeNow` asks for that for a child whose own planned stop has had
+ * its time, and the Hermes gateway reads a SIGTERM as a crash.
+ */
 async function killTree(proc: Proc, graceMs: number): Promise<void> {
   const pid = proc.child.pid
   if (!pid) return
-  if (proc.group && process.platform !== 'win32' && trySignal(-pid, 'SIGTERM')) {
+  const first: NodeJS.Signals = graceMs > 0 ? 'SIGTERM' : 'SIGKILL'
+  if (proc.group && process.platform !== 'win32' && trySignal(-pid, first)) {
+    if (first === 'SIGKILL') return
     const t = setTimeout(() => {
       if (trySignal(-pid, 0)) trySignal(-pid, 'SIGKILL')
     }, graceMs)
@@ -297,7 +304,8 @@ async function killTree(proc: Proc, graceMs: number): Promise<void> {
   }
   if (proc.child.exitCode !== null || proc.child.signalCode !== null) return
   const tree = [...(await descendantsOf(pid)), pid]
-  for (const p of tree) trySignal(p, 'SIGTERM')
+  for (const p of tree) trySignal(p, first)
+  if (first === 'SIGKILL') return
   const t = setTimeout(() => {
     for (const p of tree) if (trySignal(p, 0)) trySignal(p, 'SIGKILL')
   }, graceMs)

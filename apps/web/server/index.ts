@@ -41,12 +41,9 @@ import { repointRuntimesToServerNode } from './lib/runtimeFolder'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
-import { installServerStop, startOnceListening, watchEmbedderChannel } from './lib/serverStop'
-import {
-  isSubprocessShutdown,
-  killLiveSubprocesses,
-  shutdownLiveSubprocesses,
-} from './lib/runtimes/subprocess'
+import { installStopThenListen, watchEmbedderChannel, watchStopSignals } from './lib/serverStop'
+import { stopServerParts } from './lib/serverExit'
+import { killLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
@@ -96,15 +93,18 @@ import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { gatewayProxyUpstreamSettings, getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
-import { startHermesAtBoot } from './lib/runtimes/hermes'
+import { signalHermesGatewayForExit, startHermesAtBoot } from './lib/runtimes/hermes'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
   resolveApiPort,
   writeApiPortFile,
   getApiPortFilePath,
   removeApiPortFileIfOwned,
+  removeStartMarkerIfOwned,
   waitForPortFree,
+  writeStartMarker,
 } from './lib/portUtils'
+import { getCurrentVersion } from './lib/updateCheck'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe, startBackgroundFullDatabaseCheck } from './lib/bootProbe'
@@ -216,6 +216,10 @@ async function main() {
   // before anything waits, so a stop asked for while the server starts is held
   // and runs as soon as the stop below exists.
   const embedder = watchEmbedderChannel(process, process.env)
+  // SIGINT and SIGTERM are kept the same way: no other part of the server
+  // listens for them, so one sent while the server starts is neither spent on a
+  // part that happened to listen already nor ends the process before its stop.
+  const stopSignals = watchStopSignals(process)
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
 
@@ -1233,8 +1237,9 @@ async function main() {
 
   // ── Listen ────────────────────────────────────────────────────────────────
 
-  // Not once a stop has begun: see startOnceListening.
-  const onListening = startOnceListening(isSubprocessShutdown, (): void => {
+  // What starts once the server listens. Never once a stop has begun, kept from
+  // boot or asked for while the listen completes: see installStopThenListen.
+  const startAfterListen = (): void => {
     const hostForBrowser = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname
     // Trailing slash under a mount so the shell's relative assets resolve without
     // relying on the redirect (which is there for hand-typed URLs).
@@ -1251,6 +1256,12 @@ async function main() {
           'and sends its access token only to the port it names, so it cannot sign in to ' +
           'this server until the file can be written.',
       )
+    }
+    // Right after the port file: the start marker names this process too, so a
+    // reader can tell this server from a program that took a dead one's port.
+    // A reader with no marker goes by the port file alone, as before.
+    if (!writeStartMarker(port, getCurrentVersion())) {
+      log.warn({ port }, 'Could not write the start marker api-port.json beside the port file.')
     }
 
     log.info({ url: browserUrl }, `Clawboo ready — open in browser: ${browserUrl}`)
@@ -1365,10 +1376,7 @@ async function main() {
         }
       })
       .catch((err: unknown) => log.error({ err }, 'Boot probe failed (non-fatal)'))
-  })
-  // Already listening when the work folder move ran.
-  if (server.listening) onListening()
-  else server.listen(port, hostname, onListening)
+  }
 
   // Best-effort cleanup of the runtime port file on graceful shutdown so
   // stale entries don't mislead the CLI on the next launch. We don't rely
@@ -1381,7 +1389,7 @@ async function main() {
   // recovered on the next open — so a checkpoint failure is logged and
   // never blocks shutdown or changes the exit code.
   //
-  // This runs TWICE by construction: the stop below (a signal, or a shutdown
+  // This runs TWICE by construction: the stop (a signal, or a shutdown
   // message from the app that started this server) calls it and then calls
   // `process.exit(0)`, which fires the `'exit'` hook that calls it again.
   // `closeDb()` is idempotent, and the flag keeps the port-file removal and the
@@ -1400,6 +1408,14 @@ async function main() {
     } catch (err) {
       log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
     }
+    // The Hermes gateway is not in that reap: it gets SIGINT, its planned stop
+    // (a bare SIGTERM reads to Hermes as a crash). Nothing waits here; after the
+    // graceful path it has already exited, and this is a no-op.
+    try {
+      signalHermesGatewayForExit()
+    } catch (err) {
+      log.warn({ err }, 'Failed to stop the Hermes gateway on shutdown (non-fatal)')
+    }
     // With agent isolation: every process the agent user still runs, then the
     // host. A no-op otherwise.
     try {
@@ -1411,6 +1427,8 @@ async function main() {
     // fallback, or a restart successor that has already rebound) may have
     // rewritten it, and deleting that would strand a server that is still up.
     removeApiPortFileIfOwned(port)
+    // The same rule: only a marker that names this process.
+    removeStartMarkerIfOwned()
     try {
       closeDb()
     } catch (err) {
@@ -1423,29 +1441,43 @@ async function main() {
   // process — so a child ignoring SIGTERM used to outlive the server. The wait is
   // bounded (SHUTDOWN_WAIT_MS) so a hung child can never block the exit, and it
   // never throws.
+  //
+  // The Hermes gateway's planned stop runs AT THE SAME TIME, not after, and so
+  // does closing the OpenClaw connection, after the parts that start work are
+  // stopped; traces are flushed last, so the spans of the runs those stops end
+  // are kept (see `stopServerParts`). The whole wait stays under about 11 s,
+  // inside the 15 s an app that runs Clawboo may allow a stop. With no gateway
+  // started and no trace exporter it waits for nothing.
   const gracefulExit = async (): Promise<void> => {
-    try {
-      const { signalled, exited } = await shutdownLiveSubprocesses()
-      if (signalled > 0) {
-        log.info({ signalled, exited }, 'Terminated running runtime subprocesses on shutdown')
-      }
-    } catch (err) {
-      log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
-    }
+    await stopServerParts(log)
     cleanup()
   }
-  // One stop, however it is asked for: Ctrl+C, SIGTERM, or the app that started
-  // this server, over its IPC channel. Asked twice, it runs once.
-  installServerStop({
-    proc: process,
-    channel: embedder,
-    gracefulExit,
-    exit: (code) => process.exit(code),
-    onStopping: (why) => log.info({ why }, 'Stopping the server'),
-  })
   // Last-resort synchronous path (a `process.exit` from anywhere else): it cannot
   // await, so it falls back to signalling without waiting.
   process.once('exit', cleanup)
+
+  // One stop, however it is asked for: Ctrl+C, SIGTERM, or the app that started
+  // this server, over its IPC channel. Asked twice, it runs once. Installed
+  // BEFORE the after-listen starts: a stop kept while the server started (on a
+  // boot that moved work folders the server already listens here) runs first,
+  // and then none of them run, so no routine can start a run on a server that
+  // is going away.
+  installStopThenListen(
+    {
+      proc: process,
+      signals: stopSignals,
+      channel: embedder,
+      gracefulExit,
+      exit: (code) => process.exit(code),
+      onStopping: (why) => log.info({ why }, 'Stopping the server'),
+    },
+    {
+      // Already listening when the work folder move ran.
+      listening: server.listening,
+      listen: (onListening) => server.listen(port, hostname, onListening),
+      onListening: startAfterListen,
+    },
+  )
 
   // Defensive graceful degradation: a background subsystem that rejects without a
   // local handler should NOT crash the whole server. Log it (redacted by the pino

@@ -37,7 +37,7 @@ The server picks its port at startup. It tries `18790` first and scans up to `18
 | `PORT`                   | Outside `--dev`, use exactly this port (fails if taken). Checked before the scan, so it beats the next one. |
 | `CLAWBOO_API_PORT_START` | Start the scan here instead of `18790`.                                                                     |
 
-After binding, the server writes the port to `<clawboo home>/api-port.txt` (`~/.clawboo/api-port.txt` unless `CLAWBOO_HOME` is set). The CLI reads that file to find a running server; see [CLI](/reference/cli).
+After binding, the server writes the port to `<clawboo home>/api-port.txt` (`~/.clawboo/api-port.txt` unless `CLAWBOO_HOME` is set), and in releases after 0.8.0 the [start marker](/reference/configuration#start-marker) `api-port.json` beside it, which names the server's process so a reader can tell a running server's record from a dead one's. The CLI reads them to find a running server; see [CLI](/reference/cli).
 
 ### Serving under a path prefix
 

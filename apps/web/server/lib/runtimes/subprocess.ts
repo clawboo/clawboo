@@ -100,6 +100,16 @@ export function registerRuntimeChild(child: AgentProcess): void {
   liveChildren.add(child)
 }
 
+/**
+ * Put a child in the durable pid record only, for one that stops in its own
+ * way at shutdown rather than through this registry's SIGTERM of its tree: the
+ * Hermes gateway, whose planned stop is SIGINT (`hermes/gateway.ts`
+ * `stopForExit`). The next boot still reaps it if a crash leaves it running.
+ */
+export function recordRuntimeChildPid(child: AgentProcess): void {
+  recordUntilClose(child)
+}
+
 /** Stop tracking a local-tool child that closed cleanly. */
 export function unregisterRuntimeChild(child: AgentProcess): void {
   liveChildren.delete(child)

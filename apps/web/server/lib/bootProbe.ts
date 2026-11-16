@@ -35,6 +35,8 @@ import { DEFAULTS } from './defaults'
 import { probeMcpServer } from './mcpSupervisor'
 import { otlpConfigured } from './obs/obsFlags'
 import { getObsTracer, getOtelInitFailure, initOtel } from './obs/otel'
+import { readStartMarker } from '@clawboo/process-lookup'
+
 import { readApiPortFile } from './portUtils'
 import { getRuntimeSecret, getVaultPaths, hasRuntimeSecret, setRuntimeSecret } from './secretsVault'
 
@@ -489,18 +491,30 @@ async function runBootProbeInner(input: BootProbeInput = {}): Promise<BootReport
     }),
   )
 
-  // 6. api-port file matches the actual port.
+  // 6. api-port file matches the actual port, and the start marker beside it
+  //    names this process on it (readers check the marker before they trust
+  //    the port: without one naming us they go by the bare file alone).
   checks.push(
     await runCheck('apiPortFileMatches', () => {
       if (input.port == null)
         return { ok: true, message: 'port file check skipped (no port supplied)' }
       const onDisk = readApiPortFile()
-      return onDisk === input.port
-        ? { ok: true, message: `api-port file matches (${input.port})` }
-        : {
-            ok: false,
-            message: `api-port file is ${onDisk ?? 'absent'}, server is on ${input.port}`,
-          }
+      if (onDisk !== input.port) {
+        return {
+          ok: false,
+          message: `api-port file is ${onDisk ?? 'absent'}, server is on ${input.port}`,
+        }
+      }
+      const marker = readStartMarker(resolveClawbooDir(process.env))
+      if (!marker || marker.pid !== process.pid || marker.port !== input.port) {
+        return {
+          ok: false,
+          message: marker
+            ? `start marker names pid ${marker.pid} on port ${marker.port}, server is pid ${process.pid} on ${input.port}`
+            : `start marker api-port.json is absent, server is on ${input.port}`,
+        }
+      }
+      return { ok: true, message: `api-port file and start marker match (${input.port})` }
     }),
   )
 
