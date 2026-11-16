@@ -11,6 +11,11 @@
 // server's health for a while. That watch lives here rather than in the panel:
 // leaving Runtimes or closing Settings unmounts the panel, and the client would
 // then never come up until a reload.
+//
+// Something else can connect the server while a page is open with no client of
+// its own: a routine falling due, or another page opening OpenClaw. The connected
+// row then offers Connect this page, which brings up the client through the same
+// shared dial (connectThisPage). A thin client never gets one (see thinClient).
 
 import {
   connectOpenClawGateway,
@@ -20,6 +25,7 @@ import {
 
 import { enterGatewayMode } from '@/features/connection/GatewayBootstrap'
 import { connectGatewayFromSettings } from '@/lib/gatewayConnect'
+import { isThinClient } from '@/lib/thinClient'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 
@@ -60,9 +66,26 @@ async function watchForServer(watch: { cancelled: boolean }, first: RegistryHeal
     if (watch.cancelled) return
     health = await fetchRegistryHealth()
   }
+  // Replaced, or a person connected this page directly (connectThisPage).
+  if (watch.cancelled) return
   if (current === watch) current = null
   // Already has one (the setup flow, or a reconnect banner, got there first).
   if (useConnectionStore.getState().client !== null) return
+  // A thin client has no page connection to bring up.
+  if (isThinClient()) return
+  await attachPageClient()
+}
+
+/**
+ * Give this page its own Gateway client now, for a server already connected to
+ * the Gateway: the connected row's Connect this page. Shares a dial already in
+ * flight, so a double click dials once. Ends a watch from an earlier open, which
+ * would otherwise dial again after this one. A failure says so in a toast.
+ */
+export async function connectThisPage(): Promise<void> {
+  if (isThinClient()) return
+  if (useConnectionStore.getState().client !== null) return
+  cancelOpenClawWatch()
   await attachPageClient()
 }
 
@@ -71,23 +94,57 @@ async function watchForServer(watch: { cancelled: boolean }, first: RegistryHeal
 // disconnect the other's client.
 let attaching: Promise<void> | null = null
 
+// Who to tell when a page dial starts or ends: the connected row shows Connect
+// this page as busy while one runs, whichever path started it.
+const attachListeners = new Set<() => void>()
+
+/** Hear when a page dial starts or ends (for useSyncExternalStore). */
+export function subscribePageAttach(listener: () => void): () => void {
+  attachListeners.add(listener)
+  return () => {
+    attachListeners.delete(listener)
+  }
+}
+
+/** True while this page is dialing its own Gateway connection. */
+export function isPageAttaching(): boolean {
+  return attaching !== null
+}
+
+function setAttaching(next: Promise<void> | null): void {
+  attaching = next
+  for (const listener of attachListeners) listener()
+}
+
 function attachPageClient(): Promise<void> {
-  attaching ??= (async () => {
+  if (attaching) return attaching
+  const dial = (async () => {
     try {
       const { client, gatewayUrl } = await connectGatewayFromSettings()
+      // Another path gave the page a client while this dial ran (the offline
+      // banner's Reconnect, the setup flow). Keep that one: entering this one
+      // would disconnect it and load the fleet twice.
+      if (useConnectionStore.getState().client !== null) {
+        client.disconnect()
+        return
+      }
       await enterGatewayMode(client, gatewayUrl)
     } catch {
+      // The page has a client after all: another path's, which landed while
+      // this dial ran, or this dial's own, set before entering it failed. The
+      // page is connected, and Connect this page is not offered, so a toast
+      // saying it could not connect, and pointing there, would be wrong.
+      if (useConnectionStore.getState().client !== null) return
       // A device to approve, say. The server's connection stands either way,
-      // and a reload of the page connects it as a returning page does. Said
-      // out loud: the connected row offers nothing for the page's connection.
+      // and the connected row offers Connect this page while the page has no
+      // client, so the toast points there.
       useToastStore.getState().addToast({ message: PAGE_CLIENT_FAILED, type: 'error' })
     }
-  })().finally(() => {
-    attaching = null
-  })
-  return attaching
+  })().finally(() => setAttaching(null))
+  setAttaching(dial)
+  return dial
 }
 
 /** What a person is told when this page could not open its own connection. */
 export const PAGE_CLIENT_FAILED =
-  'OpenClaw is connected, but this page could not connect to it. Reload the page to chat with OpenClaw agents.'
+  "OpenClaw is connected, but this page could not connect to it. To chat with OpenClaw agents here, choose Connect this page on OpenClaw's row in Settings > Runtimes."

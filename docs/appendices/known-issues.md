@@ -21,7 +21,7 @@ This page lists what does not work yet in Clawboo, or works with a catch. Each e
 - **Open**: no fix exists yet.
 - **Fixed on main**: the fix is in the source code but not in an npm release yet. It ships with the next release.
 
-The latest npm release is 0.7.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
+The latest npm release is 0.8.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
 
 ## Security and access
 
@@ -77,7 +77,7 @@ The latest npm release is 0.7.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** Claude Code and Codex start with their own permission prompts and sandboxes turned off, so they can work unattended. Hermes has no sandbox and asks only before the commands its own policy flags. They run as your user account and can read and change any file it can. Without a worktree they start in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default): on a task, including agent Routines you create in the app, in the task's own folder (`teams/<team id>/tasks/<task id>`), and on other team-chat turns and in an agent's own chat, in their team's folder (`teams/<team id>`). The work folder sits outside Clawboo's data folder, so a short relative path such as `../..` from a team folder or a task folder no longer reaches the database, and neither does a tool that walks up parent folders. Work an install keeps in the data folder (see [The work folder](/operating/data-and-state#the-work-folder) for when that happens) does not get that distance. That is not a boundary: the agents still run as the same user account and can open Clawboo's database and saved keys in `~/.clawboo` by their full path. A git worktree keeps one task's file changes apart from another's; it is not a sandbox either.
 
-**What to do:** give coding agents only work you would let them do unattended. For work you do not fully trust, run agents under a separate user account or run Clawboo in a virtual machine. [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to do the first: Claude Code, Codex and Hermes runs, and Clawboo Native's commands, then start as a user that cannot open Clawboo's database, saved keys, settings or access token. Their sandboxes stay off, and they still reach the network. It is not available on Windows. All agents share that one user, so it does not keep them apart from each other. On Linux, [`CLAWBOO_AGENT_USERS`](/operating/agent-isolation#a-user-per-agent) now gives each agent a user of its own instead: one agent cannot read another's home or reach the folder of a team it is not on. Code tasks in a repository, Hermes and a few other things are [not available with it yet](/operating/agent-isolation#not-available-yet-with-a-user-per-agent). See [What agents can do](/concepts/permissions).
+**What to do:** give coding agents only work you would let them do unattended. For work you do not fully trust, run agents under a separate user account or run Clawboo in a virtual machine. [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to do the first: Claude Code, Codex and Hermes runs, and Clawboo Native's commands, then start as a user that cannot open Clawboo's database, saved keys, settings or access token. Their sandboxes stay off, and they still reach the network. It is not available on Windows. All agents share that one user, so it does not keep them apart from each other. From 0.8.0, on Linux, [`CLAWBOO_AGENT_USERS`](/operating/agent-isolation#a-user-per-agent) gives each agent a user of its own instead: one agent cannot read another's home or reach the folder of a team it is not on. Code tasks in a repository, Hermes and a few other things are [not available with it yet](/operating/agent-isolation#not-available-yet-with-a-user-per-agent). See [What agents can do](/concepts/permissions).
 
 **Status:** open, by design.
 
@@ -87,7 +87,7 @@ The latest npm release is 0.7.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** Clawboo does not limit which settings files Claude Code loads. Every Claude Code agent reads what your own `claude` command reads: your user settings and memory in `~/.claude`, plus any `.claude` settings and `CLAUDE.md` in the folder it works in. All Claude Code agents share them.
 
-**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. From 0.7.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user; all Claude Code agents then share that user's one `~/.claude`, which is not yours. In releases after 0.7.0, with [`CLAWBOO_AGENT_USERS`](/operating/agent-isolation#a-user-per-agent) (Linux only for now), each agent runs as a user of its own, with its own `~/.claude`. See [Claude Code](/runtimes/claude-code).
+**What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. From 0.7.0, [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) is the built-in way to run agents as a separate user; all Claude Code agents then share that user's one `~/.claude`, which is not yours. From 0.8.0, with [`CLAWBOO_AGENT_USERS`](/operating/agent-isolation#a-user-per-agent) (Linux only for now), each agent runs as a user of its own, with its own `~/.claude`. See [Claude Code](/runtimes/claude-code).
 
 **Status:** fixed in 0.6.0. From 0.6.0, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
 
@@ -268,6 +268,17 @@ The latest npm release is 0.7.0. Run `clawboo --version` to see which one you ha
 **What to do:** behind a reverse proxy, limit concurrent connections there, and keep the access token on. See the [Observability API](/reference/rest-api/observability).
 
 **Status:** open.
+
+## Issues in 0.7.0 that are fixed in 0.8.0
+
+These problems affect the 0.7.0 release. They are fixed in 0.8.0, which the [changelog](/appendices/changelog) describes.
+
+| What you see on 0.7.0                                                                                                                                                                                                                | Area     |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| Clawboo connects to the OpenClaw Gateway or probes its port at every start, even when nothing uses OpenClaw, so a Gateway that a service manager starts on its first connection, such as a systemd socket unit, starts at every boot | OpenClaw |
+| An OpenClaw Gateway that nothing uses is reported as unreachable when it is not running                                                                                                                                              | OpenClaw |
+| A browser connection to the Gateway that fails keeps retrying unseen                                                                                                                                                                 | OpenClaw |
+| A reconnect asked for while a Gateway connection is still being made leaves the server unable to connect to the Gateway until it restarts                                                                                            | OpenClaw |
 
 ## Issues in 0.6.0 that are fixed in 0.7.0
 

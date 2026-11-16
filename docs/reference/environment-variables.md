@@ -365,7 +365,7 @@ Before it accepts any run, the server checks from inside that user's account tha
 
 ### CLAWBOO_AGENT_USERS
 
-A pool of operating system users, so each agent runs as a user of its own. Linux only for now, in releases after 0.7.0.
+A pool of operating system users, so each agent runs as a user of its own. Linux only for now, from 0.8.0.
 
 - Type: user names separated by commas, or a range of user ids
 - Default: unset (off)
