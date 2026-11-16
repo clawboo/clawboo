@@ -33,6 +33,8 @@ import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { getDb } from '../lib/db'
+import { roleScopeOf } from '../lib/roles/guard'
+import { redactForGuest, titlesOnTeams } from '../lib/roles/redact'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { subscribeBoardChange } from '../lib/teamChat/boardChangeBus'
 import { booZeroForTeam } from '../lib/teamChat/booZero'
@@ -167,10 +169,15 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   // `id:` line (EPHEMERAL, off the resume cursor). The thin client applies each to
   // its board store and reconciles any gap-missed change with a `GET /api/board`
   // reload on (re)connect. So a server cascade's BoardTaskCards update live.
+  // A guest's frames keep no title of a task off their teams in what the board wrote
+  // (lib/roles/redact), as their other answers do. A frame that cannot be redacted is
+  // dropped (the bus isolates the throw), and the next reload brings the card back.
+  const scope = roleScopeOf(req)
   const unsubBoard = subscribeBoardChange(teamId, (change) => {
     if (closed) return
+    const frame = scope ? redactForGuest(change, () => titlesOnTeams(db, scope.teams)) : change
     res.write('event: board\n')
-    res.write(`data: ${JSON.stringify(change)}\n\n`)
+    res.write(`data: ${JSON.stringify(frame)}\n\n`)
   })
 
   // Live agent working/idle signals — forwarded as named `status` events, also with

@@ -7,13 +7,18 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createTask, teamChat, teams, updateStatus } from '@clawboo/db'
+import { addComment, agents, createTask, teamChat, teams, updateStatus } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
+import { roleGuard } from '../../lib/roles/guard'
+import type { PersonAccess } from '../../lib/roles/policy'
+import { ROUTE_RULES } from '../../lib/roles/rules'
+import { reflectToRoom } from '../../lib/teamChat/reflect'
 import { boardGetGET, boardLinkDepPOST, boardListGET } from '../board'
+import { teamChatGET } from '../teamChat'
 
 function fakeRes(): { res: Response; body: () => unknown } {
   let body: unknown
@@ -202,5 +207,73 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     expect(room).toContain('now depends on "Write the brief"')
     expect(room).toContain('now depends on a task on another team')
     expect(room).not.toContain('Unannounced launch')
+  })
+
+  it("hides another team's title in rows the board stored before, from a guest only", () => {
+    const db = getDb()
+    createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' })
+    createTask(db, { title: 'Write the brief', teamId: 'T' })
+    // Rows as the board wrote them before a release note left other teams' titles out.
+    const old = (title: string) =>
+      `“${title}”, the task this waited on, is done, and nothing started this one again. Retry it or decide what happens next.`
+    const mine = createTask(db, {
+      title: 'Photos',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'person', need: old('Unannounced launch'), by: 'agent' },
+    }).id
+    addComment(db, mine, old('Unannounced launch'), 'system', null, { kind: 'note' })
+    addComment(db, mine, old('Write the brief'), 'system', null, { kind: 'note' })
+    reflectToRoom(db, 'T', 'Task "Photos" now depends on "Unannounced launch".')
+
+    const until = Math.floor(Date.now() / 1000) + 3600
+    const guest: PersonAccess = {
+      roles: ['guest'],
+      approve: false,
+      teams: ['T'],
+      until,
+      label: null,
+      service: false,
+    }
+    const operator: PersonAccess = { ...guest, roles: ['operator'], teams: null, until: null }
+    // A request the way the server serves it: the route's own guard, then its handler.
+    const serve = (
+      route: string,
+      handler: (req: Request, res: Response) => void,
+      access: PersonAccess,
+      parts: { params?: Record<string, string>; query?: Record<string, string> },
+    ): unknown => {
+      const r = fakeRes()
+      const res = Object.assign(r.res, { set: () => res, on: () => res, writableEnded: false })
+      const req = {
+        params: parts.params ?? {},
+        query: parts.query ?? {},
+        body: {},
+        headers: {},
+        person: { id: 'p-1', name: 'Ada', role: null },
+        access,
+        app: { locals: { rolesMode: 'enforce' } },
+      } as unknown as Request
+      roleGuard(ROUTE_RULES[route]!)(req, res, () => handler(req, res))
+      return r.body()
+    }
+
+    const read = (access: PersonAccess) =>
+      JSON.stringify([
+        serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: mine } }),
+        serve('GET /api/board', boardListGET, access, {}),
+        serve('GET /api/team-chat', teamChatGET, access, { query: { teamId: 'T' } }),
+      ])
+
+    const asGuest = read(guest)
+    expect(asGuest).not.toContain('Unannounced launch')
+    expect(asGuest).toContain('The task this waited on, on another team, is done')
+    expect(asGuest).toContain('now depends on a task on another team')
+    // Their own team's title stays.
+    expect(asGuest).toContain('Write the brief')
+
+    const asOperator = read(operator)
+    expect(asOperator).toContain('“Unannounced launch”, the task this waited on')
+    expect(asOperator).toContain('now depends on \\"Unannounced launch\\"')
   })
 })
