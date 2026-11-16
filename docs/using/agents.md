@@ -123,6 +123,15 @@ Below the screen, **View link** and **Control link** make a link to this one age
 - One link opens at most two views at once, and links leave two places on each agent's screen (and eight in all) for the dashboard, so links you hand out never lock you out. An agent has at most 20 links; revoke one to make another.
 - The link is shown once, when you make it. Clawboo keeps only a fingerprint of it and never writes it to a log: the part after `#` is never sent to any server, and the link's page takes it out of the address bar as soon as it opens. The browser that opened it may still keep it in its history, so revoke a link when it is no longer needed.
 
+### Behind a sign-in proxy
+
+In releases after 0.8.0, an administrator who runs Clawboo behind a [sign-in proxy](/guides/sso-proxy) can ask more of the screen:
+
+- With [`personCheck: verified`](/guides/sso-proxy#only-signed-requests-act-as-a-person), watching an agent's screen, taking it over and typing need you to be signed in through the proxy, and a link needs that as well as the link. Your view is yours alone: nobody else can pick it up or type into it, though another signed-in person can still take over from a view of their own, as anywhere. Every few minutes the view reconnects by itself, which keeps your take over.
+- With [`proxyIdentityControlClaim: required`](/guides/sso-proxy#taking-over-a-screen), the proxy also decides who may take over which agent. Without its say-so, **Take over** answers "Your sign-in proxy has not allowed you to take over this agent", and if it stops allowing it while you have control, the screen goes back to the agent.
+
+Both are checks on what reaches the screen through Clawboo. Agents that share one operating system user can still open each other's displays directly; with a [user per agent](/operating/agent-isolation#a-user-per-agent) they cannot.
+
 ## Chat with an agent
 
 The chat on an agent's page is a one-to-one conversation with that agent. For a Clawboo Native, Claude Code, Codex or Hermes agent, the Clawboo server runs the chat, so it needs no OpenClaw Gateway. The reply appears as the agent writes it. An OpenClaw agent's chat goes through the OpenClaw Gateway, so it works while the Gateway is connected. Only [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat) can hand work to a team, and not on OpenClaw; a hand-off in any other agent's reply shows as a **Not handed off** note.

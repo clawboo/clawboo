@@ -17,7 +17,12 @@ import {
   PERSON_CHECK_MOVE,
   PERSON_CHECK_REFUSED,
   PERSON_CHECK_REPLY,
+  primePersonCheckMode,
   resetPersonCheckNotices,
+  VERIFIED_MOVE,
+  VERIFIED_NOBODY,
+  VERIFIED_REFUSED,
+  VERIFIED_REPLY,
   watchForPersonCheckRefusal,
 } from '../personCheckNotice'
 
@@ -159,5 +164,53 @@ describe('a command card answered through the server', () => {
       ),
     )
     expect(await answer('ap-2')).toMatch(/could not reach the Gateway/)
+  })
+})
+
+describe('on a server that counts only a person its sign-in proxy signed for', () => {
+  const identity = (body: Record<string, unknown>) =>
+    server.use(http.get('/api/access/identity', () => HttpResponse.json(body)))
+
+  it('says to open Clawboo through the proxy, not to fix a Host header', async () => {
+    identity({ personCheck: 'verified', person: { id: 'user-42', name: 'Ada', role: null } })
+    await primePersonCheckMode()
+    notePersonCheck(PERSON_CHECK_REFUSED)
+    notePersonCheck(PERSON_CHECK_MOVE)
+    notePersonCheck(PERSON_CHECK_REPLY)
+    expect(messages()).toEqual([VERIFIED_REFUSED, VERIFIED_MOVE, VERIFIED_REPLY])
+    for (const text of messages()) {
+      expect(text).toMatch(/address your sign-in proxy serves/)
+      expect(text).not.toMatch(/Host header/)
+    }
+  })
+
+  it('says once, when the page opens with nobody signed in, that nothing here acts as you', async () => {
+    identity({ personCheck: 'verified', person: null })
+    await primePersonCheckMode()
+    await primePersonCheckMode()
+    expect(messages()).toEqual([VERIFIED_NOBODY])
+  })
+
+  it('keeps the usual notices on a server that reads the page, and says nothing at open', async () => {
+    identity({ personCheck: 'page', person: null })
+    await primePersonCheckMode()
+    expect(messages()).toEqual([])
+    notePersonCheck(PERSON_CHECK_REFUSED)
+    expect(messages()).toEqual([PERSON_CHECK_REFUSED])
+  })
+
+  it('keeps the usual notices when the read fails, or on an older server', async () => {
+    server.use(http.get('/api/access/identity', () => new HttpResponse(null, { status: 500 })))
+    await primePersonCheckMode()
+    notePersonCheck(PERSON_CHECK_REFUSED)
+    expect(messages()).toEqual([PERSON_CHECK_REFUSED])
+  })
+
+  it('a refusal watched on any response gets the verified words too', async () => {
+    identity({ personCheck: 'verified', person: { id: 'user-42', name: 'Ada', role: null } })
+    await primePersonCheckMode()
+    watchForPersonCheckRefusal(refusal())
+    await flush()
+    expect(messages()).toEqual([VERIFIED_REFUSED])
   })
 })

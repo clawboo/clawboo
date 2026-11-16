@@ -45,6 +45,8 @@ With the setting on, a prompt-injected agent can no longer:
 
 Clawboo checks the first and the last of these from inside the agent user's account every time it starts, and refuses to start when it cannot prove them.
 
+This is what gives [the person check](/operating/security#what-counts-as-a-person) its strength. Without it, an agent can act as you around every check by changing the database directly. With it, and in releases after 0.8.0 with `personCheck: verified` behind a sign-in proxy, an agent other than OpenClaw's cannot act as you even if it gets the access token some other way.
+
 It does **not**:
 
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;

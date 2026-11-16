@@ -9,7 +9,7 @@ import { Lock } from 'lucide-react'
 
 import { apiFetch, setResponseObserver } from '@clawboo/control-client'
 
-import { watchForPersonCheckRefusal } from '@/lib/personCheckNotice'
+import { primePersonCheckMode, watchForPersonCheckRefusal } from '@/lib/personCheckNotice'
 
 import { readInjectedBase } from '@/app/injectedBase'
 import { Button } from '@/features/shared/Button'
@@ -99,6 +99,8 @@ export function AccessLock({
   // leave this tab failing every read until a reload.
   useEffect(() => {
     if (state !== 'open') return
+    // How the server checks a person decides what its refusals say.
+    void primePersonCheckMode()
     setResponseObserver((res) => {
       watchForPersonCheckRefusal(res)
       if (res.status !== 401) return

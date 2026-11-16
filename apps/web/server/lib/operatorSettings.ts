@@ -162,6 +162,23 @@ export const OPERATOR_KEYS = {
     userEditable: false,
     choices: ['off', 'enforce'],
   },
+  /** Whether taking over an agent's screen needs the proxy's say-so: `off`, or
+   *  `required` (a `control` claim naming the agent, on the take over and every
+   *  batch of input; lib/auth.ts `controlClaimFor`). */
+  proxyIdentityControlClaim: {
+    kind: 'choice',
+    env: 'CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM',
+    userEditable: false,
+    choices: ['off', 'required'],
+  },
+  /** Who may act as the person (lib/personCheck.ts): `page`, the dashboard's own
+   *  page or a verified person, or `verified`, a verified person only. */
+  personCheck: {
+    kind: 'choice',
+    env: 'CLAWBOO_PERSON_CHECK',
+    userEditable: false,
+    choices: ['page', 'verified'],
+  },
   // Where Clawboo Native sends each provider's requests, its key check and its
   // model list, for model traffic that goes through a gateway or company proxy
   // (lib/providerBaseUrls). Only an administrator sets these: a base URL
@@ -196,6 +213,8 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   proxyIdentityNameClaim: 'name',
   proxyIdentityRoleClaim: 'role',
   proxyIdentityRoles: 'off',
+  proxyIdentityControlClaim: 'off',
+  personCheck: 'page',
   anthropicBaseUrl: null,
   openaiBaseUrl: null,
   openrouterBaseUrl: null,

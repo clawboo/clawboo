@@ -39,6 +39,10 @@ export interface Controller {
   lastInputAt: number
   /** When the holder's view closed, while it may still come back. */
   detachedAt: number | null
+  /** The person who took control, when control is bound to one (the verified
+   *  person check, or the take-over claim required): only they send input,
+   *  hand it back or keep it through a reconnect. Null otherwise. */
+  person: string | null
 }
 
 const controllers = new Map<string, Controller>()
@@ -116,10 +120,16 @@ export function personInControlMessage(): string {
   return "A person has taken over this agent's computer (its screen and browser) and is using it now. Do not retry at once: wait for them to hand it back, or ask them in chat what they need."
 }
 
-/** Take control for `viewerId`, from the agent or from whoever held it. */
-export function takeControl(agentId: string, viewerId: string, via: Controller['via']): Controller {
+/** Take control for `viewerId`, from the agent or from whoever held it. `person`
+ *  binds it to the person who took it, when control is bound to one. */
+export function takeControl(
+  agentId: string,
+  viewerId: string,
+  via: Controller['via'],
+  person: string | null = null,
+): Controller {
   const t = now()
-  const c: Controller = { viewerId, via, since: t, lastInputAt: t, detachedAt: null }
+  const c: Controller = { viewerId, via, since: t, lastInputAt: t, detachedAt: null, person }
   controllers.set(agentId, c)
   ensureSweep()
   emit(agentId)

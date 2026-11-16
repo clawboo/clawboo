@@ -16,7 +16,8 @@
 // A speed bump, NOT a security boundary. Any program running as the same user
 // can send these headers, and can write the SQLite database under ~/.clawboo
 // directly anyway. What it stops is a local caller passing for the person by
-// setting one body field.
+// setting one body field. With `personCheck: verified` (lib/personCheck.ts) the
+// person check does not read it at all.
 
 import type { IncomingMessage } from 'node:http'
 
