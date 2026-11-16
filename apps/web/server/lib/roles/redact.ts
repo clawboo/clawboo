@@ -43,14 +43,19 @@ export const HIDDEN_NOTE = 'A note about work that is not shown here.'
 /** The longest a note quotes a title before cutting it (`subtaskNames`, `nameOfLink`). */
 const QUOTED_TITLE_MAX = 60
 
-/** Says whether a quoted title is one the guest may read. */
-export type TitleCheck = (quoted: string) => boolean
+/** Says whether a quoted title is one the guest may read. `longest`: no title they
+ *  may read is longer, so a longer span need not be looked up. */
+export interface TitleCheck {
+  (quoted: string): boolean
+  longest?: number
+}
 
 /** The titles of every task on these teams, as a check: each title as a note may
  *  quote it (as stored, with its own quotes made straight or single as new notes
  *  write them), whole or cut to its first 60 characters. */
 export function titlesOnTeams(db: ClawbooDb, teams: ReadonlySet<string>): TitleCheck {
   const readable = new Set<string>()
+  let longest = 0
   if (teams.size > 0) {
     const rows = db
       .select({ title: tasks.title })
@@ -60,11 +65,14 @@ export function titlesOnTeams(db: ClawbooDb, teams: ReadonlySet<string>): TitleC
     for (const { title } of rows) {
       for (const form of [title, title.replace(/[“”]/g, '"'), title.replace(/"/g, "'")]) {
         readable.add(form)
+        longest = Math.max(longest, form.length)
         if (form.length > QUOTED_TITLE_MAX) readable.add(form.slice(0, QUOTED_TITLE_MAX))
       }
     }
   }
-  return (quoted) => readable.has(quoted)
+  const check: TitleCheck = (quoted) => quoted.length <= longest && readable.has(quoted)
+  check.longest = longest
+  return check
 }
 
 // ─── The notes the board writes ──────────────────────────────────────────────
@@ -205,50 +213,127 @@ function mayNameATask(text: string, field: NoteField): boolean {
   return STRAIGHT_TITLE_MARKS.some((mark) => text.includes(mark))
 }
 
-type Piece = { title: false; text: string } | { title: 'curly' | 'straight'; text: string }
+/** A stretch of the note: its own words, or a quoted title (`from`/`to` are inside
+ *  the quotes). Kept as places in the note, so walking it copies no text. */
+interface Piece {
+  title: false | 'curly' | 'straight'
+  from: number
+  to: number
+}
 
-/** The longest a note is walked for before it counts as unreadable. */
-const STEP_LIMIT = 100_000
+/** The pieces read so far, newest first: adding one copies nothing. */
+type Chain = { piece: Piece; before: Chain } | null
 
-/** The one way the note reads against NOTE_SHAPES, or null for none or more than one. */
+/** A note longer than this that may name a task is hidden without being read. The
+ *  board's own notes are far shorter. */
+const MAX_NOTE_CHARS = 20_000
+/** The most steps a note is walked for (each part tried, each closing quote and each
+ *  end of a run of words considered), and the most characters of candidate titles
+ *  looked up. Past either, the note counts as unreadable. Together they keep a read
+ *  linear in the note, however many quotes it holds. */
+const STEP_LIMIT = 200_000
+const LOOKUP_CHAR_LIMIT = 1_000_000
+/** The longest a title is taken to be when the check does not say. */
+const DEFAULT_LONGEST = 1_000
+
+/** The first index in the sorted `places` greater than `after`. */
+function firstAfter(places: Int32Array, after: number): number {
+  let lo = 0
+  let hi = places.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (places[mid]! <= after) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/** Where each kind of quote sits in the note, found once. */
+function quotePlaces(text: string): {
+  curlyCloses: Int32Array
+  straight: Int32Array
+  nextCurly: Int32Array
+  nextQuote: Int32Array
+} {
+  const n = text.length
+  const curly: number[] = []
+  const straight: number[] = []
+  // nextCurly[i] / nextQuote[i]: the first curly quote / any quote at or after i (n: none).
+  const nextCurly = new Int32Array(n + 1)
+  const nextQuote = new Int32Array(n + 1)
+  nextCurly[n] = n
+  nextQuote[n] = n
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const c = text[i]
+    const isCurly = c === '“' || c === '”'
+    nextCurly[i] = isCurly ? i : nextCurly[i + 1]!
+    nextQuote[i] = isCurly || c === '"' ? i : nextQuote[i + 1]!
+  }
+  for (let i = 0; i < n; i += 1) {
+    if (text[i] === '”') curly.push(i)
+    else if (text[i] === '"') straight.push(i)
+  }
+  return {
+    curlyCloses: Int32Array.from(curly),
+    straight: Int32Array.from(straight),
+    nextCurly,
+    nextQuote,
+  }
+}
+
+/** The one way the note reads against NOTE_SHAPES, or null for none, more than one,
+ *  or a walk past its limits. */
 function readNote(text: string, mayRead: TitleCheck): { shape: NoteShape; pieces: Piece[] } | null {
+  if (text.length > MAX_NOTE_CHARS) return null
+  const { curlyCloses, straight, nextCurly, nextQuote } = quotePlaces(text)
   let found: { shape: NoteShape; pieces: Piece[] } | null = null
   let ways = 0
   let steps = 0
+  let looked = 0
+  let overLimit = false
+  const spend = (n = 1): boolean => {
+    steps += n
+    if (steps > STEP_LIMIT) overLimit = true
+    return overLimit
+  }
+
   // Walks `parts` from `i` at `pos`; `done` hears each complete reading. True: stop.
   const walk = (
     parts: readonly Part[],
     i: number,
     pos: number,
-    got: Piece[],
-    done: (pos: number, got: Piece[]) => boolean,
+    got: Chain,
+    done: (pos: number, got: Chain) => boolean,
   ): boolean => {
-    if (++steps > STEP_LIMIT) return true
+    if (spend()) return true
     if (i === parts.length) return done(pos, got)
     const part = parts[i]!
     const next = (to: number, piece?: Piece): boolean =>
-      walk(parts, i + 1, to, piece ? [...got, piece] : got, done)
+      walk(parts, i + 1, to, piece ? { piece, before: got } : got, done)
     const then = (more: readonly Part[]): boolean =>
       walk([...more, ...parts.slice(i + 1)], 0, pos, got, done)
 
-    if ('lit' in part)
+    if ('lit' in part) {
       return (
         text.startsWith(part.lit, pos) &&
-        next(pos + part.lit.length, { title: false, text: part.lit })
+        next(pos + part.lit.length, { title: false, from: pos, to: pos + part.lit.length })
       )
+    }
     if ('num' in part) {
       let end = pos
       while (end < text.length && text[end]! >= '0' && text[end]! <= '9') end += 1
-      return end > pos && next(end, { title: false, text: text.slice(pos, end) })
+      return end > pos && next(end, { title: false, from: pos, to: end })
     }
     if ('words' in part) {
-      for (let end = pos + 1; end <= text.length; end += 1) {
-        if (/[“”"]/.test(text[end - 1]!)) break
-        if (next(end, { title: false, text: text.slice(pos, end) })) return true
+      // Up to the next quote of any kind, never past it.
+      const stop = nextQuote[pos]!
+      for (let end = pos + 1; end <= stop; end += 1) {
+        if (spend()) return true
+        if (next(end, { title: false, from: pos, to: end })) return true
       }
       return false
     }
-    if ('rest' in part) return next(text.length, { title: false, text: text.slice(pos) })
+    if ('rest' in part) return next(text.length, { title: false, from: pos, to: text.length })
     if ('oneOf' in part) return part.oneOf.some((alt) => then(alt))
     if ('maybe' in part) return then(part.maybe) || next(pos)
     if ('list' in part) return then([CURLY_TITLE, { listRest: part.list }])
@@ -260,31 +345,53 @@ function readNote(text: string, mayRead: TitleCheck): { shape: NoteShape; pieces
     }
     // A quoted span: a task's title, or a routine's name.
     const curly = 'name' in part || part.title === 'curly'
-    const [open, close] = curly ? ['“', '”'] : ['"', '"']
-    if (text[pos] !== open) return false
-    for (let end = text.indexOf(close, pos + 1); end !== -1; end = text.indexOf(close, end + 1)) {
-      const inside = text.slice(pos + 1, end)
-      const quotesInside = /[“”]/.test(inside)
+    if (text[pos] !== (curly ? '“' : '"')) return false
+    const closes = curly ? curlyCloses : straight
+    // The first curly quote after the opening one: a span ending after it holds one.
+    const firstCurly = nextCurly[pos + 1]!
+    for (let k = firstAfter(closes, pos); k < closes.length; k += 1) {
+      if (spend()) return true
+      const end = closes[k]!
+      const quotesInside = curly && firstCurly < end
       if ('name' in part) {
-        if (quotesInside) continue
-        if (next(end + 1, { title: false, text: `“${inside}”` })) return true
+        // Every later end holds that quote too.
+        if (quotesInside) return false
+        if (next(end + 1, { title: false, from: pos, to: end + 1 })) return true
         continue
       }
-      // In a list, a span holding a curly quote is one only when it is theirs whole.
-      if (curly && quotesInside && !part.anyInside && !mayRead(inside)) continue
-      if (next(end + 1, { title: part.title, text: inside })) return true
+      if (quotesInside && !part.anyInside) {
+        // In a list, a span holding a curly quote is one only when it is theirs whole,
+        // and none of theirs is longer than the longest.
+        if (end - pos - 1 > (mayRead.longest ?? DEFAULT_LONGEST)) return false
+        looked += end - pos - 1
+        if (looked > LOOKUP_CHAR_LIMIT) {
+          overLimit = true
+          return true
+        }
+        if (!mayRead(text.slice(pos + 1, end))) continue
+      }
+      if (next(end + 1, { title: part.title, from: pos + 1, to: end })) return true
     }
     return false
   }
 
-  for (const shape of NOTE_SHAPES) {
-    walk(shape.parts, 0, 0, [], (pos, pieces) => {
-      if (pos !== text.length) return false
-      ways += 1
-      if (ways === 1) found = { shape, pieces }
-      return ways > 1
-    })
-    if (ways > 1 || steps > STEP_LIMIT) return null
+  try {
+    for (const shape of NOTE_SHAPES) {
+      walk(shape.parts, 0, 0, null, (pos, got) => {
+        if (pos !== text.length) return false
+        ways += 1
+        if (ways === 1) {
+          const pieces: Piece[] = []
+          for (let at = got; at; at = at.before) pieces.push(at.piece)
+          found = { shape, pieces: pieces.reverse() }
+        }
+        return ways > 1
+      })
+      if (ways > 1 || overLimit) return null
+    }
+  } catch {
+    // Too deep to walk (a list of thousands): unreadable, so hidden.
+    return null
   }
   return ways === 1 ? found : null
 }
@@ -297,9 +404,9 @@ export function redactNote(text: string, field: NoteField, mayRead: TitleCheck):
   let hidden = false
   const shown = read.pieces
     .map((piece) => {
-      if (piece.title === false) return piece.text
-      if (mayRead(piece.text))
-        return piece.title === 'curly' ? `“${piece.text}”` : `"${piece.text}"`
+      const words = text.slice(piece.from, piece.to)
+      if (piece.title === false) return words
+      if (mayRead(words)) return piece.title === 'curly' ? `“${words}”` : `"${words}"`
       hidden = true
       return OTHER_TEAM_TASK
     })
@@ -372,6 +479,7 @@ export function redactForGuest(value: unknown, mayRead: () => TitleCheck): unkno
   // The titles are read once, and only when some note may name a task.
   let check: TitleCheck | null = null
   const lazy: TitleCheck = (quoted) => (check ??= mayRead())(quoted)
+  Object.defineProperty(lazy, 'longest', { get: () => (check ??= mayRead()).longest })
   const visit = (v: unknown, depth: number): unknown => {
     // A response is plain JSON, so this never stops short of a real one.
     if (depth > 64 || v === null || typeof v !== 'object') return v

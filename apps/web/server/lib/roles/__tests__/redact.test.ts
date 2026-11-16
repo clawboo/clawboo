@@ -211,6 +211,58 @@ describe('redactNote: a note that cannot be read strictly is hidden whole', () =
   })
 })
 
+describe('redactNote: a note full of quotes reads in bounded time', () => {
+  /** Runs `read` and says how long it took, in milliseconds. */
+  const timed = (read: () => string): [string, number] => {
+    const start = performance.now()
+    const out = read()
+    return [out, performance.now() - start]
+  }
+
+  // As titlesOnTeams checks: a set, so each candidate title is hashed in full.
+  const known = new Set(['Write the brief', 'Photos'])
+  const bySet: TitleCheck = (quoted) => known.has(quoted)
+
+  it('reads a title of tens of thousands of straight quotes quickly, hiding it', () => {
+    for (const quotes of [9_000, 30_000]) {
+      const title = 'x"'.repeat(quotes)
+      // The ’ makes the note wide text, which a scan for curly quotes reads in full.
+      const note = `Task "${title}" claimed by agent’s-7.`
+      const [out, ms] = timed(() => redactNote(note, 'post', bySet))
+      expect(ms).toBeLessThan(200)
+      expect(out).not.toContain('x"x"x')
+      expect([HIDDEN_NOTE, `Task ${OTHER_TEAM_TASK} claimed by agent’s-7.`]).toContain(out)
+    }
+  })
+
+  it('reads a title of tens of thousands of curly quotes quickly, hiding it', () => {
+    for (const pairs of [6_000, 20_000]) {
+      const title = 'y”“'.repeat(pairs)
+      for (const note of [
+        `“${title}”, “Write the brief”${UNFINISHED}`,
+        `“${title}”, the task this waited on, is done.`,
+      ]) {
+        const [out, ms] = timed(() => redactNote(note, 'need', bySet))
+        expect(ms).toBeLessThan(200)
+        expect(out).not.toContain('y”“y')
+        expect([HIDDEN_NOTE, 'The task this waited on, on another team, is done.']).toContain(out)
+      }
+    }
+  })
+
+  it('reads a list of thousands of quoted titles quickly, hiding them', () => {
+    for (const items of [3_500, 8_000]) {
+      const note = `${Array.from({ length: items }, () => '“a”').join(', ')}${UNFINISHED}`
+      const [out, ms] = timed(() => redactNote(note, 'need', bySet))
+      expect(ms).toBeLessThan(200)
+      expect(out).not.toContain('“a”')
+      // Read whole, every title replaced, or hidden as a note too long to read.
+      const read = `${Array.from({ length: items }, () => OTHER_TEAM_TASK).join(', ')}${UNFINISHED}`
+      expect([HIDDEN_NOTE, read]).toContain(out)
+    }
+  })
+})
+
 describe('redactNote: a note that cannot name a task is left alone', () => {
   it('leaves a note with no quotes, and straight quotes the board does not put a title in', () => {
     for (const note of [

@@ -421,4 +421,39 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     expect(frames(['T', 'OTHER'])).toContain('Unannounced launch')
     expect(frames(null)).toContain('Unannounced launch')
   })
+
+  it('answers a guest quickly when a stored note holds tens of thousands of quotes', () => {
+    const db = getDb()
+    const mine = createTask(db, { title: 'Photos', teamId: 'T' }).id
+    for (const note of [
+      `“${'y”“'.repeat(20_000)}”, the task this waited on, is done.`,
+      `“${'y”“'.repeat(20_000)}”, “Photos” did not finish. Retry them, or mark this task done.`,
+    ]) {
+      addComment(db, mine, note, 'system', null, { kind: 'note' })
+    }
+    // The ’ makes the post wide text, which a scan for curly quotes reads in full.
+    reflectToRoom(db, 'T', `Task "${'x"'.repeat(30_000)}" claimed by agent’s-7.`)
+
+    const timedServe = (...args: Parameters<typeof serve>): [string, number] => {
+      const start = performance.now()
+      const body = JSON.stringify(serve(...args))
+      return [body, performance.now() - start]
+    }
+    const [task, taskMs] = timedServe('GET /api/board/:taskId', boardGetGET, guestAccess(), {
+      params: { taskId: mine },
+    })
+    const [room, roomMs] = timedServe('GET /api/team-chat', teamChatGET, guestAccess(), {
+      query: { teamId: 'T' },
+    })
+    expect(taskMs).toBeLessThan(200)
+    expect(roomMs).toBeLessThan(200)
+    expect(task).not.toContain('y”“y')
+    expect(room).not.toContain('x\\"x\\"x')
+    // An operator still reads them as stored.
+    expect(
+      JSON.stringify(
+        serve('GET /api/team-chat', teamChatGET, operator, { query: { teamId: 'T' } }),
+      ),
+    ).toContain('x\\"x\\"x')
+  })
 })
