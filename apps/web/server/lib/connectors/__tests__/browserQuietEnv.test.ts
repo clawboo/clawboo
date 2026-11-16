@@ -5,9 +5,13 @@
 // The package is a stand-in installed in a throwaway npx cache, so the real
 // direct-launch path runs it. Its bin is a minimal MCP server that writes down
 // the environment it was started with.
+//
+// Python's bytecode is off for both, which start through npm (the direct launch
+// runs node), and left to the server's setting for a connector any other
+// program starts.
 
 import { createHash } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
@@ -30,6 +34,8 @@ describe("Chrome DevTools' opt-outs reach the browser server", () => {
     vi.stubEnv('npm_config_cache', path.join(dir, 'npm-cache'))
     vi.stubEnv('CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS', undefined)
     vi.stubEnv('CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS', undefined)
+    vi.stubEnv('PYTHONDONTWRITEBYTECODE', undefined)
+    vi.stubEnv('PYTHONPYCACHEPREFIX', undefined)
     db = createDb(path.join(dir, 'test.db'))
 
     // Where `npx -y chrome-devtools-mcp@1.7.0` keeps its finished install.
@@ -52,7 +58,7 @@ describe("Chrome DevTools' opt-outs reach the browser server", () => {
       path.join(pkgDir, 'server.cjs'),
       `
 const env = {}
-for (const k of ['CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS', 'CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS']) env[k] = process.env[k] ?? null
+for (const k of ['CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS', 'CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS', 'PYTHONDONTWRITEBYTECODE']) env[k] = process.env[k] ?? null
 require('node:fs').writeFileSync(process.argv[2], JSON.stringify(env))
 const { Server } = require(${sdk('server/index.js')})
 const { StdioServerTransport } = require(${sdk('server/stdio.js')})
@@ -62,7 +68,18 @@ s.setRequestHandler(ListToolsRequestSchema, () => ({ tools: [] }))
 s.connect(new StdioServerTransport())
 `,
     )
+    // A connector started by a program of its own, not through npm.
+    serverScript = path.join(pkgDir, 'server.cjs')
+    ownLauncher = path.join(dir, 'fixture-server')
+    writeFileSync(
+      ownLauncher,
+      `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(serverScript)} "$@"\n`,
+    )
+    chmodSync(ownLauncher, 0o755)
   })
+
+  let serverScript = ''
+  let ownLauncher = ''
 
   afterAll(async () => {
     await closeAllAgentBrowsers()
@@ -78,6 +95,7 @@ s.connect(new StdioServerTransport())
   const OFF = {
     CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1',
     CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
   }
 
   it('on the shared session a connect starts', async () => {
@@ -117,4 +135,25 @@ s.connect(new StdioServerTransport())
     )
     expect(envOf(out)).toEqual(OFF)
   }, 30_000)
+
+  it.skipIf(process.platform === 'win32')(
+    'leaves Python’s bytecode to the server for a connector npm does not start',
+    async () => {
+      const out = path.join(dir, 'own-env.json')
+      const { connector } = await connectConnector(db, {
+        slug: 'fixtureownlauncher',
+        displayName: 'Fixture Own Launcher',
+        provenance: 'curated',
+        launch: { transport: 'stdio', command: ownLauncher, args: [out], pinnedVersion: '1.0.0' },
+        egressAllow: ['*'],
+        trifecta: { readsPrivateData: false, ingestsUntrustedContent: true, canEgress: true },
+      })
+      try {
+        expect(envOf(out)['PYTHONDONTWRITEBYTECODE']).toBeNull()
+      } finally {
+        await disconnectConnector(connector.connectorId)
+      }
+    },
+    30_000,
+  )
 })

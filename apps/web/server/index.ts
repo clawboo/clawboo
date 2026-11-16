@@ -37,6 +37,7 @@ import { attachIdentity } from './lib/auth'
 import { recordPersonActions } from './lib/personActions'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
 import { setDashboardPort } from './lib/connectors/dashboardGuard'
+import { repointRuntimesToServerNode } from './lib/runtimeFolder'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
@@ -715,6 +716,16 @@ async function main() {
   } catch (err) {
     log.error({ err }, 'SQLite: could not open/bootstrap the database — see /api/health')
   }
+
+  // ── Runtimes on a Node that moved ───────────────────────────────────────────
+  // A runtime Clawboo installed runs on the Node.js that installed it, by path.
+  // When that Node is gone (an app that runs Clawboo on a Node of its own was
+  // moved or renamed) and this server's Node can run the runtime, its launchers
+  // move to this Node now, so one typed in a terminal works before anything
+  // here looks it up. Each move is logged by repointRuntimeNode.
+  safeStart('runtime-node-repoint', () => {
+    repointRuntimesToServerNode()
+  })
 
   // ── Orphaned runtime children ───────────────────────────────────────────────
   // An agent run outlives an engine that dies hard: a crash, a force-quit from

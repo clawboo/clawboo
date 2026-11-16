@@ -18,14 +18,20 @@ import path from 'node:path'
 import { summarizeNpmFailure } from '../npmFailure'
 import { findExecutable } from '../platform'
 import {
+  HOMEBREW_KEG_NODE,
   commitRuntimeInstall,
   discardInstallFolder,
   newInstallFolder,
   runtimesDirRefusal,
+  stableNodePath,
   withInstallUmask,
   type RuntimeInstallRecord,
   type RuntimeLauncher,
 } from '../runtimeFolder'
+
+// Lives in the runtimes folder module, which repoints a runtime to it when the
+// Node it was installed with has moved; exported here as well, where it began.
+export { stableNodePath }
 
 /** One npm runtime: where it goes, what to install, and the commands it offers. */
 export interface NpmRuntime {
@@ -65,9 +71,6 @@ const realpathOrNull = (p: string): string | null => {
     return null
   }
 }
-
-/** A Homebrew keg's Node (`<prefix>/Cellar/<formula>/<version>/bin/node`). */
-const HOMEBREW_KEG_NODE = /^(.*)[/\\]Cellar[/\\]([^/\\]+)[/\\][^/\\]+[/\\]bin[/\\]node(\.exe)?$/
 
 /**
  * How to run npm on the Node this server runs on (`execPath`), so npm reads that
@@ -116,35 +119,21 @@ export function npmInvocation(
 }
 
 /**
- * The path to record for the Node a runtime runs on: `execPath`, except for a
- * Homebrew keg, whose versioned folder an upgrade deletes. There it is the
- * formula's `opt` link (`<prefix>/opt/<formula>/bin/node`) when that link leads
- * to the same Node today, so the runtime keeps working after `brew upgrade` on
- * the same formula (a `node@24` stays on Node 24).
- */
-export function stableNodePath(
-  execPath: string = process.execPath,
-  lookup: Pick<NpmLookup, 'realpath'> = {},
-): string {
-  const realpath = lookup.realpath ?? realpathOrNull
-  const keg = HOMEBREW_KEG_NODE.exec(execPath)
-  if (!keg) return execPath
-  const sep = execPath.includes('\\') && !execPath.includes('/') ? '\\' : '/'
-  const opt = [keg[1], 'opt', keg[2], 'bin', `node${keg[3] ?? ''}`].join(sep)
-  const a = realpath(opt)
-  const b = realpath(execPath)
-  return a !== null && a === b ? opt : execPath
-}
-
-/**
  * The environment npm runs in. Variables that would turn the install global
  * (an npm run of Clawboo itself can leave `npm_config_global` or
  * `npm_config_prefix` behind) are dropped, and this Node's folder goes first on
  * PATH so every script npm starts runs on it.
+ *
+ * Python writes no bytecode (`PYTHONDONTWRITEBYTECODE=1`) unless the server's
+ * environment sets `PYTHONDONTWRITEBYTECODE` or `PYTHONPYCACHEPREFIX` itself: a
+ * native part's build (`node-gyp`) runs python3, which would otherwise write
+ * `__pycache__` folders into the install tree of the npm that runs it, such as
+ * the npm of a Node bundled inside an app.
  */
 export function npmChildEnv(
   base: NodeJS.ProcessEnv = process.env,
   execPath: string = process.execPath,
+  platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [k, v] of Object.entries(base)) {
@@ -154,6 +143,16 @@ export function npmChildEnv(
   const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH'
   env[pathKey] = [path.dirname(execPath), env[pathKey]].filter(Boolean).join(path.delimiter)
   env['npm_config_update_notifier'] = 'false'
+  // Windows reads an environment name in any case, POSIX in its own case only.
+  const keyOf = (name: string): string | undefined =>
+    Object.keys(env).find((k) => (platform === 'win32' ? k.toUpperCase() === name : k === name))
+  const pythonSet = (name: string): boolean => {
+    const key = keyOf(name)
+    return key !== undefined && (env[key] ?? '') !== ''
+  }
+  if (!pythonSet('PYTHONDONTWRITEBYTECODE') && !pythonSet('PYTHONPYCACHEPREFIX')) {
+    env[keyOf('PYTHONDONTWRITEBYTECODE') ?? 'PYTHONDONTWRITEBYTECODE'] = '1'
+  }
   return env
 }
 
@@ -361,7 +360,7 @@ export function runNpmRuntimeInstall(rt: NpmRuntime, opts: NpmInstallOptions = {
             folder,
             version: pkg.version,
             source: rt.spec,
-            interpreter: { path: nodePath, version: process.version },
+            interpreter: { path: nodePath, version: process.version, arch: process.arch },
             launchers,
           },
           env,
