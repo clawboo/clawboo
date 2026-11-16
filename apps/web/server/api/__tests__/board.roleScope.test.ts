@@ -7,12 +7,13 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createTask, teams } from '@clawboo/db'
+import { agents, createTask, teamChat, teams, updateStatus } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { boardGetGET, boardListGET } from '../board'
+import { boardGetGET, boardLinkDepPOST, boardListGET } from '../board'
 
 function fakeRes(): { res: Response; body: () => unknown } {
   let body: unknown
@@ -39,7 +40,8 @@ function req(taskId: string, guestTeams?: string[]): Request {
 }
 
 interface Detail {
-  task: { waitingOnDetail?: { taskTitle?: string } }
+  task: { waitingOn?: string | null; waitingOnDetail?: { taskTitle?: string } }
+  comments: Array<{ body: string }>
   ancestors: Array<{ id: string }>
   subtasks?: Array<{ id: string }>
 }
@@ -136,5 +138,69 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     }
     expect(listed()).toBe('Unannounced launch')
     expect(listed(['T'])).toBe('')
+  })
+
+  it("never copies a waited-on task's title from another team into the waiting task", () => {
+    const db = getDb()
+    // A wait can cross teams: a session bound to no team can set one.
+    const secret = createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' }).id
+    const mine = createTask(db, {
+      title: 'Photos',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'task', taskId: secret },
+    }).id
+    // The same on one team, which names what it waited on.
+    const brief = createTask(db, { title: 'Write the brief', teamId: 'T' }).id
+    const copy = createTask(db, {
+      title: 'Copy',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'task', taskId: brief },
+    }).id
+    for (const id of [secret, brief]) {
+      expect(updateStatus(db, id, 'in_progress').ok).toBe(true)
+      expect(updateStatus(db, id, 'done', { actor: 'person' }).ok).toBe(true)
+    }
+
+    const seen = detail(mine, ['T'])
+    const said = [...seen.comments.map((c) => c.body), seen.task.waitingOn ?? ''].join('\n')
+    expect(said).toContain('on another team, is done')
+    expect(said).not.toContain('Unannounced launch')
+    expect(
+      detail(copy, ['T'])
+        .comments.map((c) => c.body)
+        .join('\n'),
+    ).toContain('Write the brief')
+  })
+
+  it("never names another team's task in this team's room when a task comes to depend on it", () => {
+    const db = getDb()
+    const secret = createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' }).id
+    const brief = createTask(db, { title: 'Write the brief', teamId: 'T' }).id
+    const mine = createTask(db, { title: 'Photos', teamId: 'T' }).id
+    for (const dependsOnTaskId of [secret, brief]) {
+      const r = fakeRes()
+      boardLinkDepPOST(
+        {
+          params: { taskId: mine },
+          body: { dependsOnTaskId },
+          query: {},
+          headers: {},
+        } as unknown as Request,
+        r.res,
+      )
+      expect(r.body()).toEqual({ ok: true })
+    }
+    const room = db
+      .select({ body: teamChat.body })
+      .from(teamChat)
+      .where(eq(teamChat.teamId, 'T'))
+      .all()
+      .map((m) => m.body)
+      .join('\n')
+    expect(room).toContain('now depends on "Write the brief"')
+    expect(room).toContain('now depends on a task on another team')
+    expect(room).not.toContain('Unannounced launch')
   })
 })

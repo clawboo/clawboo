@@ -1207,8 +1207,15 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
       taskId,
       data: { dependsOnTaskId: parsed.data.dependsOnTaskId, ...actorField(req) },
     })
-    // Narrate the dependency into the team room (best-effort, after the write).
-    reflectToRoom(db, task.teamId, `Task "${task.title}" now depends on "${dependsOn.title}".`)
+    // Narrate the dependency into the team room (best-effort, after the write). A
+    // task on another team is not named in this team's room: its own board names it.
+    reflectToRoom(
+      db,
+      task.teamId,
+      dependsOn.teamId === task.teamId
+        ? `Task "${task.title}" now depends on "${dependsOn.title}".`
+        : `Task "${task.title}" now depends on a task on another team.`,
+    )
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })
