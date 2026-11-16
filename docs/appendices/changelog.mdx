@@ -8,7 +8,7 @@ Release history of the `clawboo` npm package, newest first. Each entry starts wi
 
 <Note>
 
-These docs follow the main branch. The latest npm release is 0.7.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
+These docs follow the main branch. The latest npm release is 0.8.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
 
 </Note>
 
@@ -16,6 +16,7 @@ These docs follow the main branch. The latest npm release is 0.7.0; anything on 
 
 | Version | Released   | Highlights                                                                                                      |
 | ------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
+| 0.8.0   | 2026-11-15 | Run Clawboo from your own app, an OpenClaw Gateway that sleeps until needed, a user per agent on Linux          |
 | 0.7.0   | 2026-11-14 | Readable task ids, plans and an Inbox, pause, agents on their own user, a computer you can watch for each agent |
 | 0.6.0   | 2026-11-04 | Rooms, steering, a rebuilt workspace, a dashboard that locks itself, a phone-ready web app, Ollama with no key  |
 | 0.5.0   | 2026-10-21 | The Board as a calendar, task costs that count every run, a quieter team chat                                   |
@@ -35,6 +36,41 @@ These docs follow the main branch. The latest npm release is 0.7.0; anything on 
 | 0.1.0   | 2026-02-28 | Name placeholder                                                                                                |
 
 Every 0.1.x release is deprecated on npm. That line ran on OpenClaw only and does not work reliably with current OpenClaw. Install a supported release with `npm install -g clawboo@latest`, or run `npx clawboo@latest`. Keep the `@latest`: a bare `npx clawboo` can reuse an old copy from npm's cache.
+
+<Update label="0.8.0" description="2026-11-15">
+
+0.8.0 lets an app that runs Clawboo stop it cleanly and open the dashboard from its own notifications. Clawboo now connects to the OpenClaw Gateway only once something needs it, so a Gateway that starts on its first connection can stay asleep. On Linux, each agent can run as an operating system user of its own.
+
+**Run Clawboo from your own app**
+
+- **Stop it over the IPC channel.** An app that runs Clawboo as its own child process can send `{ "type": "shutdown" }` on the channel, and the server stops the way it does on SIGTERM: it ends the agent runs, closes the database and exits with code `0`. This works on Windows too, where a signal ends the process at once. With `CLAWBOO_STOP_ON_DISCONNECT=1`, the server also stops when that channel closes, so it stops with an app that quits or crashes. A server the `clawboo` command starts keeps running after the command returns, as before. See [Start it from your own app](/operating/deployment#start-it-from-your-own-app).
+- **Open the dashboard from a notification.** An app that shows the dashboard in its own window can open what one of its notifications is about, through `onOpenTarget` on the object it gives the page: the task's drawer, or **Needs you** with the approval's card brought into view and outlined while it has focus. Before, the app could only bring its window forward. See [Open the dashboard from a notification](/operating/deployment#open-the-dashboard-from-a-notification).
+
+**OpenClaw**
+
+- **The Gateway is left alone until something needs it.** Clawboo connects to the OpenClaw Gateway once there is an OpenClaw agent (or a delete of one still owed to the Gateway), once you open OpenClaw in **Settings** > **Runtimes** or start the Gateway from Clawboo, or once a routine for an OpenClaw agent falls due. An install with OpenClaw agents connects at every start, as before. Until then neither the server, the dashboard nor `clawboo` connects to the Gateway or probes its port, so a Gateway that a service manager starts on its first connection, such as a systemd socket unit on a small Linux machine, stays asleep instead of starting at every boot. See [How Clawboo connects](/runtimes/openclaw#how-clawboo-connects).
+- **Not in use, rather than unreachable.** OpenClaw's row reads **Not in use** with **Connect** while nothing uses the Gateway. The welcome screen offers **Open OpenClaw** to bring in the agents of an OpenClaw already set up, **Capabilities** shows no warning for it, [System Health](/using/system-health) passes its Gateway check as "not in use yet", and the dashboard loads with no offline banner.
+- `clawboo` no longer prints whether a Gateway answers on port 18789 when it starts.
+
+**A user per agent, on Linux**
+
+- **Each agent can run as an operating system user of its own.** Set `CLAWBOO_AGENT_USERS` to a pool of users you create once (names, or a uid range such as `uid:20001-20008`), `CLAWBOO_AGENT_GROUPS` to a pool of team groups, and `CLAWBOO_WORK_DIR` to a folder of your own. It is used instead of `CLAWBOO_AGENT_USER`, never with it, and is off unless you set it. One agent then cannot read another's sign-ins, sessions or cookies, reach its display or signal its processes. Teammates read and change each other's files in their team's folder, and agents on other teams cannot reach it. See [A user per agent](/operating/agent-isolation#a-user-per-agent).
+- **An agent keeps its user for life.** An agent gets the next free user when it is created, and each team gets a group the same way. A deleted agent's processes stop at once, and its user is wiped before another agent gets it. With no free user, a new agent is still created and its runs say why they cannot start; it never falls back to a shared user.
+- **Set it up and check it.** `clawboo agent-user plan --pool <n> --teams <m>` prints the setup, with the one sudoers rule a pool needs, and `clawboo agent-user check` checks a pool too. The startup check now also proves, from inside each agent user's own host, that no agent user can list another's home or signal another's process, and refuses a pool whose users share a uid, a primary group or a home.
+- **Not available yet with a user per agent:** code tasks that work in a checkout of a repository (refused with the reason), Hermes (it does not start), OpenClaw (not covered, as before), connectors with local reach shared by every agent (they do not start; each agent's own browser does), picking an agent for a Codex or Hermes sign-in on the Runtimes page (give the runtime an API key), a container launcher for a pool, macOS, and copying older agent state in. See [Not available yet with a user per agent](/operating/agent-isolation#not-available-yet-with-a-user-per-agent).
+
+**If you script the API**
+
+- For a Gateway nothing uses, `GET /api/agents` is not `stale`, `GET /api/agents/registry/health` and `GET /api/system/status` report `inUse: false`, and `GET /api/system/idle` reports the Gateway's cron jobs `off` with the reason `not_in_use`. The registry health also reports `configured`. See [Agents API](/reference/rest-api/agents).
+- New route: `POST /api/agents/registry/connect`, which the dashboard sends when OpenClaw's row opens.
+- With a Gateway set up that nothing used yet, creating an OpenClaw agent or a sync without a body now waits up to about 5 seconds for the connection.
+
+**Fixes**
+
+- A browser connection to the Gateway that fails no longer keeps retrying unseen.
+- A reconnect asked for while a Gateway connection was still being made no longer leaves the server unable to connect until it restarts.
+
+</Update>
 
 <Update label="0.7.0" description="2026-11-14">
 

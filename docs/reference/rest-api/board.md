@@ -1028,7 +1028,23 @@ A new run is what ends a person's hold on a card (see `PATCH` above), so while a
     // 1 when the team engine owns the run, 0 when anything else opened it, null on a row
     // from before this field. Only the engine sets it.
     engineRun: number | null
-    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
+    // The last three mean the server stopped the run, not a person. Only the server
+    // writes them; PATCH /api/board/executions/:execId cannot.
+    //   budget_paused: a hard budget cap refused the run or ended it. A person raises the cap.
+    //   budget_held: refused because the cap's room is taken by runs already going.
+    //     It clears by itself when they end.
+    //   breaker_tripped: the circuit breaker stopped a run that was going wrong. A person
+    //     looks at it.
+    status:
+      | 'queued'
+      | 'running'
+      | 'succeeded'
+      | 'failed'
+      | 'timed_out'
+      | 'cancelled'
+      | 'budget_paused'
+      | 'budget_held'
+      | 'breaker_tripped'
     claimedAt: number | null
     startedAt: number | null
     completedAt: number | null

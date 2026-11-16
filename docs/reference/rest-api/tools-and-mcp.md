@@ -354,7 +354,7 @@ Without either credential the gate answers **401**:
 }
 ```
 
-Clawboo 0.5.0, the latest npm release, does not have this rule: on 0.5.0 any loopback request reaches every `/api/mcp/*` route, `/api/mcp/config` included, without the cookie. See [Security](/operating/security).
+Clawboo 0.5.0 and older do not have this rule: on those releases any loopback request reaches every `/api/mcp/*` route, `/api/mcp/config` included, without the cookie. See [Security](/operating/security).
 
 ### Session binding: who is calling
 
