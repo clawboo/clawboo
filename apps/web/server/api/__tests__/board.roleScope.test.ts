@@ -3,21 +3,33 @@
 // a guest (lib/roles) sees only the tasks of their own teams. Sandboxes HOME and
 // CLAWBOO_HOME so the database is a throwaway.
 
+import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, createTask, teams } from '@clawboo/db'
+import { addComment, agents, createTask, tasks, teamChat, teams, updateStatus } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { boardGetGET, boardListGET } from '../board'
+import { roleGuard } from '../../lib/roles/guard'
+import { HIDDEN_NOTE } from '../../lib/roles/redact'
+import type { PersonAccess } from '../../lib/roles/policy'
+import { ROUTE_RULES } from '../../lib/roles/rules'
+import { reflectToRoom } from '../../lib/teamChat/reflect'
+import { publishBoardChange } from '../../lib/teamChat/boardChangeBus'
+import { boardGetGET, boardLinkDepPOST, boardListGET } from '../board'
+import { teamChatGET } from '../teamChat'
+import { teamChatStreamGET } from '../teamChatStream'
 
-function fakeRes(): { res: Response; body: () => unknown } {
+function fakeRes(): { res: Response; body: () => unknown; status: () => number } {
   let body: unknown
+  let code = 200
   const res = {
-    status() {
+    status(c: number) {
+      code = c
       return this
     },
     json(b: unknown) {
@@ -25,7 +37,7 @@ function fakeRes(): { res: Response; body: () => unknown } {
       return this
     },
   } as unknown as Response
-  return { res, body: () => body }
+  return { res, body: () => body, status: () => code }
 }
 
 function req(taskId: string, guestTeams?: string[]): Request {
@@ -39,7 +51,8 @@ function req(taskId: string, guestTeams?: string[]): Request {
 }
 
 interface Detail {
-  task: { waitingOnDetail?: { taskTitle?: string } }
+  task: { waitingOn?: string | null; waitingOnDetail?: { taskTitle?: string } }
+  comments: Array<{ body: string }>
   ancestors: Array<{ id: string }>
   subtasks?: Array<{ id: string }>
 }
@@ -48,6 +61,55 @@ function detail(taskId: string, guestTeams?: string[]): Detail {
   const r = fakeRes()
   boardGetGET(req(taskId, guestTeams), r.res)
   return r.body() as Detail
+}
+
+/** A guest of team T, until an hour from now. */
+function guestAccess(): PersonAccess {
+  return {
+    roles: ['guest'],
+    approve: false,
+    teams: ['T'],
+    until: Math.floor(Date.now() / 1000) + 3600,
+    label: null,
+    service: false,
+  }
+}
+
+const operator: PersonAccess = {
+  roles: ['operator'],
+  approve: false,
+  teams: null,
+  until: null,
+  label: null,
+  service: false,
+}
+
+/** A request the way the server serves it: the route's own guard, then its handler.
+ *  With the status it answered, so a refusal is never read as an answer. */
+function serveWithStatus(
+  route: string,
+  handler: (req: Request, res: Response) => void,
+  access: PersonAccess,
+  parts: { params?: Record<string, string>; query?: Record<string, string> },
+): { status: number; body: unknown } {
+  const r = fakeRes()
+  const res = Object.assign(r.res, { set: () => res, on: () => res, writableEnded: false })
+  const req = {
+    params: parts.params ?? {},
+    query: parts.query ?? {},
+    body: {},
+    headers: {},
+    person: { id: 'p-1', name: 'Ada', role: null },
+    access,
+    app: { locals: { rolesMode: 'enforce' } },
+  } as unknown as Request
+  roleGuard(ROUTE_RULES[route]!)(req, res, () => handler(req, res))
+  return { status: r.status(), body: r.body() }
+}
+
+/** The body of a request served as above. */
+function serve(...args: Parameters<typeof serveWithStatus>): unknown {
+  return serveWithStatus(...args).body
 }
 
 describe('board REST: a guest sees only their teams in a task tree', () => {
@@ -136,5 +198,294 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     }
     expect(listed()).toBe('Unannounced launch')
     expect(listed(['T'])).toBe('')
+  })
+
+  it("never copies a waited-on task's title from another team into the waiting task", () => {
+    const db = getDb()
+    // A wait can cross teams: a session bound to no team can set one.
+    const secret = createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' }).id
+    const mine = createTask(db, {
+      title: 'Photos',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'task', taskId: secret },
+    }).id
+    // The same on one team, which names what it waited on.
+    const brief = createTask(db, { title: 'Write the brief', teamId: 'T' }).id
+    const copy = createTask(db, {
+      title: 'Copy',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'task', taskId: brief },
+    }).id
+    for (const id of [secret, brief]) {
+      expect(updateStatus(db, id, 'in_progress').ok).toBe(true)
+      expect(updateStatus(db, id, 'done', { actor: 'person' }).ok).toBe(true)
+    }
+
+    const seen = detail(mine, ['T'])
+    const said = [...seen.comments.map((c) => c.body), seen.task.waitingOn ?? ''].join('\n')
+    expect(said).toContain('on another team, is done')
+    expect(said).not.toContain('Unannounced launch')
+    expect(
+      detail(copy, ['T'])
+        .comments.map((c) => c.body)
+        .join('\n'),
+    ).toContain('Write the brief')
+  })
+
+  it("never names another team's task in this team's room when a task comes to depend on it", () => {
+    const db = getDb()
+    const secret = createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' }).id
+    const brief = createTask(db, { title: 'Write the brief', teamId: 'T' }).id
+    const mine = createTask(db, { title: 'Photos', teamId: 'T' }).id
+    for (const dependsOnTaskId of [secret, brief]) {
+      const r = fakeRes()
+      boardLinkDepPOST(
+        {
+          params: { taskId: mine },
+          body: { dependsOnTaskId },
+          query: {},
+          headers: {},
+        } as unknown as Request,
+        r.res,
+      )
+      expect(r.body()).toEqual({ ok: true })
+    }
+    const room = db
+      .select({ body: teamChat.body })
+      .from(teamChat)
+      .where(eq(teamChat.teamId, 'T'))
+      .all()
+      .map((m) => m.body)
+      .join('\n')
+    expect(room).toContain('now depends on "Write the brief"')
+    expect(room).toContain('now depends on a task on another team')
+    expect(room).not.toContain('Unannounced launch')
+  })
+
+  it("hides another team's title in rows the board stored before, from a guest only", () => {
+    const db = getDb()
+    createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' })
+    createTask(db, { title: 'Write the brief', teamId: 'T' })
+    // Rows as the board wrote them before a release note left other teams' titles out.
+    const old = (title: string) =>
+      `“${title}”, the task this waited on, is done, and nothing started this one again. Retry it or decide what happens next.`
+    const mine = createTask(db, {
+      title: 'Photos',
+      teamId: 'T',
+      status: 'blocked',
+      // As releaseWaiterTx stores it: the board's own reason, with no `by`.
+      waitingOn: { kind: 'person', need: old('Unannounced launch') },
+    }).id
+    addComment(db, mine, old('Unannounced launch'), 'system', null, { kind: 'note' })
+    addComment(db, mine, old('Write the brief'), 'system', null, { kind: 'note' })
+    reflectToRoom(db, 'T', 'Task "Photos" now depends on "Unannounced launch".')
+
+    const guest = guestAccess()
+
+    const read = (access: PersonAccess) =>
+      JSON.stringify([
+        serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: mine } }),
+        serve('GET /api/board', boardListGET, access, {}),
+        serve('GET /api/team-chat', teamChatGET, access, { query: { teamId: 'T' } }),
+      ])
+
+    const asGuest = read(guest)
+    expect(asGuest).not.toContain('Unannounced launch')
+    expect(asGuest).toContain('The task this waited on, on another team, is done')
+    expect(asGuest).toContain('now depends on a task on another team')
+    // Their own team's title stays.
+    expect(asGuest).toContain('Write the brief')
+
+    const asOperator = read(operator)
+    expect(asOperator).toContain('“Unannounced launch”, the task this waited on')
+    expect(asOperator).toContain('now depends on \\"Unannounced launch\\"')
+  })
+
+  it('hides all of a title of another team that holds quotes of its own, in stored notes', () => {
+    const db = getDb()
+    createTask(db, { title: 'Plan ”Secret” notes', teamId: 'OTHER' })
+    createTask(db, { title: 'Launch "Acquisition" plan', teamId: 'OTHER' })
+    createTask(db, { title: 'Write the brief', teamId: 'T' })
+    createTask(db, { title: 'Menu ”draft” v2', teamId: 'T' })
+    // Notes as the board wrote them before titles were quoted safely.
+    const list =
+      '“Write the brief”, “Plan ”Secret” notes” did not finish. Retry them, or mark this task done.'
+    const listed = createTask(db, {
+      title: 'Launch day',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'person', need: list, by: 'agent', untilSubtasks: true },
+    }).id
+    // A long list cut at 1000 characters, inside a title just after one of its quotes.
+    const head = Array.from({ length: 50 }, () => '“Write the brief”').join(', ') + ', '
+    const cut = `${head}“Plan ”Secr`.padStart(1000, ' ')
+    expect(cut).toHaveLength(1000)
+    const cutShort = createTask(db, {
+      title: 'Big launch',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'person', need: cut, by: 'agent', untilSubtasks: true },
+    }).id
+    // The note from the review: one title holding a closing and then an opening quote.
+    const mixed = createTask(db, {
+      title: 'Spring menu',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: {
+        kind: 'person',
+        need: '“Plan ”Secret “notes” did not finish. Retry them, or mark this task done.',
+        untilSubtasks: true,
+      },
+    }).id
+    addComment(
+      db,
+      listed,
+      '“Plan ”Secret” notes”, the task this waited on, is done.',
+      'system',
+      null,
+      {
+        kind: 'note',
+      },
+    )
+    addComment(db, listed, '“Menu ”draft” v2”, the task this waited on, is done.', 'system', null, {
+      kind: 'note',
+    })
+    reflectToRoom(db, 'T', 'Task "Launch day" now depends on "Launch "Acquisition" plan".')
+
+    const read = (access: PersonAccess) =>
+      JSON.stringify([
+        serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: listed } }),
+        serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: cutShort } }),
+        serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: mixed } }),
+        serve('GET /api/board', boardListGET, access, {}),
+        serve('GET /api/team-chat', teamChatGET, access, { query: { teamId: 'T' } }),
+      ])
+
+    const asGuest = read(guestAccess())
+    for (const part of ['Secret', 'Secr', 'notes”', 'Acquisition']) {
+      expect(asGuest).not.toContain(part)
+    }
+    expect(asGuest).toContain('now depends on a task on another team.')
+    // Their own title, quotes and all, still shows.
+    expect(asGuest).toContain('“Menu ”draft” v2”, the task this waited on, is done.')
+    // A note that cannot be read strictly is hidden whole.
+    expect(asGuest).toContain(HIDDEN_NOTE)
+
+    const asOperator = read(operator)
+    for (const part of [
+      '“Plan ”Secret” notes”',
+      'Secr',
+      'Launch \\"Acquisition\\" plan',
+      '“Plan ”Secret “notes” did not finish',
+    ]) {
+      expect(asOperator).toContain(part)
+    }
+  })
+
+  it("keeps a waited-on task's title off a guest's live board frame unless it is theirs", () => {
+    const db = getDb()
+    const secret = createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' }).id
+    const mine = createTask(db, {
+      title: 'Photos',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'task', taskId: secret },
+    }).id
+    const row = db.select().from(tasks).where(eq(tasks.id, mine)).get()!
+
+    const frames = (teams: string[] | null): string => {
+      const req = Object.assign(new EventEmitter(), {
+        params: { id: 'T' },
+        query: {},
+        headers: {},
+        ...(teams ? { roleScope: { teams: new Set(teams) } } : {}),
+      }) as unknown as Request
+      let written = ''
+      const res = Object.assign(new EventEmitter(), {
+        writeHead: () => res,
+        write: (chunk: string) => {
+          written += chunk
+          return true
+        },
+        status: () => res,
+        json: () => res,
+      }) as unknown as Response
+      teamChatStreamGET(req, res)
+      publishBoardChange('T', {
+        id: mine,
+        status: 'blocked',
+        waitingOn: row.waitingOn,
+        waitingOnDetail: { taskTitle: 'Unannounced launch' },
+      } as Parameters<typeof publishBoardChange>[1])
+      ;(req as unknown as EventEmitter).emit('close')
+      return written.split('event: board\n')[1] ?? ''
+    }
+
+    const asGuest = frames(['T'])
+    expect(asGuest).toContain('"waitingOnDetail":{"taskTitle":""}')
+    expect(asGuest).not.toContain('Unannounced launch')
+    expect(frames(['T', 'OTHER'])).toContain('Unannounced launch')
+    expect(frames(null)).toContain('Unannounced launch')
+  })
+
+  it('answers a guest quickly when a stored note holds tens of thousands of quotes', () => {
+    const db = getDb()
+    const mine = createTask(db, { title: 'Photos', teamId: 'T' }).id
+    for (const note of [
+      `“${'y”“'.repeat(20_000)}”, the task this waited on, is done.`,
+      `“${'y”“'.repeat(20_000)}”, “Photos” did not finish. Retry them, or mark this task done.`,
+    ]) {
+      addComment(db, mine, note, 'system', null, { kind: 'note' })
+    }
+    // The ’ makes the post wide text, which a scan for curly quotes reads in full.
+    reflectToRoom(db, 'T', `Task "${'x"'.repeat(30_000)}" claimed by agent’s-7.`)
+
+    const timedServe = (...args: Parameters<typeof serveWithStatus>): [number, string, number] => {
+      const start = performance.now()
+      const { status, body } = serveWithStatus(...args)
+      return [status, JSON.stringify(body), performance.now() - start]
+    }
+    const [taskStatus, task, taskMs] = timedServe(
+      'GET /api/board/:taskId',
+      boardGetGET,
+      guestAccess(),
+      { params: { taskId: mine } },
+    )
+    const [roomStatus, room, roomMs] = timedServe(
+      'GET /api/team-chat',
+      teamChatGET,
+      guestAccess(),
+      {
+        query: { teamId: 'T' },
+      },
+    )
+    expect(taskMs).toBeLessThan(200)
+    expect(roomMs).toBeLessThan(200)
+    // Both answered what they were asked for, so what is left out is left out of an answer.
+    expect(taskStatus).toBe(200)
+    expect(roomStatus).toBe(200)
+    const taskBody = JSON.parse(task) as {
+      task: { id: string }
+      comments: Array<{ authorType: string; body: string }>
+    }
+    expect(taskBody).toMatchObject({ task: { id: mine } })
+    expect(taskBody.comments.filter((c) => c.authorType === 'system').map((c) => c.body)).toEqual([
+      HIDDEN_NOTE,
+      HIDDEN_NOTE,
+    ])
+    const roomBody = JSON.parse(room) as { posts: Array<{ kind: string; body: string }> }
+    expect(roomBody.posts.filter((p) => p.kind === 'system').map((p) => p.body)).toEqual([
+      HIDDEN_NOTE,
+    ])
+    expect(task).not.toContain('y”“y')
+    expect(room).not.toContain('x\\"x\\"x')
+    // An operator still reads them as stored.
+    expect(
+      JSON.stringify(
+        serve('GET /api/team-chat', teamChatGET, operator, { query: { teamId: 'T' } }),
+      ),
+    ).toContain('x\\"x\\"x')
   })
 })

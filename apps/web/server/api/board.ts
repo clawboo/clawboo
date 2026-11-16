@@ -66,7 +66,6 @@ import {
   taskLabelsBody,
   personMovedSinceLastRun,
   type ClawbooDb,
-  parseWaitingOn,
   pendingQuestionsForTasks,
   waitingOnDetailOf,
   wakeCommentIds,
@@ -85,6 +84,7 @@ import { actingPerson, actorField, actsAsPerson, personOf, refuseUnlessPerson } 
 import { markReleasedTasksRead, ownWriterOf, readStatesOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { inRoleScope, roleScopeOf, teamOfTask } from '../lib/roles/guard'
+import { guestWaitingOnDetail } from '../lib/roles/redact'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
@@ -310,15 +310,10 @@ function withOpenQuestion<T extends DbTask>(
     db,
     rows.filter((t) => t.waitingOn != null).map((t) => t.id),
   )
-  const scoped = roleScopeOf(req) !== null
+  const teams = roleScopeOf(req)?.teams ?? null
   return rows.map((t) => {
-    let waitingOnDetail = waitingOnDetailOf(db, t)
-    if (scoped && waitingOnDetail?.taskTitle) {
-      const w = parseWaitingOn(t.waitingOn)
-      if (w?.kind === 'task' && !inRoleScope(req, teamOfTask(db, w.taskId))) {
-        waitingOnDetail = { taskTitle: '' }
-      }
-    }
+    // The same check the team chat stream's board frames use (lib/roles/redact).
+    const waitingOnDetail = guestWaitingOnDetail(db, t.waitingOn, waitingOnDetailOf(db, t), teams)
     return {
       ...t,
       openQuestion: byId.get(t.id) ?? null,
@@ -1207,8 +1202,15 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
       taskId,
       data: { dependsOnTaskId: parsed.data.dependsOnTaskId, ...actorField(req) },
     })
-    // Narrate the dependency into the team room (best-effort, after the write).
-    reflectToRoom(db, task.teamId, `Task "${task.title}" now depends on "${dependsOn.title}".`)
+    // Narrate the dependency into the team room (best-effort, after the write). A
+    // task on another team is not named in this team's room: its own board names it.
+    reflectToRoom(
+      db,
+      task.teamId,
+      dependsOn.teamId === task.teamId
+        ? `Task "${task.title}" now depends on "${dependsOn.title}".`
+        : `Task "${task.title}" now depends on a task on another team.`,
+    )
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

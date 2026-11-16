@@ -34,6 +34,7 @@ import {
   type PersonAccess,
   type Permission,
 } from './policy'
+import { redactForGuest, titlesOnTeams } from './redact'
 import {
   ROUTE_RULES,
   UNLISTED_RULE,
@@ -298,6 +299,26 @@ function endAtGuestDeadline(res: Response, access: PersonAccess, now: number): v
   res.on('close', clear)
 }
 
+/**
+ * A guest's JSON answers go through ./redact, so text the board wrote keeps no title
+ * of a task off their teams, whichever route returns it. If that step fails, the
+ * answer is a 500, never the text unredacted.
+ */
+function redactGuestAnswers(res: Response, teams: ReadonlySet<string>): void {
+  const send = res.json.bind(res)
+  res.json = ((body: unknown) => {
+    let out: unknown
+    try {
+      out = redactForGuest(body, () => titlesOnTeams(getDb(), teams))
+    } catch (err) {
+      log.error({ err }, "redacting a guest's answer failed")
+      res.status(500)
+      return send({ ok: false, error: 'redaction' })
+    }
+    return send(out)
+  }) as Response['json']
+}
+
 /** The rule a route's guard applies, kept on the guard so a test can read the
  *  router and find each route's own. */
 export const GUARD_RULE = Symbol.for('clawboo.roleRule')
@@ -314,7 +335,10 @@ export function roleGuard(rule: RouteRule): RequestHandler {
       refuse(res, decision.reason)
       return
     }
-    if (decision.scope) req.roleScope = decision.scope
+    if (decision.scope) {
+      req.roleScope = decision.scope
+      redactGuestAnswers(res, decision.scope.teams)
+    }
     if (req.access) endAtGuestDeadline(res, req.access, Date.now())
     next()
   }
