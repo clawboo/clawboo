@@ -72,7 +72,7 @@ The bar is the window's drag area (`-webkit-app-region: drag`), so pressing its 
 
 ### Back and forward
 
-The dashboard keeps its own short history of the pages you moved between, up to 50 back, in the page's memory: a reload starts it empty. Back skips a page that is gone, such as a deleted team's chat. While the bar shows, `Cmd + [` and `Cmd + ]` (`Ctrl` on Windows and Linux) go back and forward, except while you are typing.
+The dashboard keeps its own short history of the pages you moved between, up to 50 back, in the page's memory: a reload starts it empty. Back skips a page that is gone, such as a deleted team's chat or a deleted chat room. While the bar shows, `Cmd + [` and `Cmd + ]` (`Ctrl` on Windows and Linux) go back and forward, except while you are typing.
 
 ## Check that the server supports it
 

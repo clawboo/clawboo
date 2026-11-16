@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { mockPhoneViewport } from '@/__vitest__/phoneViewport'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
+import { useRoomStore, type Room } from '@/stores/rooms'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useViewStore } from '@/stores/view'
@@ -45,6 +46,7 @@ const agent = (id: string, name: string, teamId: string | null): AgentState =>
 beforeEach(() => {
   useTeamStore.setState({ teams: [team('t1', 'Marketing')], selectedTeamId: null })
   useFleetStore.setState({ agents: [agent('a1', 'Writer Boo', 't1'), agent('a2', 'Solo', null)] })
+  useRoomStore.setState({ roomsByTeam: new Map(), loadedTeams: new Set() })
   useSettingsModalStore.setState({ open: false })
   useViewStore.setState({
     viewMode: { type: 'nav', view: 'graph' },
@@ -156,6 +158,32 @@ describe('back and forward', () => {
         viewHistory: { past: [{ type: 'agent', agentId: 'a1' }], future: [] },
       })
       useFleetStore.setState({ agents: [] })
+    })
+    expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled()
+  })
+
+  it('stays disabled when the only page back is a chat room that was deleted', () => {
+    const r1: Room = {
+      id: 'r1',
+      teamId: 't1',
+      name: 'Launch',
+      memberIds: [],
+      pinnedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    useRoomStore.setState({ roomsByTeam: new Map([['t1', [r1]]]), loadedTeams: new Set(['t1']) })
+    render(<EmbedTitlebar />)
+    act(() => {
+      useViewStore.getState().openGroupChat('t1', 'r1')
+      useViewStore.getState().navigateTo('board')
+    })
+    expect(screen.getByRole('button', { name: 'Back' })).toBeEnabled()
+    act(() => {
+      useViewStore.setState({
+        viewHistory: { past: [{ type: 'groupChat', teamId: 't1', roomId: 'r1' }], future: [] },
+      })
+      useRoomStore.getState().remove('t1', 'r1')
     })
     expect(screen.getByRole('button', { name: 'Back' })).toBeDisabled()
   })
