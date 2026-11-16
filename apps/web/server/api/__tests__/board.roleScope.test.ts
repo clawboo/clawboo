@@ -24,10 +24,12 @@ import { boardGetGET, boardLinkDepPOST, boardListGET } from '../board'
 import { teamChatGET } from '../teamChat'
 import { teamChatStreamGET } from '../teamChatStream'
 
-function fakeRes(): { res: Response; body: () => unknown } {
+function fakeRes(): { res: Response; body: () => unknown; status: () => number } {
   let body: unknown
+  let code = 200
   const res = {
-    status() {
+    status(c: number) {
+      code = c
       return this
     },
     json(b: unknown) {
@@ -35,7 +37,7 @@ function fakeRes(): { res: Response; body: () => unknown } {
       return this
     },
   } as unknown as Response
-  return { res, body: () => body }
+  return { res, body: () => body, status: () => code }
 }
 
 function req(taskId: string, guestTeams?: string[]): Request {
@@ -82,13 +84,14 @@ const operator: PersonAccess = {
   service: false,
 }
 
-/** A request the way the server serves it: the route's own guard, then its handler. */
-function serve(
+/** A request the way the server serves it: the route's own guard, then its handler.
+ *  With the status it answered, so a refusal is never read as an answer. */
+function serveWithStatus(
   route: string,
   handler: (req: Request, res: Response) => void,
   access: PersonAccess,
   parts: { params?: Record<string, string>; query?: Record<string, string> },
-): unknown {
+): { status: number; body: unknown } {
   const r = fakeRes()
   const res = Object.assign(r.res, { set: () => res, on: () => res, writableEnded: false })
   const req = {
@@ -101,7 +104,12 @@ function serve(
     app: { locals: { rolesMode: 'enforce' } },
   } as unknown as Request
   roleGuard(ROUTE_RULES[route]!)(req, res, () => handler(req, res))
-  return r.body()
+  return { status: r.status(), body: r.body() }
+}
+
+/** The body of a request served as above. */
+function serve(...args: Parameters<typeof serveWithStatus>): unknown {
+  return serveWithStatus(...args).body
 }
 
 describe('board REST: a guest sees only their teams in a task tree', () => {
@@ -434,19 +442,43 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     // The ’ makes the post wide text, which a scan for curly quotes reads in full.
     reflectToRoom(db, 'T', `Task "${'x"'.repeat(30_000)}" claimed by agent’s-7.`)
 
-    const timedServe = (...args: Parameters<typeof serve>): [string, number] => {
+    const timedServe = (...args: Parameters<typeof serveWithStatus>): [number, string, number] => {
       const start = performance.now()
-      const body = JSON.stringify(serve(...args))
-      return [body, performance.now() - start]
+      const { status, body } = serveWithStatus(...args)
+      return [status, JSON.stringify(body), performance.now() - start]
     }
-    const [task, taskMs] = timedServe('GET /api/board/:taskId', boardGetGET, guestAccess(), {
-      params: { taskId: mine },
-    })
-    const [room, roomMs] = timedServe('GET /api/team-chat', teamChatGET, guestAccess(), {
-      query: { teamId: 'T' },
-    })
+    const [taskStatus, task, taskMs] = timedServe(
+      'GET /api/board/:taskId',
+      boardGetGET,
+      guestAccess(),
+      { params: { taskId: mine } },
+    )
+    const [roomStatus, room, roomMs] = timedServe(
+      'GET /api/team-chat',
+      teamChatGET,
+      guestAccess(),
+      {
+        query: { teamId: 'T' },
+      },
+    )
     expect(taskMs).toBeLessThan(200)
     expect(roomMs).toBeLessThan(200)
+    // Both answered what they were asked for, so what is left out is left out of an answer.
+    expect(taskStatus).toBe(200)
+    expect(roomStatus).toBe(200)
+    const taskBody = JSON.parse(task) as {
+      task: { id: string }
+      comments: Array<{ authorType: string; body: string }>
+    }
+    expect(taskBody).toMatchObject({ task: { id: mine } })
+    expect(taskBody.comments.filter((c) => c.authorType === 'system').map((c) => c.body)).toEqual([
+      HIDDEN_NOTE,
+      HIDDEN_NOTE,
+    ])
+    const roomBody = JSON.parse(room) as { posts: Array<{ kind: string; body: string }> }
+    expect(roomBody.posts.filter((p) => p.kind === 'system').map((p) => p.body)).toEqual([
+      HIDDEN_NOTE,
+    ])
     expect(task).not.toContain('y”“y')
     expect(room).not.toContain('x\\"x\\"x')
     // An operator still reads them as stored.
