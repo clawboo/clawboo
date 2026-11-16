@@ -34,7 +34,7 @@ Use this page to check how your agents are doing, find out what one of them did,
 | See budget warnings, pauses and approvals  | **Settings** > **Insights** > **Governance**, under **Audit log** (see [Budgets and spend](/using/budgets-and-spend)) |
 | Check that Clawboo's own parts are working | **Settings** > **System Health** (see [System Health](/using/system-health))                                          |
 
-To open **Settings**, click **Settings** at the bottom of the left sidebar, or press Cmd+, (macOS) or Ctrl+, (Windows, Linux) while no text field has focus. **Fleet** and **Observability** are in the **Insights** group.
+To open **Settings**, click the gear in the account bar at the bottom of the left sidebar, or press Cmd+, (macOS) or Ctrl+, (Windows, Linux) while no text field has focus. **Fleet** and **Observability** are in the **Insights** group.
 
 ## Check the fleet
 

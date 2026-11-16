@@ -799,7 +799,8 @@ The answer is built from the running process alone: no database read, no network
     "board.pause": true,
     "auth.proxyIdentity": false,
     "auth.appLink": false,
-    "auth.roles": false
+    "auth.roles": false,
+    "ui.embedTitlebar": true
   }
 }
 ```
@@ -854,6 +855,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `auth.proxyIdentity`                                                        | An administrator turned the [proxy identity lane](/guides/sso-proxy) `on` or `required`: a sign-in proxy's signed identity tokens are checked, and the person each names is recorded. `GET /api/access/identity` says which mode, and who the request is.                                                                                                           |
 | `auth.appLink`                                                              | The app that started this server, such as the desktop app, gave it a key (`CLAWBOO_APP_LINK_PUBLIC_KEY`): the tokens it signs for its own `account:` people are checked, and each person is recorded. See [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo).                                                                               |
 | `auth.roles`                                                                | An administrator enforces [roles](/guides/sso-proxy#roles) (`proxyIdentityRoles: enforce`): the role in each token decides what its person may do. `GET /api/access/identity` says what this person may do.                                                                                                                                                         |
+| `ui.embedTitlebar`                                                          | Always, in releases after 0.8.0. An app that shows the dashboard in its own window can ask for the slim top bar by setting `data-clawboo-embed-titlebar` on the page. It has no route. See [Show the dashboard in an app's window](/guides/app-window).                                                                                                             |
 
 ### For client authors
 

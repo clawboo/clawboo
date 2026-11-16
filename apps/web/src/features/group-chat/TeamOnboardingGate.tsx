@@ -291,7 +291,7 @@ export function TeamOnboardingGate({
                   placeholder="Hi team! I'm working on…"
                   rows={5}
                   disabled={submittingUserIntro}
-                  className="mb-4 w-full rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50"
+                  className="mb-4 w-full rounded-xl border border-border bg-field px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50"
                   style={{ resize: 'vertical', minHeight: 110 }}
                   data-testid="user-intro-textarea"
                 />

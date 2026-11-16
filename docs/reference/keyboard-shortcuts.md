@@ -37,9 +37,11 @@ Every shortcut the dashboard handles, grouped by where it works. On macOS use `C
 | `Cmd/Ctrl+4` | Open Memory                                                                                                                                                                  |
 | `Cmd/Ctrl+,` | Open Settings                                                                                                                                                                |
 | `Cmd/Ctrl+\` | Show or hide the sidebar                                                                                                                                                     |
+| `Cmd/Ctrl+[` | Go back to the page you were on, in an [app's own window](/guides/app-window) that shows the slim top bar (releases after 0.8.0)                                             |
+| `Cmd/Ctrl+]` | Go forward again, in the same window                                                                                                                                         |
 | `Escape`     | Close the topmost menu, popover or dialog. With none open, close Settings; with Settings closed, leave an agent, Boo Zero or team chat for the **Welcome to Clawboo** screen |
 
-`Cmd/Ctrl+1` to `4`, `Cmd/Ctrl+,` and the view-leaving `Escape` do nothing while you type in a text field or while a dialog has the keyboard. `Cmd/Ctrl+\` works everywhere, even while you type.
+`Cmd/Ctrl+1` to `4`, `Cmd/Ctrl+,`, `Cmd/Ctrl+[` and `]`, and the view-leaving `Escape` do nothing while you type in a text field or while a dialog has the keyboard. In a browser tab `Cmd/Ctrl+[` and `]` stay the browser's own. `Cmd/Ctrl+\` works everywhere, even while you type.
 
 The sidebar's resize handle (**Resize sidebar**) takes the keyboard too: focus it, then use the left and right arrow keys to make the sidebar narrower or wider. Left at the narrowest width, or `Enter`, collapses it. Double-click the handle to reset its width.
 

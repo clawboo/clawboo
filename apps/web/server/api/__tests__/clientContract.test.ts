@@ -125,6 +125,7 @@ const PINNED_FEATURES = [
   'auth.proxyIdentity',
   'auth.appLink',
   'auth.roles',
+  'ui.embedTitlebar',
 ]
 
 /** The drain-and-hold answer (GET, POST /api/system/hold, DELETE /api/system/hold/:owner). */

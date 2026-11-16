@@ -480,7 +480,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
             rows={8}
             placeholder="e.g. Be concise and direct. Use technical language when discussing code. Never use emojis. Always explain trade-offs when making recommendations."
             spellCheck={false}
-            className="w-full resize-y rounded-xl border border-border bg-surface px-3 py-2.5 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+            className="w-full resize-y rounded-xl border border-border bg-field px-3 py-2.5 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
             style={{ minHeight: 120 }}
           />
           <p className="mt-1.5 font-mono text-[10px] text-muted-foreground">

@@ -175,7 +175,7 @@ export function TeamVerifyCommandEditor({ teamId }: { teamId: string }) {
             spellCheck={false}
             autoComplete="off"
             placeholder="None set. For example: npm test"
-            className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 font-mono text-[12px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+            className="w-full rounded-xl border border-border bg-field px-4 py-2.5 font-mono text-[12px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
           />
           {lineBreakRefused && (
             <p role="alert" className="m-0 text-[12px] text-destructive">

@@ -221,6 +221,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'auth.appLink': appLinkOn(),
     // The administrator's switch: the role in each token decides what its person may do.
     'auth.roles': proxyIdentityRolesEnforced(),
+    // The dashboard page's own layout, so no route and no switch: an app that
+    // shows it in its own window can ask for the slim top bar.
+    'ui.embedTitlebar': true,
   }
   return {
     version,

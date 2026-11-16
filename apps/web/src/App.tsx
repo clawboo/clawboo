@@ -7,13 +7,17 @@ import { EmbedderLinks } from '@/features/embedder/EmbedderLinks'
 import { InboxBridge } from '@/features/inbox/InboxBridge'
 import { PresenceBeat } from '@/features/presence/PresenceBeat'
 import { AppSidebar } from '@/features/layout/AppSidebar'
+import { SHEET_RADIUS } from '@/features/layout/railMetrics'
 import { ContentArea } from '@/features/layout/ContentArea'
+import { EmbedTitlebar } from '@/features/layout/EmbedTitlebar'
+import { useEmbedTitlebar } from '@/features/embedder/embedTitlebar'
 import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
 import { UpdateChip } from '@/features/promo/UpdateChip'
 import { AppTopBar } from '@/features/promo/AppTopBar'
 import { SettingsModal } from '@/features/settings/SettingsModal'
 import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
 import { FinishPromptDialog } from '@/features/board/FinishPromptDialog'
+import { usePhoneLayout } from '@/features/layout/phoneLayout'
 import { useViewStore } from '@/stores/view'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
@@ -39,6 +43,15 @@ export function App() {
   // takes the bar with it.
   const hasBooZero = useBooZeroStore((s) => s.booZeroAgentId !== null)
   const showGlobalTopBar = shouldShowGlobalTopBar(viewMode, { hasBooZero })
+  // Opt-in only: an app that shows the dashboard in its own window sets
+  // `data-clawboo-embed-titlebar` on <html> to get the slim top bar.
+  const embedTitlebar = useEmbedTitlebar()
+  // Under the bar, everything right of the rail is one sheet with a rounded
+  // top-left corner. The agent column opens it; on Boo Zero's page, which has
+  // no column, the page itself does, while the sidebar is docked beside it.
+  const phone = usePhoneLayout()
+  const columnCollapsed = useViewStore((s) => s.columnCollapsed)
+  const pageOpensSheet = embedTitlebar && !phone && !columnCollapsed && viewMode.type === 'booZero'
 
   return (
     <Providers>
@@ -67,9 +80,17 @@ export function App() {
       <div
         inert={settingsOpen || undefined}
         data-testid="app-shell"
-        className="flex h-dvh overflow-hidden bg-background text-foreground"
+        className={
+          embedTitlebar
+            ? 'flex h-dvh overflow-hidden bg-frame text-foreground'
+            : 'flex h-dvh overflow-hidden bg-background text-foreground'
+        }
         style={{ paddingTop: 'var(--clawboo-titlebar-inset, 0px)' }}
       >
+        {/* Inside the shell, so Settings makes it inert with everything else,
+            and first in it, so Tab reaches the bar before the sidebar. It
+            fills the strip the inset keeps free. */}
+        {embedTitlebar && <EmbedTitlebar />}
         {/* Cols 1 + 2 — team rail + agent column, resizable and collapsible. Each
             column keeps its own error boundary (inside AppSidebar) so a crash in
             one can't take the other, or the content area, down with it. */}
@@ -78,7 +99,17 @@ export function App() {
             views without their own integrated chrome. Hidden on agent /
             booZero / groupChat — those views host the Star pill inside
             their own header row to save vertical space. */}
-        <main className="flex flex-1 flex-col overflow-hidden">
+        <main
+          data-testid="app-main"
+          className={[
+            'flex flex-1 flex-col overflow-hidden',
+            embedTitlebar && 'border-t border-border bg-background',
+            pageOpensSheet && 'border-l',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          style={pageOpensSheet ? { borderTopLeftRadius: SHEET_RADIUS } : undefined}
+        >
           {showGlobalTopBar && <AppTopBar />}
           <ContentArea />
         </main>

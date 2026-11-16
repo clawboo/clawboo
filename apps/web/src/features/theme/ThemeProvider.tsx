@@ -10,7 +10,7 @@ export const THEME_STORAGE_KEY = 'clawboo.theme'
  *  the title bar of an installed dashboard and a phone browser's toolbar. */
 export const THEME_COLORS: Record<ResolvedTheme, string> = {
   light: '#f8fafc',
-  dark: '#0a0e1a',
+  dark: '#1b1a1f',
 }
 
 export interface ThemeContextValue {

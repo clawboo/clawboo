@@ -165,7 +165,7 @@ export function CreateBooModal({
         onKeyDown={(e) => {
           if (e.key === 'Enter') void handleSubmit()
         }}
-        className="mb-4 w-full rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+        className="mb-4 w-full rounded-xl border border-border bg-field px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
       />
 
       {/* Role */}
@@ -181,7 +181,7 @@ export function CreateBooModal({
         onChange={(e) => setRole(e.target.value)}
         rows={4}
         placeholder="What should this Boo do?"
-        className="mb-4 w-full resize-none rounded-xl border border-border bg-surface px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+        className="mb-4 w-full resize-none rounded-xl border border-border bg-field px-4 py-3 text-[14px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
       />
 
       {runtime && (

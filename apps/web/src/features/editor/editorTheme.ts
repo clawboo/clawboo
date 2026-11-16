@@ -2,13 +2,15 @@ import { EditorView } from '@codemirror/view'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 
-// Dark theme — original Clawboo editor chrome. Used when resolved theme is 'dark'.
+// Dark theme. Used when resolved theme is 'dark'. Its surfaces are the app's
+// own tokens, so the editor sits in the same near-black steps as the page:
+// the text on the content step, the gutter on the darker frame step.
 const editorChromeDark = EditorView.theme(
   {
     '&': {
       height: '100%',
       fontSize: '13px',
-      background: '#0d1117',
+      background: 'var(--background)',
     },
     '.cm-content': {
       fontFamily: 'var(--font-mono)',
@@ -20,7 +22,7 @@ const editorChromeDark = EditorView.theme(
       borderLeftWidth: '2px',
     },
     '.cm-gutters': {
-      background: '#111827',
+      background: 'var(--frame)',
       borderRight: '1px solid rgba(255,255,255,0.06)',
       color: 'rgba(107,114,128,0.5)',
     },
@@ -53,12 +55,12 @@ const editorChromeDark = EditorView.theme(
       color: 'rgba(232,232,232,0.4)',
     },
     '.cm-tooltip': {
-      background: '#111827',
-      border: '1px solid rgba(255,255,255,0.1)',
+      background: 'var(--popover)',
+      border: '1px solid var(--border-floating)',
     },
     '.cm-panels': {
-      background: '#111827',
-      color: '#E8E8E8',
+      background: 'var(--surface)',
+      color: 'var(--foreground)',
     },
     '.cm-panels.cm-panels-top': {
       borderBottom: '1px solid rgba(255,255,255,0.06)',

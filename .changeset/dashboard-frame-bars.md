@@ -1,0 +1,7 @@
+---
+'clawboo': minor
+---
+
+The dashboard's frame is reworked. An account bar runs along the bottom of the sidebar, under the team rail and the agent column: the person a sign-in proxy verified (or "You" on a local install, said as such), the theme switch and the Settings gear, which moved there from the agent column. The team rail is 72 px wide with larger icons, and its add-team button now sits at the end of the team icons and scrolls with them. An app that shows the dashboard in its own window can ask for a slim top bar by setting `data-clawboo-embed-titlebar` on the page, with `--clawboo-titlebar-inset` for its height and the new `--clawboo-titlebar-left` for the window buttons' width: the sidebar's hide button (moved there from the agent column), back and forward through the dashboard's own pages, the team or page name, Needs you and help. Under the bar, everything right of the team rail sits on one sheet whose top and left edges carry a faint line meeting in a rounded corner. The bar is the window's drag area, and `GET /api/system/capabilities` reports `ui.embedTitlebar`. In a browser tab, nothing about the top of the page changes.
+
+Dark mode moves to a neutral near-black palette on every screen: the team rail, agent column and top bar on the darkest step, each view's main area one step up, and panes, cards and the account bar one step above that, with recessed text fields and fainter dividers. The brand red, mint and amber stay; the dark text red and error red are a shade lighter so they keep 4.5:1 on the new greys. Light mode is unchanged.

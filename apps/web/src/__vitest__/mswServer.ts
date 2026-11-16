@@ -38,6 +38,17 @@ export const server = setupServer(
     HttpResponse.json({ stargazers_count: 0 }),
   ),
   http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+  // The account bar at the bottom of the sidebar asks who "you" are on mount, so
+  // every test that renders the sidebar reads it. Nobody verified by default: the
+  // install's built-in person. A test about a signed-in person overrides it.
+  http.get('/api/access/identity', () =>
+    HttpResponse.json({
+      proxyIdentity: 'off',
+      appLink: false,
+      person: null,
+      you: { id: 'local', name: 'You', role: null },
+    }),
+  ),
   // The drawer asks for a task's plan and Team settings for its switch.
   http.get('/api/board/:taskId/plan', () => HttpResponse.json({ plan: null, revisions: [] })),
   http.get('/api/team-plan-approval/:teamId', () => HttpResponse.json({ on: false })),

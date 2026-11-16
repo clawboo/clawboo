@@ -7,8 +7,8 @@
 // to msw's strict mode, which cannot see a fetch the component swallows.
 //
 // The <ThemeProvider> wrapper is required, not cosmetic: AgentBooAvatar (inside
-// AgentAvatar and GroupChatRow) and ThemeToggle both call useTheme(), which
-// THROWS outside a provider.
+// AgentAvatar and GroupChatRow) calls useTheme(), which THROWS outside a
+// provider.
 
 import type { ReactElement } from 'react'
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
@@ -202,7 +202,7 @@ describe('AgentListColumn', () => {
     expect(screen.getByTestId('agent-search-open')).toBeInTheDocument()
   })
 
-  it('clicking a row opens that agent; the nav rows navigate and open settings', async () => {
+  it('clicking a row opens that agent; the nav rows navigate', async () => {
     useFleetStore.setState({ agents: [agent({ id: 'a1', name: 'Research Boo' })] })
     renderColumn(<AgentListColumn />)
 
@@ -218,9 +218,14 @@ describe('AgentListColumn', () => {
 
     await userEvent.click(screen.getByTestId('nav-graph'))
     expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'graph' })
+  })
 
-    await userEvent.click(screen.getByTestId('nav-settings'))
-    expect(useSettingsModalStore.getState().open).toBe(true)
+  it('leaves Settings and the theme switch to the account bar under the whole sidebar', () => {
+    renderColumn(<AgentListColumn />)
+    const column = screen.getByTestId('agent-list-column')
+    expect(within(column).queryByTestId('nav-settings')).not.toBeInTheDocument()
+    expect(within(column).queryByTestId('theme-toggle')).not.toBeInTheDocument()
+    expect(within(column).getByTestId('open-on-another-device')).toBeInTheDocument()
   })
 
   // Native mode: the app is connected and there is no Gateway client. Deleting

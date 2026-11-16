@@ -149,6 +149,7 @@
               "operating/index",
               "guides/self-host-securely",
               "guides/sso-proxy",
+              "guides/app-window",
               "operating/deployment",
               "operating/security",
               "operating/agent-isolation",

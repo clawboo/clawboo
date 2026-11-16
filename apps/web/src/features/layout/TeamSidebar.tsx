@@ -17,12 +17,11 @@ import { refreshTeamAgentsMd } from '@/lib/createAgent'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { SidebarToggle } from './SidebarToggle'
 import { closePhoneNav, isPhoneLayout } from './phoneLayout'
+import { MAX_TOGGLE_LEFT, RAIL_ICON_SIZE, RAIL_WIDTH, TOGGLE_SIZE } from './railMetrics'
 import type { PeekAnchor } from './sidebarPeek'
 
 /** The rail's top padding (`pt-1.5`), so a peek toggle can land on its anchor. */
 const RAIL_PAD_TOP = 6
-/** The rail is 60px wide and the toggle 32px: keep it inside the rail. */
-const MAX_TOGGLE_LEFT = 28
 
 // ─── RailTip ─────────────────────────────────────────────────────────────────
 
@@ -102,14 +101,15 @@ function MascotIcon({
         onClick={onClick}
         onContextMenu={onContextMenu}
         aria-label="Boo Zero"
+        style={{ width: RAIL_ICON_SIZE, height: RAIL_ICON_SIZE }}
         className={[
-          'flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] p-0 transition-all duration-150',
+          'flex shrink-0 cursor-pointer items-center justify-center rounded-[16px] p-0 transition-all duration-150',
           selected
             ? 'border-2 border-primary bg-primary/10'
             : 'border-2 border-transparent bg-foreground/[0.04] hover:bg-foreground/[0.07]',
         ].join(' ')}
       >
-        <img src="logo.svg" width={26} height={24} alt="Boo Zero" />
+        <img src="logo.svg" width={30} height={28} alt="Boo Zero" />
       </button>
     </RailTip>
   )
@@ -136,11 +136,12 @@ function TeamIcon({
   return (
     <RailTip label={label}>
       <div className="relative flex items-center">
-        {/* Selected indicator pill on the left edge — brand red. */}
+        {/* Selected indicator pill on the rail's left edge, in brand red: the
+            icon list's 12px side padding puts the rail's edge at -12. */}
         {selected && (
           <div
-            className="absolute h-5 w-1 rounded-r-full"
-            style={{ left: -8, background: 'var(--primary)' }}
+            className="absolute h-6 w-1 rounded-r-full"
+            style={{ left: -12, background: 'var(--primary)' }}
           />
         )}
         <button
@@ -148,12 +149,14 @@ function TeamIcon({
           onContextMenu={onContextMenu}
           aria-label={label}
           className={[
-            'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-200 cursor-pointer',
-            selected ? 'rounded-[13px]' : 'rounded-[20px] hover:rounded-[14px]',
+            'flex shrink-0 items-center justify-center border-none p-0 text-2xl leading-none transition-all duration-200 cursor-pointer',
+            selected ? 'rounded-[16px]' : 'rounded-[24px] hover:rounded-[16px]',
             team.color ? '' : 'bg-foreground/[0.06]',
             archived ? 'opacity-45 grayscale hover:opacity-80' : '',
           ].join(' ')}
           style={{
+            width: RAIL_ICON_SIZE,
+            height: RAIL_ICON_SIZE,
             ...(team.color ? { background: team.color } : {}),
             ...(selected ? { boxShadow: '0 0 0 2px var(--primary)' } : {}),
           }}
@@ -208,12 +211,20 @@ const folderLeftMessage = (name: string) =>
 /** The sidebar toggle normally sits in the agent column's top row. The rail shows
  *  its own only when there is no agent column (Boo Zero's view), and in the
  *  collapsed sidebar's hover peek, where it sits right under the pointer that
- *  opened the peek; `peek` makes it read "expand" and dock the sidebar. */
+ *  opened the peek; `peek` makes it read "expand" and dock the sidebar.
+ *  `edge` false drops the rail's right border, for when the column beside it
+ *  draws that line itself (the rounded sheet under the slim top bar). */
 export function TeamSidebar({
   peek = false,
   showToggle = true,
   toggleAnchor = null,
-}: { peek?: boolean; showToggle?: boolean; toggleAnchor?: PeekAnchor | null } = {}) {
+  edge = true,
+}: {
+  peek?: boolean
+  showToggle?: boolean
+  toggleAnchor?: PeekAnchor | null
+  edge?: boolean
+} = {}) {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const selectTeam = useTeamStore((s) => s.selectTeam)
@@ -456,7 +467,11 @@ export function TeamSidebar({
   return (
     <div
       data-testid="team-sidebar"
-      className="flex h-full w-[60px] shrink-0 flex-col items-center gap-2 border-r border-border bg-background pb-3 pt-1.5"
+      className={[
+        'flex h-full shrink-0 flex-col items-center gap-2 bg-frame pb-3 pt-1.5',
+        edge ? 'border-r border-border' : '',
+      ].join(' ')}
+      style={{ width: RAIL_WIDTH }}
     >
       {/* The toggle lives here only when there is no agent column to hold it,
           and in the peek. There it lands exactly on the header toggle that
@@ -471,7 +486,7 @@ export function TeamSidebar({
                   paddingLeft: Math.min(Math.max(0, toggleAnchor.left), MAX_TOGGLE_LEFT),
                   marginTop: Math.max(0, toggleAnchor.top - RAIL_PAD_TOP),
                 }
-              : { paddingLeft: 8 }
+              : { paddingLeft: (RAIL_WIDTH - TOGGLE_SIZE) / 2 }
           }
         >
           <SidebarToggle
@@ -497,8 +512,8 @@ export function TeamSidebar({
       {/* Divider */}
       <div className="w-8 shrink-0 border-t border-border" />
 
-      {/* Team icons */}
-      <div className="flex w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2.5 py-2">
+      {/* Team icons, then the add-team button, which scrolls with them. */}
+      <div className="flex w-full min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-3 py-2">
         {activeTeams.map((team) => (
           <TeamIcon
             key={team.id}
@@ -523,14 +538,15 @@ export function TeamSidebar({
                 aria-label={`Archived (${archivedTeams.length})`}
                 aria-expanded={showArchived}
                 onClick={() => setShowArchived((v) => !v)}
+                style={{ width: RAIL_ICON_SIZE, height: RAIL_ICON_SIZE }}
                 className={[
-                  'flex h-10 w-10 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[13px] border-none p-0 transition-colors duration-150',
+                  'flex shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[16px] border-none p-0 transition-colors duration-150',
                   showArchived
                     ? 'bg-foreground/[0.08] text-foreground/70'
                     : 'bg-transparent text-foreground/40 hover:bg-foreground/[0.05] hover:text-foreground/70',
                 ].join(' ')}
               >
-                <Archive size={14} strokeWidth={2} />
+                <Archive size={16} strokeWidth={2} />
                 <span className="font-data text-[10px] leading-none">{archivedTeams.length}</span>
               </button>
             </RailTip>
@@ -550,19 +566,19 @@ export function TeamSidebar({
               ))}
           </>
         )}
+        {/* Add team button, at the end of the list: opens the Marketplace Teams
+            showcase (the single canonical place to browse + deploy a team, or
+            start one from scratch). */}
+        <RailTip label="Create a team">
+          <button
+            aria-label="Create a team"
+            onClick={openTeamMarketplace}
+            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border border-dashed border-border-strong bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:border-primary hover:text-primary hover:bg-primary/[0.06]"
+          >
+            <Plus size={16} strokeWidth={2} />
+          </button>
+        </RailTip>
       </div>
-
-      {/* Add team button — opens the Marketplace Teams showcase (the single
-          canonical place to browse + deploy a team, or start one from scratch). */}
-      <RailTip label="Create a team">
-        <button
-          aria-label="Create a team"
-          onClick={openTeamMarketplace}
-          className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-[13px] border border-dashed border-border-strong bg-transparent p-0 text-foreground/40 transition-all duration-150 hover:border-primary hover:text-primary hover:bg-primary/[0.06]"
-        >
-          <Plus size={16} strokeWidth={2} />
-        </button>
-      </RailTip>
 
       {/* Mascot right-click context menu */}
       {mascotMenu && (
