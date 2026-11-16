@@ -113,14 +113,24 @@ import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSetti
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import { loadProviderBaseUrls, providerBaseUrlWarnings } from './lib/providerBaseUrls'
 import {
+  controlClaimModeOf,
   identityConfigs,
   loadAppLinkConfig,
+  loadPersonCheck,
   loadProxyIdentityConfig,
   operatorFileReplaceable,
   proxyIdentityFileWarning,
   rolesModeOf,
   type ProxyIdentityConfig,
 } from './lib/proxyIdentity/config'
+import {
+  controlClaimRequired,
+  personCheckLogLine,
+  personCheckMode,
+  setControlClaimMode,
+  setPersonCheckMode,
+  upgradeAllowedForPersonCheck,
+} from './lib/personCheck'
 import { upgradeAllowedForRoles } from './lib/roles/guard'
 import { createIdentityLane, type LaneSource } from './lib/proxyIdentity/lane'
 import { createAssertionVerifier } from './lib/proxyIdentity/verifier'
@@ -243,6 +253,10 @@ async function main() {
     proxyIdentityConfig = loadProxyIdentityConfig()
     appLinkConfig = loadAppLinkConfig(process.env)
     identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig)
+    // Who may act as the person: the dashboard's page too, or only a verified
+    // token. From the sign-in proxy lane alone: the app link does not count.
+    setPersonCheckMode(loadPersonCheck(proxyIdentityConfig))
+    setControlClaimMode(controlClaimModeOf(proxyIdentityConfig))
     // Where Clawboo Native reaches each model provider (a gateway, a company
     // proxy), read once like the rest. A base URL receives the provider's key.
     loadProviderBaseUrls()
@@ -395,6 +409,25 @@ async function main() {
     log.info(
       'Roles enforced: each request may do only what the role in its token allows. ' +
         'A token with no role this engine knows reaches only who it names, health, capabilities and presence.',
+    )
+  }
+  // The person check's mode, and how far it reaches with agents where they run.
+  if (proxyIdentityConfig || personCheckMode() === 'verified') {
+    log.info(
+      personCheckLogLine(
+        personCheckMode(),
+        !isAgentUserMode(process.env)
+          ? 'none'
+          : isAgentPoolMode(process.env)
+            ? 'agent-users'
+            : 'agent-user',
+      ),
+    )
+  }
+  if (controlClaimRequired()) {
+    log.info(
+      "Take over claim required: taking over an agent's screen, and every batch of input " +
+        'after, needs a sign-in proxy token whose control claim names that agent.',
     )
   }
 
@@ -627,6 +660,12 @@ async function main() {
         return
       }
       if (!proxyIdentity) {
+        // Startup refuses a verified person check with no sign-in proxy lane;
+        // this keeps the socket shut should that ever change.
+        if (!upgradeAllowedForPersonCheck(personCheckMode(), null)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
         proxy.handleUpgrade(req, socket, head)
         return
       }
@@ -646,6 +685,12 @@ async function main() {
         // The Gateway socket's messages are not checked one by one, so with
         // roles enforced only a person who may run the whole system opens it.
         if (!upgradeAllowedForRoles(rolesMode, decision)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        // The dashboard answers OpenClaw approvals over this socket, so with the
+        // verified person check only a person the sign-in proxy names opens it.
+        if (!upgradeAllowedForPersonCheck(personCheckMode(), decision)) {
           socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
           return
         }

@@ -69,6 +69,8 @@ export type LaneDecision =
       person: PersonRef | null
       /** What the person's token grants, with roles enforced. */
       access?: PersonAccess | null
+      /** The agent the token's `control` claim names, with the claim required. */
+      control?: string | null
     }
   | { ok: false; reason: LaneRefusal }
 
@@ -169,7 +171,13 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     try {
       const result = await source.verifier.verify({ token, method: req.method ?? 'GET', path })
       return result.ok
-        ? { ok: true, person: result.person, access: result.access ?? null, from }
+        ? {
+            ok: true,
+            person: result.person,
+            access: result.access ?? null,
+            control: result.control ?? null,
+            from,
+          }
         : { ...result, from }
     } catch {
       return { ok: false, reason: 'malformed', from }
@@ -227,6 +235,10 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
       if (service) req.service = decision.person
       req.access = decision.access ?? null
       if (!service && decision.person && decision.from) req.personVia = decision.from
+      // A take-over claim counts only for a person a sign-in proxy names: never a
+      // service token's, and the app link's tokens never carry one.
+      req.controlClaim =
+        !service && decision.person && decision.from === 'proxy' ? (decision.control ?? null) : null
       next()
     })
   }

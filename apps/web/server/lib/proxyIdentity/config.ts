@@ -34,11 +34,14 @@ import {
   operatorFileLocation,
   type OperatorKey,
 } from '../operatorSettings'
+import { resolvePersonCheck, type PersonCheckMode } from '../personCheck'
 
 export type ProxyIdentityMode = 'off' | 'on' | 'required'
 export type ProxyIdentityBinding = 'request' | 'session'
 /** `enforce`: the role a token carries decides what its person may do (lib/roles). */
 export type ProxyIdentityRoles = 'off' | 'enforce'
+/** `required`: taking over an agent's screen needs a `control` claim naming it. */
+export type ProxyIdentityControlClaim = 'off' | 'required'
 
 export type ProxyIdentityKeys =
   { source: 'jwks-url'; url: URL } | { source: 'public-key'; jwks: JSONWebKeySet }
@@ -68,6 +71,10 @@ export interface ProxyIdentityConfig {
   /** `enforce`: the verifier reads the access the token's role claims grant, and
    *  a malformed one refuses the token. Unset: `off`. */
   roles?: ProxyIdentityRoles
+  /** `required`: the verifier reads a request-bound token's `control` claim (the
+   *  agent whose screen it may take over), and a malformed one refuses the
+   *  token. Unset: `off`. Never set on the app link. */
+  controlClaim?: ProxyIdentityControlClaim
 }
 
 /** A route an app link's token may be used on: a method and a whole-path pattern. */
@@ -277,6 +284,17 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
         'required, so that every request names a person whose role can be checked.',
     )
   }
+  // The take-over claim lives in a sign-in proxy's token, and only one bound to
+  // its request: a session token is good on every path until it expires, so a
+  // claim in one would hand over the agent's screen for the whole sign-in.
+  const controlClaim = effectiveSetting('proxyIdentityControlClaim')
+    .value as ProxyIdentityControlClaim
+  if (controlClaim === 'required' && mode === 'off') {
+    fail(
+      'proxyIdentityControlClaim is required but proxyIdentity is off. Set proxyIdentity to on ' +
+        'or required, so that a take over can carry a claim Clawboo can verify.',
+    )
+  }
   if (mode === 'off') return null
 
   const lane = 'The proxy identity lane'
@@ -329,18 +347,28 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
     if (!CLAIM_PATH.test(value)) fail(`${key} must be a claim name such as name or role.`)
   }
 
+  const binding = effectiveSetting('proxyIdentityBinding').value as ProxyIdentityBinding
+  if (controlClaim === 'required' && binding !== 'request') {
+    fail(
+      'proxyIdentityControlClaim is required but proxyIdentityBinding is session. A session ' +
+        'token is good on every path until it expires, so a take over claim in one would hand ' +
+        "over the agent's screen for the whole sign-in. Use request binding.",
+    )
+  }
+
   return {
     mode,
     header,
     issuer,
     audience,
-    binding: effectiveSetting('proxyIdentityBinding').value as ProxyIdentityBinding,
+    binding,
     maxLifetimeSeconds: effectiveSetting('proxyIdentityMaxLifetime').value as number,
     nameClaim,
     roleClaim,
     keys,
     accountSubjects: 'any',
     roles,
+    controlClaim,
   }
 }
 
@@ -373,6 +401,26 @@ export function identityConfigs(
 /** How roles are applied, from the lane's config: `off` when the lane is. */
 export function rolesModeOf(proxy: ProxyIdentityConfig | null): ProxyIdentityRoles {
   return proxy?.roles === 'enforce' ? 'enforce' : 'off'
+}
+
+/** Whether taking over an agent's screen needs a `control` claim, from the lane's
+ *  config: `off` when the lane is. */
+export function controlClaimModeOf(proxy: ProxyIdentityConfig | null): ProxyIdentityControlClaim {
+  return proxy?.controlClaim === 'required' ? 'required' : 'off'
+}
+
+/**
+ * The person check's mode (lib/personCheck.ts) from the operator's setting and
+ * the sign-in proxy lane (`proxy`, null when it is off; the app link does not
+ * count). Throws OperatorSettingsError on `verified` with no sign-in proxy lane.
+ */
+export function loadPersonCheck(proxy: ProxyIdentityConfig | null): PersonCheckMode {
+  const resolved = resolvePersonCheck(
+    effectiveSetting('personCheck').value as PersonCheckMode,
+    proxy ? proxy.mode : null,
+  )
+  if (!resolved.ok) fail(resolved.error)
+  return resolved.mode
 }
 
 /** Whether the app that started this engine handed it an app link key. */
@@ -514,8 +562,10 @@ export function operatorFileReplaceable(
 export function proxyIdentityFileWarning(
   { uid }: { uid: number | undefined } = { uid: process.getuid?.() },
 ): string | null {
-  const keys = (Object.keys(OPERATOR_KEYS) as OperatorKey[]).filter((k) =>
-    k.startsWith('proxyIdentity'),
+  // The person check's mode too: an agent that could set it back to `page`
+  // could act as the person after the next restart.
+  const keys = (Object.keys(OPERATOR_KEYS) as OperatorKey[]).filter(
+    (k) => k.startsWith('proxyIdentity') || k === 'personCheck',
   )
   if (!keys.some((k) => effectiveSetting(k).source === 'file')) return null
   const file = operatorFileLocation().path

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '@clawboo/control-client'
 
 import { ComputerScreen } from './ComputerScreen'
+import { REFUSAL_WORDS } from './useLiveScreen'
 
 const LINK_HEADER = 'x-clawboo-computer-link'
 
@@ -36,10 +37,11 @@ export function ComputerLinkPage() {
 
   useEffect(() => {
     if (!token) return
-    // No cookie, and no access lock is mounted on this page to read a 401.
+    // No access lock is mounted on this page to read a 401. This address's
+    // cookies still go, so a sign-in proxy in front can tell who opened it.
     void apiFetch('/api/computer-link/info', {
       headers: { [LINK_HEADER]: token },
-      credentials: 'omit',
+      credentials: 'same-origin',
     })
       .then(async (r) => {
         const body = (await r.json().catch(() => null)) as {
@@ -49,7 +51,8 @@ export function ComputerLinkPage() {
           error?: string
         } | null
         if (!r.ok || !body?.kind) {
-          setError(body?.error ?? 'This link does not work any more.')
+          const code = body?.error
+          setError((code && REFUSAL_WORDS[code]) || code || 'This link does not work any more.')
           return
         }
         setInfo({

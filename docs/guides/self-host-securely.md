@@ -401,6 +401,12 @@ Answering an approval, Retry, Assign and a team's work check are refused with `4
 
 </Accordion>
 
+<Accordion title="The dashboard says it is not signed in through your sign-in proxy">
+
+In releases after 0.8.0, with `personCheck: verified`, only a request your sign-in proxy signed acts as you. A dashboard opened around the proxy, such as at `http://localhost:18790` or the server's own address, sends no token: it can show your agents, but answering approvals, moving cards and taking over a screen are refused with `403 person_only`, and the Gateway connection is refused. Open Clawboo at the address your proxy serves. If you do and still see it, check that the proxy sends its token on every request, `GET /api/access/identity` included. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person).
+
+</Accordion>
+
 <Accordion title="401: Clawboo access token required">
 
 This browser has no cookie yet, or the token changed. Open your Clawboo address with `?access_token=<your-token>` once, or open a one-time link from `clawboo open --print` on the server (replace `127.0.0.1:<port>` with the address you use) or from **Open on another device** in a signed-in browser.

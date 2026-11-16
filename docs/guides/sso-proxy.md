@@ -19,6 +19,12 @@ keywords:
     'permissions',
     'CLAWBOO_PROXY_IDENTITY_ROLES',
     'proxyIdentityRoles',
+    'person check',
+    'personCheck',
+    'CLAWBOO_PERSON_CHECK',
+    'take over',
+    'proxyIdentityControlClaim',
+    'CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM',
   ]
 ---
 
@@ -58,6 +64,8 @@ This works beside the [access token](/operating/security#the-access-token), not 
 
 Start with `on` to check that names come through, then switch to `required`.
 
+In releases after 0.8.0, `personCheck: verified` keeps `on` mode's unnamed requests from acting as a person. See [Only signed requests act as a person](#only-signed-requests-act-as-a-person).
+
 ## Choose a binding
 
 | `proxyIdentityBinding` | Use it when                                                                      | A copied token is good for                         |
@@ -75,23 +83,25 @@ With `session` binding a token needs only `sub` and `exp`. If it carries `htm` o
 
 ## Settings
 
-| Operator file key          | Variable                              | Default            | What it sets                                                                        |
-| -------------------------- | ------------------------------------- | ------------------ | ----------------------------------------------------------------------------------- |
-| `proxyIdentity`            | `CLAWBOO_PROXY_IDENTITY`              | `off`              | `off`, `on` or `required`                                                           |
-| `proxyIdentityHeader`      | `CLAWBOO_PROXY_IDENTITY_HEADER`       | `clawboo-identity` | The header that carries the token. A `Bearer ` prefix is allowed                    |
-| `proxyIdentityJwksUrl`     | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`     | unset              | The proxy's key set. `https`, or plain `http` only to this computer                 |
-| `proxyIdentityPublicKey`   | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`   | unset              | The proxy's public key: a PEM public key, a JWK or a JWKS                           |
-| `proxyIdentityIssuer`      | `CLAWBOO_PROXY_IDENTITY_ISSUER`       | unset              | The `iss` every token must carry                                                    |
-| `proxyIdentityAudience`    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`     | unset              | The `aud` every token must carry                                                    |
-| `proxyIdentityBinding`     | `CLAWBOO_PROXY_IDENTITY_BINDING`      | `request`          | `request` or `session`                                                              |
-| `proxyIdentityMaxLifetime` | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` | `60`               | The longest `exp - iat` a request-bound token may have, in seconds, from 1 to 300   |
-| `proxyIdentityNameClaim`   | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   | `name`             | The claim with the person's name. Without it, `email`, then `preferred_username`    |
-| `proxyIdentityRoleClaim`   | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   | `role`             | The claim with the person's role. A list is joined with commas                      |
-| `proxyIdentityRoles`       | `CLAWBOO_PROXY_IDENTITY_ROLES`        | `off`              | `off`, or `enforce` to let the role decide what the person may do ([Roles](#roles)) |
+| Operator file key           | Variable                               | Default            | What it sets                                                                                                                                                                      |
+| --------------------------- | -------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proxyIdentity`             | `CLAWBOO_PROXY_IDENTITY`               | `off`              | `off`, `on` or `required`                                                                                                                                                         |
+| `proxyIdentityHeader`       | `CLAWBOO_PROXY_IDENTITY_HEADER`        | `clawboo-identity` | The header that carries the token. A `Bearer ` prefix is allowed                                                                                                                  |
+| `proxyIdentityJwksUrl`      | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`      | unset              | The proxy's key set. `https`, or plain `http` only to this computer                                                                                                               |
+| `proxyIdentityPublicKey`    | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`    | unset              | The proxy's public key: a PEM public key, a JWK or a JWKS                                                                                                                         |
+| `proxyIdentityIssuer`       | `CLAWBOO_PROXY_IDENTITY_ISSUER`        | unset              | The `iss` every token must carry                                                                                                                                                  |
+| `proxyIdentityAudience`     | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`      | unset              | The `aud` every token must carry                                                                                                                                                  |
+| `proxyIdentityBinding`      | `CLAWBOO_PROXY_IDENTITY_BINDING`       | `request`          | `request` or `session`                                                                                                                                                            |
+| `proxyIdentityMaxLifetime`  | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME`  | `60`               | The longest `exp - iat` a request-bound token may have, in seconds, from 1 to 300                                                                                                 |
+| `proxyIdentityNameClaim`    | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`    | `name`             | The claim with the person's name. Without it, `email`, then `preferred_username`                                                                                                  |
+| `proxyIdentityRoleClaim`    | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`    | `role`             | The claim with the person's role. A list is joined with commas                                                                                                                    |
+| `proxyIdentityRoles`        | `CLAWBOO_PROXY_IDENTITY_ROLES`         | `off`              | `off`, or `enforce` to let the role decide what the person may do ([Roles](#roles))                                                                                               |
+| `proxyIdentityControlClaim` | `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM` | `off`              | `off`, or `required` for a take over to need the proxy's `control` claim ([Taking over a screen](#taking-over-a-screen)). In releases after 0.8.0                                 |
+| `personCheck`               | `CLAWBOO_PERSON_CHECK`                 | `page`             | `page`, or `verified` for only a person a token names to act as a person ([Only signed requests act as a person](#only-signed-requests-act-as-a-person)). In releases after 0.8.0 |
 
 Set exactly one of `proxyIdentityJwksUrl` and `proxyIdentityPublicKey`, and both the issuer and the audience. Without the audience, a token your sign-in provider made for any other app would do. A claim name can be a dotted path into the token, such as `realm_access.roles`. In an environment variable, a PEM key can be written on one line with `\n` for each line break.
 
-Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; when the header is one Clawboo or a browser already uses, such as `cookie` or `host`; or when `proxyIdentityRoles` is `enforce` and `proxyIdentity` is not `required`.
+Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; when the header is one Clawboo or a browser already uses, such as `cookie` or `host`; or when `proxyIdentityRoles` is `enforce` and `proxyIdentity` is not `required`. In releases after 0.8.0 it also refuses `personCheck: verified` with `proxyIdentity` off, and `proxyIdentityControlClaim: required` with `proxyIdentity` off or with `session` binding.
 
 **Keep these settings out of agents' reach.** Agents run as the same user as Clawboo, so an agent that can change these settings can put in its own key and sign in as anyone after the next restart. Set the variables in your service manager, or keep the operator file somewhere that user can read but not change, such as a root-owned `/etc/clawboo/operator.json`: the file and every folder above it owned by another user, and none of them writable by Clawboo's user, except a sticky folder such as `/tmp`, which lets a user rename only what it owns. When the settings come from a file Clawboo's user owns, can write, or can replace through a folder above it, the server logs a `SECURITY:` warning at startup. On Windows, Clawboo cannot check who can change a file (Node reads neither owners nor access lists there), so it logs that warning whenever these settings come from the operator file. Let only administrators change the file, or set the variables in the service's environment.
 
@@ -190,11 +200,13 @@ Then restart Clawboo (`clawboo restart`, or your service manager). The startup l
   "proxyIdentity": "required",
   "appLink": false,
   "roles": "off",
+  "personCheck": "verified",
+  "controlClaim": "off",
   "person": { "id": "user-42", "name": "Ada Lovelace", "role": "admin" }
 }
 ```
 
-`person` is `null` for a request that carried no token while the lane is `on`. **Settings** > **System** > **Deployment** shows the mode under **Sign-in proxy**, set by your administrator.
+`person` is `null` for a request that carried no token while the lane is `on`. In releases after 0.8.0, `personCheck` says who may act as a person (`page` or `verified`; `required` mode always answers `verified`), and `controlClaim` whether a take over needs the proxy's `control` claim (`off` or `required`). **Settings** > **System** > **Deployment** shows the mode under **Sign-in proxy**, set by your administrator.
 
 ## What gets recorded
 
@@ -298,11 +310,45 @@ The roles are checked on every request through Clawboo's API. They do not keep a
 
 With `proxyIdentity` set to `required`, you can turn the access token off with `STUDIO_ACCESS_TOKEN=` (set blank). Your proxy is then the only way in: every `/api/` request and the Gateway WebSocket need a token that verifies, and agents' own MCP calls still work by their attach token. This fits the default loopback bind behind a proxy on the same machine. A network bind (`HOST=0.0.0.0`) with the access token off still refuses to start.
 
+## Only signed requests act as a person
+
+Available in releases after 0.8.0. Clawboo 0.8.0 and older ignore `CLAWBOO_PERSON_CHECK`, and refuse to start with `personCheck` in the operator file, as with any key they do not know.
+
+Some writes carry a person's authority: answering an approval, moving a card, Retry, a person's comment, pausing an agent, and the rest that take [the person check](/operating/security#the-person-check). By default the check also takes the dashboard's own page, from the marks a browser puts on its requests. Anything that holds the access token can send the same marks, an agent running as Clawboo's user among them.
+
+Set `personCheck` to `verified` (or `CLAWBOO_PERSON_CHECK=verified`), and only a person a verified token names acts as a person:
+
+- The page's marks count for nothing. A request without a token still gets in while the lane is `on`, but it acts as no one: a person-only write answers `403` `person_only`, a move stops no run, and a comment is not a reply to the agent.
+- Clawboo's Gateway WebSocket (`/api/gateway/ws`) opens only for a person your proxy's token names. The dashboard answers OpenClaw approvals over it, so without this an agent holding the access token could answer its own there. A refused upgrade gets `403 Forbidden`. It does not cover the OpenClaw Gateway's own port: an OpenClaw agent runs as Clawboo's user and can read the Gateway's token and connect to it directly. And it is checked when it opens: a socket already open stays open until it closes, so close a person's connections at your proxy when you remove them.
+- Every route of an agent's screen needs such a person: watching it, its browser's screenshots, taking over, typing, and a view or control link, which needs the person as well as the link. A view belongs to the person who opened it, so no one else can resume it, take it over or type into it. Another signed-in person can still take over the agent from a view of their own, as the newest take over always wins. A live view's stream ends every 5 minutes and the page comes straight back with a fresh signed request, keeping a take over, so someone your proxy stops vouching for loses the view within minutes.
+- An [app that starts Clawboo](#an-app-that-starts-clawboo) still acts for its people on the routes it signs.
+
+It needs the lane on: with `proxyIdentity` off, the server refuses to start. In `required` mode the check works this way whatever `personCheck` says, since every request names a verified person.
+
+Opened around the proxy, such as at `http://localhost:18790`, the dashboard says once that it is not signed in through your sign-in proxy, and that nothing done there acts as you. Open it at the address your proxy serves.
+
+What it does not change: other routes, such as settings, provider keys and connectors, still answer to the access token alone in `on` mode. Use `required`, and [Roles](#roles), to put every route behind a token. And it is a check on Clawboo's API: an agent running as Clawboo's own user can still change the database directly. [What counts as a person](/operating/security#what-counts-as-a-person) says what each kind of install gets.
+
+## Taking over a screen
+
+Available in releases after 0.8.0. Clawboo 0.8.0 and older ignore `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM`, and refuse to start with `proxyIdentityControlClaim` in the operator file.
+
+A person who takes over an agent's screen can do what that agent's browser user can do on its computer. With `proxyIdentityControlClaim` set to `required` (or `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM=required`), a take over also needs your proxy's say-so:
+
+- The token carries a `control` claim whose value is the agent's id, such as `"control": "agent-7"`. Clawboo reads it only from a request-bound token, and refuses to start with this switch and `session` binding: a claim in a session token would last the whole sign-in, on every path.
+- It is checked when someone takes over and on every batch of keys and clicks after, from the dashboard and through a control link, where it must name the link's agent. Without it the answer is `403` `{ "ok": false, "error": "control_claim" }`, and the page says your sign-in proxy has not allowed the take over.
+- A batch that arrives without it hands the screen back to the agent at once, and lets go of any key held down. So the proxy ends a take over by no longer adding the claim.
+- Handing back and watching never need it. Control belongs to the person who took it until someone else takes over in turn, which needs a claim naming the same agent: another person's batch is refused and leaves it alone.
+- A `control` that is there but is not an agent id, such as a number, a list, an empty string or text with spaces around it, refuses the token with `claims`. A service token never takes over.
+
+It works with either `personCheck` mode and needs the lane on. Both switches are checks on Clawboo's API: an agent running as the same operating system user as another agent's display can open that display directly (see [Security](/operating/security#what-agents-can-do-on-your-machine)), and with a [user per agent](/operating/agent-isolation#a-user-per-agent) it cannot. `GET /api/agents/:agentId/computer` answers `controlClaim: { "required", "granted" }`: whether the claim is required, and whether this request's token has it for that agent.
+
 ## What it does not protect
 
 - **Without roles it is not access control.** Anyone who gets through your proxy can do everything the dashboard can, and a role is only recorded. With [Roles](#roles) enforced, the role decides what each person may do through the API.
 - **The records live in Clawboo's database.** Agents and other programs running as Clawboo's user can change the database and its files directly. The records say who did what through the dashboard; they are not a tamper-proof audit log.
-- **In `on` mode, the access token still works.** Agents can read the access token file, so anything running as Clawboo's user can still act through the API, with no name recorded. Use `required` to refuse such requests.
+- **In `on` mode, the access token still works.** Agents can read the access token file, so anything running as Clawboo's user can still act through the API, with no name recorded. Use `required` to refuse such requests. With [`personCheck: verified`](#only-signed-requests-act-as-a-person) such a request still gets in, but acts as no person.
+- **Script on the dashboard's own address passes every check.** Your proxy signs whatever the signed-in person's browser sends, so a page served from the dashboard's address could act as them, a signed token included. Keep anything an agent wrote off that address.
 - **A removal or a role change waits for the tokens.** Clawboo knows a person only from the token on each request, so a change at your proxy reaches it once the proxy stops issuing tokens for that person, or issues them with the new role, and the tokens it issued before have expired. With `request` binding that is within seconds; with `session` binding a token can last hours (see [Choose a binding](#choose-a-binding)), so end the person's proxy session too. From then on a removed person's requests are refused, and a demoted person's may do only what the new role allows.
 - **A stream that is already open keeps running.** A live view, such as a chat's or the event stream, is checked when it opens, so it runs until it closes, unless its person is a guest whose `access_until` passes. Close a person's open connections at the proxy when you remove them or take a role away.
 - **A token someone copies works for its lifetime.** With `session` binding that can be hours, on any path. With `request` binding it is once, for one request, within seconds, per Clawboo server: the list of used tokens is kept in memory, so a token used just before a restart works once more after it until it expires, and so does one sent to a second server behind the same proxy. Clawboo never logs tokens, but your proxy's logs might.
@@ -364,6 +410,8 @@ A refused request gets `401` with a JSON body. Its `reason` says why:
 | `keys-unavailable` | The proxy's key set could not be fetched                                                                    |
 
 A refused WebSocket upgrade gets `401 Unauthorized`. The server logs `Proxy identity: refused a request` with the reason, the method and the path, never the token.
+
+A token that verified can still be turned away by a route, with `403` and an `error`, in releases after 0.8.0: `person_only` from a person-only route under [`personCheck: verified`](#only-signed-requests-act-as-a-person) when no token named a person, and `control_claim` from a [take over](#taking-over-a-screen) without the claim for that agent. A Gateway WebSocket upgrade with no person under `verified` gets `403 Forbidden`.
 
 <Accordion title="Under the hood">
 

@@ -125,6 +125,8 @@ const PINNED_FEATURES = [
   'auth.proxyIdentity',
   'auth.appLink',
   'auth.roles',
+  'auth.personCheck',
+  'computer.controlClaim',
   'ui.embedTitlebar',
 ]
 

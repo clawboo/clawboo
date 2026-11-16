@@ -38,13 +38,18 @@ export const server = setupServer(
     HttpResponse.json({ stargazers_count: 0 }),
   ),
   http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
-  // The account bar at the bottom of the sidebar asks who "you" are on mount, so
-  // every test that renders the sidebar reads it. Nobody verified by default: the
-  // install's built-in person. A test about a signed-in person overrides it.
+  // The account bar at the bottom of the sidebar asks who "you" are on mount,
+  // and the dashboard reads how the server checks a person once its access lock
+  // opens (lib/personCheckNotice). A local install's answer by default: nobody
+  // verified, the install's built-in person. A test about who "you" is
+  // registers its own.
   http.get('/api/access/identity', () =>
     HttpResponse.json({
       proxyIdentity: 'off',
       appLink: false,
+      roles: 'off',
+      personCheck: 'page',
+      controlClaim: 'off',
       person: null,
       you: { id: 'local', name: 'You', role: null },
     }),

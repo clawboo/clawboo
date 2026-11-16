@@ -18,6 +18,12 @@
 // SESSION BINDING is for proxies that send their own sign-in token on every
 // request (Cloudflare Access, oauth2-proxy): such a token is good until it
 // expires, on any path. `htm` and `htu` are still checked when present.
+//
+// THE TAKE-OVER CLAIM. With `proxyIdentityControlClaim: required` (request
+// binding only; config.ts refuses it otherwise), a token's `control` claim names
+// the agent whose screen its person may take over. It is read only then: a
+// `control` that is there but not an agent id refuses the token, and an absent
+// one is no claim.
 
 import {
   createLocalJWKSet,
@@ -92,6 +98,9 @@ export type AssertionResult =
       person: PersonRef
       /** What the token's role claims grant. Only with roles enforced. */
       access?: PersonAccess
+      /** The agent whose screen the token's `control` claim lets its person take
+       *  over. Only with the claim required, and only when the token has one. */
+      control?: string
     }
   | { ok: false; reason: AssertionRefusal }
 
@@ -306,12 +315,24 @@ export function createAssertionVerifier(
     const roleValue = claimAt(payload, config.roleClaim)
     const role = roleOf(roleValue)
     const person = { id: sub, name, role }
-    if (config.roles !== 'enforce') return { ok: true, person }
+    // Read only from a request-bound token: config.ts refuses the switch with
+    // session binding, and this keeps a session token from ever carrying one.
+    let control: string | undefined
+    if (config.controlClaim === 'required' && requestBound && payload['control'] !== undefined) {
+      const value = payload['control']
+      // Exactly an id, as written: no control characters, no padding, not empty.
+      if (typeof value !== 'string' || cleanText(value, MAX_ID_CHARS) !== value) {
+        return { ok: false, reason: 'claims' }
+      }
+      control = value
+    }
+    const withControl = control === undefined ? {} : { control }
+    if (config.roles !== 'enforce') return { ok: true, person, ...withControl }
     // A claim beside the role that is there but malformed refuses the token: a
     // `teams` that is not a list must never read as every team.
     const access = accessFromClaims(roleValue, payload)
     if (!access) return { ok: false, reason: 'claims' }
-    return { ok: true, person, access }
+    return { ok: true, person, access, ...withControl }
   }
 
   return { verify }
