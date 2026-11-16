@@ -1,39 +1,35 @@
 // What a guest reads of text the board stored: another team's task titles left out.
 //
-// The board writes some notes that name another task: the note a waiting task gets
-// when the task it waited on closes, a parent's list of sub-tasks that did not finish,
-// a hand-off refused because of a task its target handed out, a team room's line about
-// a new dependency. Since the release that limited guests, the first and the last name
-// a task of another team only generically, but rows written before then still carry
-// the title, and the sub-task and hand-off notes still name every task. A guest
-// (lib/roles) reads all of these through the board, so a guest's responses go through
-// here once, at the guard (./guard), and so do the team chat stream's board frames.
+// The board writes some notes that name a task by its title: the note a waiting task
+// gets when the task it waited on closes, a list of sub-tasks that did not finish,
+// a refused hand-off, a team room's lines about a task. Some can name a task of
+// another team, and rows written before the board stopped doing so still carry the
+// title. A guest (lib/roles) reads all of these through the board, so a guest's
+// responses go through here once, at the guard (./guard), and so do the team chat
+// stream's board frames. Only text the board writes is read: system comments, a wait
+// reason the board set, a card's attention detail when it repeats one, and system
+// posts in a team room. What people and agents write is their own.
 //
-// THE RULE. A title in such a note is shown to a guest only when it is the title of a
-// task on one of their teams, which they can already read; anything else is replaced.
-// That holds for a title of another team's task, and also for one of a task since
-// renamed or removed, so nothing a guest could not read gets through.
+// STRICT SHAPES. The board writes these notes from a small set of templates
+// (NOTE_SHAPES). A note that may name a task (it holds a curly quote, or a straight
+// quote where the board puts a title) is read against them strictly: their fixed
+// words, quoted titles, and between the titles of a list only the separators the
+// board writes, ending in the template's own words. When the note reads exactly one
+// way, each title the guest may read stays and each other one becomes "a task on
+// another team". When it reads no way, or more than one, the whole note is replaced
+// with one sentence (HIDDEN_NOTE). An unusual old note can be hidden that way; a
+// character of a title the guest may not read is not shown.
 //
-// WHERE TITLES SIT. Every note that names another task quotes its title: in curly
-// quotes (“…”), or in straight quotes in two notes ("handed out "…", which is still
-// open" and "depends on "…"."). Curly quotes are read wherever they appear in
-// board-written text; the straight ones only in those two notes, since other straight
-// quotes (a hand-off's words, an error) are not titles of other tasks. Only text the
-// board writes is read: system comments, a task's wait reason, a card's attention
-// detail and system posts in a team room. What people and agents write is their own.
+// QUOTES INSIDE A TITLE. New notes write a title's own curly quotes as straight ones
+// (quoteTitle in @clawboo/board-core), so the note's curly quotes mark where it ends.
+// Old notes may not have. So a curly-quoted span may hold a curly quote only when the
+// whole span is a title the guest may read; otherwise a list could be read in more
+// than one way. A template whose one title sits between fixed words at both ends (the
+// release notes) takes any span, since it can be read only one way.
 //
-// FAIL CLOSED. A title can hold the quotes that mark it, and a long list was once cut
-// inside one, so in a stored note where a title ends cannot always be told. New notes
-// are written so it can (quoteTitle in @clawboo/board-core makes a title's own curly
-// quotes straight, and lists are cut between names; a refused hand-off makes its
-// straight quotes single). Reading a note's quoted spans in turn, a span is shown only
-// when it is a title the guest may read and the words after it, up to the next opening
-// quote, hold no closing quote (one there means the title went on). A span with no
-// quote inside that ends the same way is replaced alone. Anything else, and the last
-// span of a note long enough to have been cut, is replaced with everything after its
-// opening quote. A readable title can be hidden that way; a character of one the guest
-// may not read is not shown, short of a title built to look like several, which only a
-// note written before quoteTitle can hold.
+// THE RULE FOR A TITLE. A title is shown to a guest only when it is the title of a
+// task on one of their teams, which they can already read (titlesOnTeams). That
+// leaves out another team's task and also one since renamed or removed.
 
 import { getTask, parseWaitingOn, tasks, type ClawbooDb } from '@clawboo/db'
 import { inArray } from 'drizzle-orm'
@@ -41,16 +37,11 @@ import { inArray } from 'drizzle-orm'
 /** The words for a task a guest may not see the title of. */
 export const OTHER_TEAM_TASK = 'a task on another team'
 
+/** What a guest reads in place of a note the board wrote that cannot be read strictly. */
+export const HIDDEN_NOTE = 'A note about work that is not shown here.'
+
 /** The longest a note quotes a title before cutting it (`subtaskNames`, `nameOfLink`). */
 const QUOTED_TITLE_MAX = 60
-
-/** The release note a waiting task got before guests were limited, with the title. It
- *  is anchored at both ends, so a title with quotes of its own is read whole. */
-const OLD_WAIT_NOTE =
-  /^“([\s\S]+)”, the task this waited on, (is done\.|is done, and nothing started this one again\. Retry it or decide what happens next\.|was cancelled\. Decide what happens next\.)$/
-
-const OPEN = '“'
-const CLOSE = '”'
 
 /** Says whether a quoted title is one the guest may read. */
 export type TitleCheck = (quoted: string) => boolean
@@ -76,87 +67,244 @@ export function titlesOnTeams(db: ClawbooDb, teams: ReadonlySet<string>): TitleC
   return (quoted) => readable.has(quoted)
 }
 
-/** A note at least this long may have been cut inside its last title: a list of
- *  sub-tasks was once cut at 1000 characters, wherever that fell. */
-const MAY_BE_CUT_AT = 1_000
+// ─── The notes the board writes ──────────────────────────────────────────────
 
-/** The curly-quoted titles in a note, each kept only when the guest may read it. */
-function redactCurly(text: string, mayRead: TitleCheck): string {
-  if (!text.includes(OPEN)) return text
-  // Whether the words after a closing quote at `j`, up to the next opening one, hold
-  // no closing quote. If they do, the quote at `j` was inside a title.
-  const endsCleanly = (j: number): boolean => {
-    const next = text.indexOf(OPEN, j + 1)
-    return !text.slice(j + 1, next === -1 ? text.length : next).includes(CLOSE)
-  }
-  const lastOpen = text.length >= MAY_BE_CUT_AT ? text.lastIndexOf(OPEN) : -1
-  let out = ''
-  let at = 0
-  for (;;) {
-    const open = text.indexOf(OPEN, at)
-    if (open === -1) return out + text.slice(at)
-    out += text.slice(at, open)
-    // The last title of a note that may have been cut cannot be read whole.
-    if (open === lastOpen) return out + OTHER_TEAM_TASK
-    // A title they may read, quotes of its own and all: the longest that ends cleanly.
-    let readable = -1
-    for (let j = text.lastIndexOf(CLOSE); j > open; j = text.lastIndexOf(CLOSE, j - 1)) {
-      if (mayRead(text.slice(open + 1, j)) && endsCleanly(j)) {
-        readable = j
-        break
+type Part =
+  /** These words exactly. */
+  | { lit: string }
+  /** A task's title in quotes. `anyInside`: the span may hold anything, because
+   *  fixed words pin both its ends. */
+  | { title: 'curly' | 'straight'; anyInside?: true }
+  /** A name in curly quotes that is not a task's title (a routine's): shown as it is. */
+  | { name: true }
+  /** One or more titles in curly quotes, joined by ", ". `more`: the list may end
+   *  with ", and N more". */
+  | { list: { more: boolean } }
+  /** The rest of a list: see `list`. */
+  | { listRest: { more: boolean } }
+  /** One or more characters with no quote among them (a name, a status). */
+  | { words: true }
+  /** The rest of the note, as a person or an agent wrote it. */
+  | { rest: true }
+  /** A whole number. */
+  | { num: true }
+  /** One of these. */
+  | { oneOf: readonly (readonly Part[])[] }
+  /** These, or nothing. */
+  | { maybe: readonly Part[] }
+
+interface NoteShape {
+  parts: readonly Part[]
+  /** The whole note when its one title is not shown, as the board writes it now. */
+  hidden?: string
+}
+
+const CURLY_TITLE: Part = { title: 'curly' }
+const CURLY_ANY: Part = { title: 'curly', anyInside: true }
+const STRAIGHT_TITLE: Part = { title: 'straight', anyInside: true }
+const LIST: Part = { list: { more: false } }
+
+const DONE = 'is done.'
+const DONE_NOT_STARTED =
+  'is done, and nothing started this one again. Retry it or decide what happens next.'
+const CANCELLED = 'was cancelled. Decide what happens next.'
+
+/** Every note the board writes that can name a task by its title, as a guest reads it. */
+export const NOTE_SHAPES: readonly NoteShape[] = [
+  // A waiting task's note, and its wait reason, when the task it waited on closed.
+  ...[DONE, DONE_NOT_STARTED, CANCELLED].map((end) => ({
+    parts: [CURLY_ANY, { lit: `, the task this waited on, ${end}` }],
+    hidden: `The task this waited on, on another team, ${end}`,
+  })),
+  // The wait reason of a task whose handed-out work did not finish (unfinishedNeed).
+  {
+    parts: [
+      { list: { more: true } },
+      { lit: ' did not finish. Retry them, or mark this task done.' },
+    ],
+  },
+  // A task closed over sub-tasks that did not get done.
+  {
+    parts: [
+      { lit: 'This closed over sub-tasks that did not get done.' },
+      { maybe: [{ lit: ' ' }, LIST, { lit: ' did not finish.' }] },
+      { maybe: [{ lit: ' ' }, LIST, { lit: ' cancelled.' }] },
+    ],
+  },
+  // A request a routine made.
+  { parts: [{ lit: 'From the routine ' }, { name: true }, { lit: '.' }] },
+  // A newer plan replaced one that was waiting.
+  {
+    parts: [
+      { lit: 'A newer plan took the place of ' },
+      STRAIGHT_TITLE,
+      { lit: '. Nothing from that one started, and it stays readable as revision ' },
+      { num: true },
+      { lit: '.' },
+    ],
+  },
+  // A hand-off refused because its target handed out work still open (nameOfLink).
+  {
+    parts: [
+      { lit: 'Not handed to ' },
+      { words: true },
+      { lit: ': they handed out ' },
+      { oneOf: [[STRAIGHT_TITLE], [{ words: true }]] },
+      { lit: ', which is still open.' },
+    ],
+  },
+  // A team room's lines about a task (api/board.ts).
+  {
+    parts: [
+      { lit: 'Task ' },
+      STRAIGHT_TITLE,
+      { lit: ' claimed by ' },
+      { words: true },
+      { lit: '.' },
+    ],
+  },
+  {
+    parts: [
+      { oneOf: [[{ lit: 'A person' }], [{ lit: 'A local API call' }]] },
+      { lit: ' moved ' },
+      STRAIGHT_TITLE,
+      { lit: ' to ' },
+      { words: true },
+      { lit: '.' },
+    ],
+  },
+  {
+    parts: [{ words: true }, { lit: ' on ' }, STRAIGHT_TITLE, { lit: ': ' }, { rest: true }],
+  },
+  {
+    parts: [
+      { lit: 'Task ' },
+      STRAIGHT_TITLE,
+      { lit: ' now depends on ' },
+      STRAIGHT_TITLE,
+      { lit: '.' },
+    ],
+  },
+  {
+    parts: [{ lit: 'Task ' }, STRAIGHT_TITLE, { lit: ' now depends on a task on another team.' }],
+  },
+]
+
+/** Where a note was found: it decides which straight quotes may hold a title. */
+export type NoteField = 'comment' | 'need' | 'post'
+
+/** Straight-quoted words where the board puts a title, outside a team room. */
+const STRAIGHT_TITLE_MARKS = ['handed out "', 'took the place of "', 'depends on "', 'Task "']
+
+/** Whether a note may name a task by its title, and so must be read strictly. A team
+ *  room's system posts are all the board's lines about tasks; elsewhere, straight
+ *  quotes are titles only where the board puts one (an error's quotes are not). */
+function mayNameATask(text: string, field: NoteField): boolean {
+  if (text.includes('“') || text.includes('”')) return true
+  if (field === 'post') return text.includes('"')
+  return STRAIGHT_TITLE_MARKS.some((mark) => text.includes(mark))
+}
+
+type Piece = { title: false; text: string } | { title: 'curly' | 'straight'; text: string }
+
+/** The longest a note is walked for before it counts as unreadable. */
+const STEP_LIMIT = 100_000
+
+/** The one way the note reads against NOTE_SHAPES, or null for none or more than one. */
+function readNote(text: string, mayRead: TitleCheck): { shape: NoteShape; pieces: Piece[] } | null {
+  let found: { shape: NoteShape; pieces: Piece[] } | null = null
+  let ways = 0
+  let steps = 0
+  // Walks `parts` from `i` at `pos`; `done` hears each complete reading. True: stop.
+  const walk = (
+    parts: readonly Part[],
+    i: number,
+    pos: number,
+    got: Piece[],
+    done: (pos: number, got: Piece[]) => boolean,
+  ): boolean => {
+    if (++steps > STEP_LIMIT) return true
+    if (i === parts.length) return done(pos, got)
+    const part = parts[i]!
+    const next = (to: number, piece?: Piece): boolean =>
+      walk(parts, i + 1, to, piece ? [...got, piece] : got, done)
+    const then = (more: readonly Part[]): boolean =>
+      walk([...more, ...parts.slice(i + 1)], 0, pos, got, done)
+
+    if ('lit' in part)
+      return (
+        text.startsWith(part.lit, pos) &&
+        next(pos + part.lit.length, { title: false, text: part.lit })
+      )
+    if ('num' in part) {
+      let end = pos
+      while (end < text.length && text[end]! >= '0' && text[end]! <= '9') end += 1
+      return end > pos && next(end, { title: false, text: text.slice(pos, end) })
+    }
+    if ('words' in part) {
+      for (let end = pos + 1; end <= text.length; end += 1) {
+        if (/[“”"]/.test(text[end - 1]!)) break
+        if (next(end, { title: false, text: text.slice(pos, end) })) return true
       }
+      return false
     }
-    if (readable !== -1) {
-      out += text.slice(open, readable + 1)
-      at = readable + 1
-      continue
+    if ('rest' in part) return next(text.length, { title: false, text: text.slice(pos) })
+    if ('oneOf' in part) return part.oneOf.some((alt) => then(alt))
+    if ('maybe' in part) return then(part.maybe) || next(pos)
+    if ('list' in part) return then([CURLY_TITLE, { listRest: part.list }])
+    if ('listRest' in part) {
+      if (then([{ lit: ', ' }, CURLY_TITLE, part])) return true
+      if (part.listRest.more && then([{ lit: ', and ' }, { num: true }, { lit: ' more' }]))
+        return true
+      return next(pos)
     }
-    // One with no quote inside that ends cleanly: it alone is replaced.
-    const first = text.indexOf(CLOSE, open + 1)
-    if (first !== -1 && !text.slice(open + 1, first).includes(OPEN) && endsCleanly(first)) {
-      out += OTHER_TEAM_TASK
-      at = first + 1
-      continue
+    // A quoted span: a task's title, or a routine's name.
+    const curly = 'name' in part || part.title === 'curly'
+    const [open, close] = curly ? ['“', '”'] : ['"', '"']
+    if (text[pos] !== open) return false
+    for (let end = text.indexOf(close, pos + 1); end !== -1; end = text.indexOf(close, end + 1)) {
+      const inside = text.slice(pos + 1, end)
+      const quotesInside = /[“”]/.test(inside)
+      if ('name' in part) {
+        if (quotesInside) continue
+        if (next(end + 1, { title: false, text: `“${inside}”` })) return true
+        continue
+      }
+      // In a list, a span holding a curly quote is one only when it is theirs whole.
+      if (curly && quotesInside && !part.anyInside && !mayRead(inside)) continue
+      if (next(end + 1, { title: part.title, text: inside })) return true
     }
-    // Where this title ends cannot be told, so nothing after its opening quote shows.
-    return out + OTHER_TEAM_TASK
+    return false
   }
+
+  for (const shape of NOTE_SHAPES) {
+    walk(shape.parts, 0, 0, [], (pos, pieces) => {
+      if (pos !== text.length) return false
+      ways += 1
+      if (ways === 1) found = { shape, pieces }
+      return ways > 1
+    })
+    if (ways > 1 || steps > STEP_LIMIT) return null
+  }
+  return ways === 1 ? found : null
 }
 
-/** A title in straight quotes after `lead` (which ends with the opening quote), up to
- *  the note's own end (`endOf`), never to a quote inside the title. With no end found
- *  (a note cut short), everything from the opening quote is replaced. */
-function redactStraight(
-  text: string,
-  mayRead: TitleCheck,
-  lead: string,
-  endOf: (text: string, start: number) => number,
-): string {
-  const at = text.indexOf(lead)
-  if (at === -1) return text
-  const start = at + lead.length
-  const end = endOf(text, start)
-  const head = `${text.slice(0, at)}${lead.slice(0, -1)}`
-  if (end === -1) return `${head}${OTHER_TEAM_TASK}`
-  if (mayRead(text.slice(start, end))) return text
-  return `${head}${OTHER_TEAM_TASK}${text.slice(end + 1)}`
-}
-
-/** Board-written text with every title the guest may not read replaced. */
-export function redactTitles(text: string, mayRead: TitleCheck): string {
-  if (!text.includes(OPEN) && !text.includes(CLOSE) && !text.includes('"')) return text
-  // The old release note reads as the one written now.
-  const old = OLD_WAIT_NOTE.exec(text)
-  if (old && !mayRead(old[1]!)) return `The task this waited on, on another team, ${old[2]}`
-  let out = redactCurly(text, mayRead)
-  out = redactStraight(out, mayRead, 'handed out "', (t, start) => {
-    const end = t.lastIndexOf('", which is still open')
-    return end >= start ? end : -1
-  })
-  out = redactStraight(out, mayRead, 'depends on "', (t, start) =>
-    t.endsWith('".') && t.length - 2 >= start ? t.length - 2 : -1,
-  )
-  return out
+/** A note the board wrote, as a guest reads it: see the top of this file. */
+export function redactNote(text: string, field: NoteField, mayRead: TitleCheck): string {
+  if (!mayNameATask(text, field)) return text
+  const read = readNote(text, mayRead)
+  if (!read) return HIDDEN_NOTE
+  let hidden = false
+  const shown = read.pieces
+    .map((piece) => {
+      if (piece.title === false) return piece.text
+      if (mayRead(piece.text))
+        return piece.title === 'curly' ? `“${piece.text}”` : `"${piece.text}"`
+      hidden = true
+      return OTHER_TEAM_TASK
+    })
+    .join('')
+  return hidden && read.shape.hidden ? read.shape.hidden : shown
 }
 
 /**
@@ -177,27 +325,40 @@ export function guestWaitingOnDetail<D extends { taskTitle?: string }>(
   return teamId !== null && teams.has(teamId) ? detail : { taskTitle: '' }
 }
 
-/** A wait reason, stored as JSON text or read back as an object, with its `need`
- *  redacted. Anything else comes back as it was. */
-function redactWaitingOn(value: unknown, mayRead: TitleCheck): unknown {
+// ─── A guest's answers ───────────────────────────────────────────────────────
+
+/** A wait reason read back as an object, from JSON text or as it is. */
+function waitObject(value: unknown): Record<string, unknown> | null {
+  let doc = value
   if (typeof value === 'string') {
-    let parsed: unknown
     try {
-      parsed = JSON.parse(value)
+      doc = JSON.parse(value)
     } catch {
-      return value
-    }
-    const out = redactWaitingOn(parsed, mayRead)
-    return out === parsed ? value : JSON.stringify(out)
-  }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const need = (value as { need?: unknown }).need
-    if (typeof need === 'string') {
-      const redacted = redactTitles(need, mayRead)
-      if (redacted !== need) return { ...(value as object), need: redacted }
+      return null
     }
   }
-  return value
+  return doc && typeof doc === 'object' && !Array.isArray(doc)
+    ? (doc as Record<string, unknown>)
+    : null
+}
+
+/** Whether the board wrote this wait's reason. A person's or an agent's own words
+ *  (`by`) are theirs; the board's own reasons carry no `by`, and a wait on unfinished
+ *  sub-tasks (`untilSubtasks`) is the board's whoever set it. */
+function boardWroteNeed(wait: Record<string, unknown>): boolean {
+  return wait['untilSubtasks'] === true || (wait['by'] !== 'agent' && wait['by'] !== 'person')
+}
+
+/** A wait reason, stored as JSON text or read back as an object, with a reason the
+ *  board wrote read as a note. Anything else comes back as it was. */
+function redactWaitingOn(value: unknown, mayRead: TitleCheck): unknown {
+  const wait = waitObject(value)
+  const need = wait?.['need']
+  if (!wait || typeof need !== 'string' || !boardWroteNeed(wait)) return value
+  const redacted = redactNote(need, 'need', mayRead)
+  if (redacted === need) return value
+  const out = { ...wait, need: redacted }
+  return typeof value === 'string' ? JSON.stringify(out) : out
 }
 
 /**
@@ -208,7 +369,7 @@ function redactWaitingOn(value: unknown, mayRead: TitleCheck): unknown {
  * every value it leaves alone, comes back as the same object.
  */
 export function redactForGuest(value: unknown, mayRead: () => TitleCheck): unknown {
-  // The titles are read once, and only when some text quotes one.
+  // The titles are read once, and only when some note may name a task.
   let check: TitleCheck | null = null
   const lazy: TitleCheck = (quoted) => (check ??= mayRead())(quoted)
   const visit = (v: unknown, depth: number): unknown => {
@@ -230,9 +391,9 @@ export function redactForGuest(value: unknown, mayRead: () => TitleCheck): unkno
       out ??= { ...obj }
       out[key] = next
     }
-    const boardWritten = obj['authorType'] === 'system' || obj['kind'] === 'system'
-    if (boardWritten && typeof obj['body'] === 'string') {
-      set('body', redactTitles(obj['body'], lazy))
+    if (typeof obj['body'] === 'string') {
+      if (obj['authorType'] === 'system') set('body', redactNote(obj['body'], 'comment', lazy))
+      else if (obj['kind'] === 'system') set('body', redactNote(obj['body'], 'post', lazy))
     }
     if ('waitingOn' in obj && obj['waitingOn'] != null) {
       set('waitingOn', redactWaitingOn(obj['waitingOn'], lazy))
@@ -242,7 +403,13 @@ export function redactForGuest(value: unknown, mayRead: () => TitleCheck): unkno
       if (key === 'attention' && child && typeof child === 'object') {
         const detail = (child as { detail?: unknown }).detail
         if (typeof detail === 'string') {
-          const redacted = redactTitles(detail, lazy)
+          // A card's detail repeats its wait reason, or says why a run failed. The
+          // reason is read as the wait is (a person's or an agent's stays theirs);
+          // anything else is read as a note the board wrote.
+          const task = obj['task'] as Record<string, unknown> | undefined
+          const wait = waitObject(obj['waitingOn'] ?? task?.['waitingOn'] ?? null)
+          const theirs = wait && wait['need'] === detail && !boardWroteNeed(wait)
+          const redacted = theirs ? detail : redactNote(detail, 'need', lazy)
           if (redacted !== detail) {
             set(key, { ...(child as object), detail: redacted })
             continue

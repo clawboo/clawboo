@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
 import { roleGuard } from '../../lib/roles/guard'
+import { HIDDEN_NOTE } from '../../lib/roles/redact'
 import type { PersonAccess } from '../../lib/roles/policy'
 import { ROUTE_RULES } from '../../lib/roles/rules'
 import { reflectToRoom } from '../../lib/teamChat/reflect'
@@ -266,7 +267,8 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
       title: 'Photos',
       teamId: 'T',
       status: 'blocked',
-      waitingOn: { kind: 'person', need: old('Unannounced launch'), by: 'agent' },
+      // As releaseWaiterTx stores it: the board's own reason, with no `by`.
+      waitingOn: { kind: 'person', need: old('Unannounced launch') },
     }).id
     addComment(db, mine, old('Unannounced launch'), 'system', null, { kind: 'note' })
     addComment(db, mine, old('Write the brief'), 'system', null, { kind: 'note' })
@@ -318,6 +320,17 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
       status: 'blocked',
       waitingOn: { kind: 'person', need: cut, by: 'agent', untilSubtasks: true },
     }).id
+    // The note from the review: one title holding a closing and then an opening quote.
+    const mixed = createTask(db, {
+      title: 'Spring menu',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: {
+        kind: 'person',
+        need: '“Plan ”Secret “notes” did not finish. Retry them, or mark this task done.',
+        untilSubtasks: true,
+      },
+    }).id
     addComment(
       db,
       listed,
@@ -337,6 +350,7 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
       JSON.stringify([
         serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: listed } }),
         serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: cutShort } }),
+        serve('GET /api/board/:taskId', boardGetGET, access, { params: { taskId: mixed } }),
         serve('GET /api/board', boardListGET, access, {}),
         serve('GET /api/team-chat', teamChatGET, access, { query: { teamId: 'T' } }),
       ])
@@ -348,9 +362,16 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     expect(asGuest).toContain('now depends on a task on another team.')
     // Their own title, quotes and all, still shows.
     expect(asGuest).toContain('“Menu ”draft” v2”, the task this waited on, is done.')
+    // A note that cannot be read strictly is hidden whole.
+    expect(asGuest).toContain(HIDDEN_NOTE)
 
     const asOperator = read(operator)
-    for (const part of ['“Plan ”Secret” notes”', 'Secr', 'Launch \\"Acquisition\\" plan']) {
+    for (const part of [
+      '“Plan ”Secret” notes”',
+      'Secr',
+      'Launch \\"Acquisition\\" plan',
+      '“Plan ”Secret “notes” did not finish',
+    ]) {
       expect(asOperator).toContain(part)
     }
   })
