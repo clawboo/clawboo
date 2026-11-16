@@ -17,6 +17,7 @@ import type { AccessGate } from '@clawboo/gateway-proxy'
 
 import { actingPerson, personOf } from '../lib/auth'
 import { appLinkOn, proxyIdentityMode } from '../lib/proxyIdentity/config'
+import { accessEnded, isGuestOnly, permissionsOf, sortedPermissions } from '../lib/roles/policy'
 
 /** The gate ../index.ts publishes on `app.locals`. */
 function gateOf(req: Request): Pick<AccessGate, 'enabled' | 'mintLaunchCode'> | null {
@@ -48,15 +49,42 @@ export function accessLaunchCodePOST(req: Request, res: Response): void {
  * verified token names, or null. An administrator checks a new proxy with it,
  * and an app its link; the dashboard can say who is signed in, and whose tasks
  * are its own.
+ *
+ * With roles enforced (`roles: "enforce"`) it also says what this person may do,
+ * so the dashboard shows only that: their roles, their permissions (an empty
+ * list for a token with no role this engine knows, or a guest whose access has
+ * ended), and for a guest the teams they reach and when that ends.
  */
 export function accessIdentityGET(req: Request, res: Response): void {
   res.set('Cache-Control', 'no-store')
+  const enforced = req.app.locals['rolesMode'] === 'enforce'
+  const access = req.access ?? null
+  const now = Date.now()
   // `you` is who "Assigned to you" and the Mine filter mean: the verified person,
   // else the install's built-in one.
   res.json({
     proxyIdentity: proxyIdentityMode(),
     appLink: appLinkOn(),
+    roles: enforced ? 'enforce' : 'off',
     person: personOf(req),
     you: actingPerson(req),
+    ...(enforced
+      ? {
+          // A service token's program, which is never a person.
+          service: req.service ?? null,
+          access: access
+            ? {
+                roles: access.roles,
+                label: access.label,
+                permissions: sortedPermissions(permissionsOf(access, now)),
+                guest: isGuestOnly(access),
+                teams: isGuestOnly(access) ? (access.teams ?? []) : null,
+                accessUntil: isGuestOnly(access) ? access.until : null,
+                ended: accessEnded(access, now),
+                service: access.service,
+              }
+            : null,
+        }
+      : {}),
   })
 }

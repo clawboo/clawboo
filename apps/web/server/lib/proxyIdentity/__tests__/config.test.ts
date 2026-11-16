@@ -26,6 +26,7 @@ import {
   proxyIdentityFileWarning,
   proxyIdentityMode,
   replaceableBy,
+  rolesModeOf,
   type PathProbe,
 } from '../config'
 
@@ -552,5 +553,47 @@ describe('the app link', () => {
     expect(allows('POST', '/api/agents/a1/chat/stop')).toBe(false)
     expect(allows('POST', '/api/agents/../chat')).toBe(false)
     expect(allows('POST', '/api/agents/./chat')).toBe(false)
+  })
+})
+
+describe('roles', () => {
+  it('are off by default: a role in a token is only recorded', () => {
+    stubLane()
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.roles).toBe('off')
+    expect(rolesModeOf(proxy)).toBe('off')
+    expect(rolesModeOf(null)).toBe('off')
+  })
+
+  it('are enforced behind a lane that requires a token', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce' })
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.roles).toBe('enforce')
+    expect(rolesModeOf(proxy)).toBe('enforce')
+  })
+
+  it('refuse to start in on mode, where a request without a token names nobody', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY: 'on', CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce' })
+    expect(refusal()).toMatch(/proxyIdentityRoles is enforce but proxyIdentity is on/)
+  })
+
+  it('refuse to start with no lane at all, rather than apply to nobody', () => {
+    vi.stubEnv('CLAWBOO_PROXY_IDENTITY_ROLES', 'enforce')
+    expect(refusal()).toMatch(/proxyIdentityRoles is enforce but proxyIdentity is off/)
+  })
+
+  it('refuse a setting they do not know', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'strict' })
+    expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+
+  it("apply to the app link's people too while enforced", () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce' })
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
+    expect(identityConfigs(proxy, appLink).map((c) => c.roles)).toEqual(['enforce', 'enforce'])
   })
 })

@@ -315,6 +315,35 @@ describe('task folder API', () => {
     expect(body.taskFolders.map((f) => f.taskId)).not.toContain(neverRan)
   })
 
+  it("lists for a guest only the agent's task folders on the guest's teams", async () => {
+    // The agent worked on team OTHER before it moved to T, and that task stayed there.
+    const now = Date.now()
+    db.insert(teams)
+      .values({ id: 'OTHER', name: 'O', icon: 'O', color: '#000', createdAt: now, updatedAt: now })
+      .run()
+    const here = task('On T', { assigneeAgentId: 'cx', status: 'in_progress' })
+    const before = task('On OTHER', {
+      assigneeAgentId: 'cx',
+      status: 'in_progress',
+      teamId: 'OTHER',
+    })
+    await folderWith(here, { 'a.md': 'a' })
+    const otherDir = path.join(teamsRoot, 'OTHER', 'tasks', before)
+    await mkdir(otherDir, { recursive: true })
+    await writeFile(path.join(otherDir, 'b.md'), 'b')
+
+    const everyone = fakeRes()
+    agentWorkspacesGET(req({ agentId: 'cx' }), everyone.res)
+    const all = everyone.body() as { taskFolders: Array<{ taskId: string }> }
+    expect(all.taskFolders.map((f) => f.taskId).sort()).toEqual([here, before].sort())
+
+    const guest = fakeRes()
+    const asGuest = Object.assign(req({ agentId: 'cx' }), { roleScope: { teams: new Set(['T']) } })
+    agentWorkspacesGET(asGuest, guest.res)
+    const theirs = guest.body() as { taskFolders: Array<{ taskId: string }> }
+    expect(theirs.taskFolders.map((f) => f.taskId)).toEqual([here])
+  })
+
   it('serves the preview from the task folder when the task has no worktree', async () => {
     const id = task('Build the page')
     await folderWith(id, { 'index.html': '<h1>Hi</h1>' })

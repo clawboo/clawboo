@@ -83,6 +83,8 @@ import { eq } from 'drizzle-orm'
 import { actingPerson, actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, readStatesOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
+import { inRoleScope, roleScopeOf, teamOfTask } from '../lib/roles/guard'
+import { guestWaitingOnDetail } from '../lib/roles/redact'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
@@ -136,7 +138,11 @@ export function boardListGET(req: Request, res: Response): void {
     const db = getDb()
     const teamId = typeof req.query['teamId'] === 'string' ? req.query['teamId'] : undefined
     if (req.query['ready'] === 'true') {
-      res.json({ tasks: getReadyTasks(db, teamId ? { teamId } : {}) })
+      res.json({
+        tasks: getReadyTasks(db, teamId ? { teamId } : {}).filter((t) =>
+          inRoleScope(req, t.teamId),
+        ),
+      })
       return
     }
     const status =
@@ -149,6 +155,7 @@ export function boardListGET(req: Request, res: Response): void {
         db,
         withOpenQuestion(
           db,
+          req,
           withReadState(
             states,
             withLabels(
@@ -159,7 +166,13 @@ export function boardListGET(req: Request, res: Response): void {
                   db,
                   withJobStopped(
                     db,
-                    withAttention(db, listTasks(db, { teamId, status, includeDropped })),
+                    withAttention(
+                      db,
+                      // A guest gets only the tasks of the teams their role names.
+                      listTasks(db, { teamId, status, includeDropped }).filter((t) =>
+                        inRoleScope(req, t.teamId),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -186,7 +199,7 @@ export function boardGetGET(req: Request, res: Response): void {
       res.status(404).json({ error: 'task not found' })
       return
     }
-    const [withWaiting] = withOpenQuestion(db, [task])
+    const [withWaiting] = withOpenQuestion(db, req, [task])
     res.json({
       task: {
         ...withReadState(states, [withWaiting!])[0]!,
@@ -203,8 +216,14 @@ export function boardGetGET(req: Request, res: Response): void {
         pendingWake: pendingWakeOf(db, taskId),
       },
       comments: getComments(db, taskId),
-      ancestors: getAncestors(db, taskId),
-      ...(task.isMainTask === 1 ? { subtasks: subtasksForDetail(db, taskId) } : {}),
+      // A guest sees only their teams' tasks: a task of this tree on another team
+      // (a hand-off files work there) stays out of their answer (lib/roles).
+      ancestors: roleScopeOf(req)
+        ? getAncestors(db, taskId).filter((a) => inRoleScope(req, teamOfTask(db, a.id)))
+        : getAncestors(db, taskId),
+      ...(task.isMainTask === 1
+        ? { subtasks: subtasksForDetail(db, taskId).filter((t) => inRoleScope(req, t.teamId)) }
+        : {}),
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -269,9 +288,12 @@ function withJobStopped<T extends DbTask>(
 
 /** Each task with the question it has open (`openQuestion`, null when none), so a
  *  card can show the answer controls without a request per card, and what a task
- *  waiting on other work waits on (`waitingOnDetail`), so its card can name it. */
+ *  waiting on other work waits on (`waitingOnDetail`), so its card can name it. A
+ *  guest is not told the title of a waited-on task on another team (lib/roles): a
+ *  wait can cross teams, and the card then reads as it does for a task that is gone. */
 function withOpenQuestion<T extends DbTask>(
   db: ClawbooDb,
+  req: Request,
   rows: T[],
 ): Array<
   T & {
@@ -288,8 +310,10 @@ function withOpenQuestion<T extends DbTask>(
     db,
     rows.filter((t) => t.waitingOn != null).map((t) => t.id),
   )
+  const teams = roleScopeOf(req)?.teams ?? null
   return rows.map((t) => {
-    const waitingOnDetail = waitingOnDetailOf(db, t)
+    // The same check the team chat stream's board frames use (lib/roles/redact).
+    const waitingOnDetail = guestWaitingOnDetail(db, t.waitingOn, waitingOnDetailOf(db, t), teams)
     return {
       ...t,
       openQuestion: byId.get(t.id) ?? null,
@@ -1178,8 +1202,15 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
       taskId,
       data: { dependsOnTaskId: parsed.data.dependsOnTaskId, ...actorField(req) },
     })
-    // Narrate the dependency into the team room (best-effort, after the write).
-    reflectToRoom(db, task.teamId, `Task "${task.title}" now depends on "${dependsOn.title}".`)
+    // Narrate the dependency into the team room (best-effort, after the write). A
+    // task on another team is not named in this team's room: its own board names it.
+    reflectToRoom(
+      db,
+      task.teamId,
+      dependsOn.teamId === task.teamId
+        ? `Task "${task.title}" now depends on "${dependsOn.title}".`
+        : `Task "${task.title}" now depends on a task on another team.`,
+    )
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -1692,7 +1723,11 @@ export async function agentWorkspacesGET(req: Request, res: Response): Promise<v
   try {
     const agentId = (req.params['agentId'] as string | undefined) ?? ''
     const db = getDb()
-    const assigned = listTasks(db).filter((t) => t.assigneeAgentId === agentId)
+    // A guest gets only the tasks of their teams: an agent moved between teams keeps
+    // its tasks on the team it left (lib/roles).
+    const assigned = listTasks(db).filter(
+      (t) => t.assigneeAgentId === agentId && inRoleScope(req, t.teamId),
+    )
     const tasks = assigned.filter((t) => t.worktreeRef)
     const foldersToCheck = assigned
       .filter((t) => !t.worktreeRef)

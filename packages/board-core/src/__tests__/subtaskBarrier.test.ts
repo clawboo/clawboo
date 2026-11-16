@@ -4,6 +4,7 @@ import { PAUSED_RUN_CLASS } from '../dispatch'
 import { encodePlanHolder } from '../plans'
 import {
   requestWaitsOn,
+  quoteTitle,
   subtaskNames,
   subtasksStillOut,
   subtaskStanding,
@@ -360,5 +361,31 @@ describe('requestWaitsOn: what a person’s request waits on', () => {
     ],
   ])('%s', (_name, task, waits) => {
     expect(requestWaitsOn(task)).toBe(waits)
+  })
+})
+
+describe('quoteTitle', () => {
+  it("makes a title's own curly quotes straight, so the note's quotes mark where it ends", () => {
+    expect(quoteTitle('Plan ”Secret” notes')).toBe('“Plan "Secret" notes”')
+    expect(quoteTitle('Menu “v2”', 6)).toBe('“Menu "”')
+    expect(quoteTitle('Ads')).toBe('“Ads”')
+  })
+})
+
+describe('a long list of unfinished sub-tasks', () => {
+  it('is cut between names, never inside one', () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      view({
+        title: `Unfinished piece of work number ${i} with a long name`,
+        status: 'blocked',
+        waitingOn: { kind: 'failure' },
+      }),
+    )
+    const need = unfinishedNeed(many)
+    expect(need.length).toBeLessThanOrEqual(1000)
+    expect(need.endsWith(' did not finish. Retry them, or mark this task done.')).toBe(true)
+    expect(need).toMatch(/, and \d+ more did not finish\./)
+    // Every opening quote has its closing one.
+    expect(need.split('“').length).toBe(need.split('”').length)
   })
 })

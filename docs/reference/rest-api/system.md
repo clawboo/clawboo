@@ -798,7 +798,8 @@ The answer is built from the running process alone: no database read, no network
     "system.idle": true,
     "board.pause": true,
     "auth.proxyIdentity": false,
-    "auth.appLink": false
+    "auth.appLink": false,
+    "auth.roles": false
   }
 }
 ```
@@ -852,6 +853,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.pause`                                                               | Always. A person can pause an agent, a team or a task tree until they resume it: `GET /api/pauses`, `POST /api/pauses`, `DELETE /api/pauses/:kind/:id`, in the [Board API](/reference/rest-api/board).                                                                                                                                                              |
 | `auth.proxyIdentity`                                                        | An administrator turned the [proxy identity lane](/guides/sso-proxy) `on` or `required`: a sign-in proxy's signed identity tokens are checked, and the person each names is recorded. `GET /api/access/identity` says which mode, and who the request is.                                                                                                           |
 | `auth.appLink`                                                              | The app that started this server, such as the desktop app, gave it a key (`CLAWBOO_APP_LINK_PUBLIC_KEY`): the tokens it signs for its own `account:` people are checked, and each person is recorded. See [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo).                                                                               |
+| `auth.roles`                                                                | An administrator enforces [roles](/guides/sso-proxy#roles) (`proxyIdentityRoles: enforce`): the role in each token decides what its person may do. `GET /api/access/identity` says what this person may do.                                                                                                                                                         |
 
 ### For client authors
 
@@ -1208,7 +1210,7 @@ The settings an administrator can pin for everyone on this install, with the val
 
 ### Responses
 
-`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`, then the ten [proxy identity](/guides/sso-proxy#settings) keys from `proxyIdentity` to `proxyIdentityRoleClaim`.
+`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`, then the eleven [proxy identity](/guides/sso-proxy#settings) keys from `proxyIdentity` to `proxyIdentityRoles`.
 
 | Field          | Type                                             | Notes                                                                                                               |
 | -------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |

@@ -40,6 +40,7 @@ import {
 } from '@clawboo/gateway-proxy'
 import type { PersonRef } from '@clawboo/protocol'
 
+import type { PersonAccess } from '../roles/policy'
 import type { ProxyIdentityConfig } from './config'
 import type { AssertionRefusal, AssertionVerifier } from './verifier'
 
@@ -63,7 +64,13 @@ export interface ProxyIdentityLane {
 }
 
 export type LaneDecision =
-  { ok: true; person: PersonRef | null } | { ok: false; reason: LaneRefusal }
+  | {
+      ok: true
+      person: PersonRef | null
+      /** What the person's token grants, with roles enforced. */
+      access?: PersonAccess | null
+    }
+  | { ok: false; reason: LaneRefusal }
 
 export interface LaneOptions {
   /** True for a spawned runtime's own `/api/mcp/*` call, as the access gate judges it. */
@@ -161,7 +168,9 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     if (token === '') return { ok: false, reason: 'malformed', from }
     try {
       const result = await source.verifier.verify({ token, method: req.method ?? 'GET', path })
-      return result.ok ? { ok: true, person: result.person, from } : { ...result, from }
+      return result.ok
+        ? { ok: true, person: result.person, access: result.access ?? null, from }
+        : { ...result, from }
     } catch {
       return { ok: false, reason: 'malformed', from }
     }
@@ -210,8 +219,14 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
         refuse(res, decision.reason, decision.from)
         return
       }
-      req.person = decision.person
-      if (decision.person && decision.from) req.personVia = decision.from
+      // A service token (roles enforced, `svc: true`) is a program acting for the
+      // sign-in front, never a person: it is kept apart, so nothing records it as
+      // one and no person check takes it.
+      const service = decision.access?.service === true
+      req.person = service ? null : decision.person
+      if (service) req.service = decision.person
+      req.access = decision.access ?? null
+      if (!service && decision.person && decision.from) req.personVia = decision.from
       next()
     })
   }
@@ -222,7 +237,14 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     const decision: Decided = appToken
       ? { ok: false, reason: 'binding' }
       : await decide(req, path, upgradeSources)
-    if (decision.ok) return { ok: true, person: decision.person }
+    if (decision.ok) {
+      // Only with roles enforced does a decision carry the person's access. A
+      // service token names no person, so it never opens the Gateway socket.
+      if (!decision.access) return { ok: true, person: decision.person }
+      return decision.access.service
+        ? { ok: true, person: null, access: decision.access }
+        : { ok: true, person: decision.person, access: decision.access }
+    }
     opts.onRefuse?.({ reason: decision.reason, method: req.method ?? 'GET', path })
     return { ok: false, reason: decision.reason }
   }

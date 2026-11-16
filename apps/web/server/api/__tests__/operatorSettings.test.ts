@@ -92,6 +92,7 @@ describe('/api/system/operator-settings', () => {
           ['proxyIdentityMaxLifetime', 60, 'CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME'],
           ['proxyIdentityNameClaim', 'name', 'CLAWBOO_PROXY_IDENTITY_NAME_CLAIM'],
           ['proxyIdentityRoleClaim', 'role', 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM'],
+          ['proxyIdentityRoles', 'off', 'CLAWBOO_PROXY_IDENTITY_ROLES'],
           ['anthropicBaseUrl', null, 'ANTHROPIC_BASE_URL'],
           ['openaiBaseUrl', null, 'OPENAI_BASE_URL'],
           ['openrouterBaseUrl', null, 'OPENROUTER_BASE_URL'],

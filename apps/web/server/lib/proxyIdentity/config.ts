@@ -37,6 +37,8 @@ import {
 
 export type ProxyIdentityMode = 'off' | 'on' | 'required'
 export type ProxyIdentityBinding = 'request' | 'session'
+/** `enforce`: the role a token carries decides what its person may do (lib/roles). */
+export type ProxyIdentityRoles = 'off' | 'enforce'
 
 export type ProxyIdentityKeys =
   { source: 'jwks-url'; url: URL } | { source: 'public-key'; jwks: JSONWebKeySet }
@@ -63,6 +65,9 @@ export interface ProxyIdentityConfig {
   /** The only routes a token from this issuer may be used on, when it is limited
    *  (the app link). Unset: any route (a sign-in proxy). */
   routes?: readonly AppLinkRoute[]
+  /** `enforce`: the verifier reads the access the token's role claims grant, and
+   *  a malformed one refuses the token. Unset: `off`. */
+  roles?: ProxyIdentityRoles
 }
 
 /** A route an app link's token may be used on: a method and a whole-path pattern. */
@@ -262,6 +267,16 @@ function textSetting(key: OperatorKey): string | null {
  */
 export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
   const mode = effectiveSetting('proxyIdentity').value as ProxyIdentityMode
+  // Roles decide what a person may do only when every request names one. Checked
+  // before the lane's own `off`, so roles asked for with no lane at all stop the
+  // server rather than quietly applying to nobody.
+  const roles = effectiveSetting('proxyIdentityRoles').value as ProxyIdentityRoles
+  if (roles === 'enforce' && mode !== 'required') {
+    fail(
+      `proxyIdentityRoles is enforce but proxyIdentity is ${mode}. Set proxyIdentity to ` +
+        'required, so that every request names a person whose role can be checked.',
+    )
+  }
   if (mode === 'off') return null
 
   const lane = 'The proxy identity lane'
@@ -325,6 +340,7 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
     roleClaim,
     keys,
     accountSubjects: 'any',
+    roles,
   }
 }
 
@@ -346,7 +362,17 @@ export function identityConfigs(
         'signs its requests in. Give your sign-in proxy a header of its own.',
     )
   }
-  return [{ ...proxy, accountSubjects: 'never' }, appLink]
+  // With roles enforced, the app link's people need a role as well: a token
+  // without one would otherwise be a person no route could check.
+  return [
+    { ...proxy, accountSubjects: 'never' },
+    proxy.roles ? { ...appLink, roles: proxy.roles } : appLink,
+  ]
+}
+
+/** How roles are applied, from the lane's config: `off` when the lane is. */
+export function rolesModeOf(proxy: ProxyIdentityConfig | null): ProxyIdentityRoles {
+  return proxy?.roles === 'enforce' ? 'enforce' : 'off'
 }
 
 /** Whether the app that started this engine handed it an app link key. */
@@ -391,6 +417,14 @@ export function loadAppLinkConfig(
 /** The lane's mode as the operator set it, without checking the rest. */
 export function proxyIdentityMode(): ProxyIdentityMode {
   return effectiveSetting('proxyIdentity').value as ProxyIdentityMode
+}
+
+/** Whether roles are enforced as the operator set them: `enforce` behind a
+ *  required lane, which is the only way the server starts with them on. */
+export function proxyIdentityRolesEnforced(): boolean {
+  return (
+    effectiveSetting('proxyIdentityRoles').value === 'enforce' && proxyIdentityMode() === 'required'
+  )
 }
 
 function writableByUs(target: string): boolean {

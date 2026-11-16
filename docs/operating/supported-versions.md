@@ -76,6 +76,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | Update from inside the app                          | `system.selfUpdate`                                                                | Supported for a global install | Planned     | Planned       |
 | Names from a sign-in proxy's identity tokens        | `auth.proxyIdentity`                                                               | Supported, off by default      | Planned     | Planned       |
 | Names from the app that started the server          | `auth.appLink`                                                                     | Supported, off by default      | Planned     | Planned       |
+| Roles that decide what each signed-in person may do | `auth.roles`                                                                       | Supported, off by default      | Planned     | Planned       |
 
 A flag being on means the server has the feature. It does not mean the surface you use shows it yet.
 

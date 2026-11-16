@@ -1,7 +1,7 @@
 ---
 title: 'Run Clawboo behind a sign-in proxy'
 sidebarTitle: 'Sign-in proxy'
-description: 'Put Clawboo behind an SSO reverse proxy that signs identity tokens, so each request names the person who sent it and approvals, chat messages and task moves record who did them.'
+description: 'Put Clawboo behind an SSO reverse proxy that signs identity tokens, so each request names the person who sent it, approvals, chat messages and task moves record who did them, and the role in each token can decide what that person may do.'
 keywords:
   [
     'SSO',
@@ -15,6 +15,10 @@ keywords:
     'who approved',
     'CLAWBOO_PROXY_IDENTITY',
     'proxyIdentity',
+    'roles',
+    'permissions',
+    'CLAWBOO_PROXY_IDENTITY_ROLES',
+    'proxyIdentityRoles',
   ]
 ---
 
@@ -24,7 +28,7 @@ This is off by default. Only an administrator turns it on, in the [operator sett
 
 <Note>
 
-This puts names on what people do. It adds no accounts, roles or permissions: everyone who gets through your proxy can still do everything the dashboard can. A role from the token is recorded, not enforced.
+On its own this puts names on what people do. It adds no accounts or permissions: everyone who gets through your proxy can still do everything the dashboard can, and a role from the token is recorded, not enforced. To let that role decide what each person may do, turn on [Roles](#roles), in releases after 0.8.0.
 
 </Note>
 
@@ -71,22 +75,23 @@ With `session` binding a token needs only `sub` and `exp`. If it carries `htm` o
 
 ## Settings
 
-| Operator file key          | Variable                              | Default            | What it sets                                                                      |
-| -------------------------- | ------------------------------------- | ------------------ | --------------------------------------------------------------------------------- |
-| `proxyIdentity`            | `CLAWBOO_PROXY_IDENTITY`              | `off`              | `off`, `on` or `required`                                                         |
-| `proxyIdentityHeader`      | `CLAWBOO_PROXY_IDENTITY_HEADER`       | `clawboo-identity` | The header that carries the token. A `Bearer ` prefix is allowed                  |
-| `proxyIdentityJwksUrl`     | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`     | unset              | The proxy's key set. `https`, or plain `http` only to this computer               |
-| `proxyIdentityPublicKey`   | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`   | unset              | The proxy's public key: a PEM public key, a JWK or a JWKS                         |
-| `proxyIdentityIssuer`      | `CLAWBOO_PROXY_IDENTITY_ISSUER`       | unset              | The `iss` every token must carry                                                  |
-| `proxyIdentityAudience`    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`     | unset              | The `aud` every token must carry                                                  |
-| `proxyIdentityBinding`     | `CLAWBOO_PROXY_IDENTITY_BINDING`      | `request`          | `request` or `session`                                                            |
-| `proxyIdentityMaxLifetime` | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` | `60`               | The longest `exp - iat` a request-bound token may have, in seconds, from 1 to 300 |
-| `proxyIdentityNameClaim`   | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   | `name`             | The claim with the person's name. Without it, `email`, then `preferred_username`  |
-| `proxyIdentityRoleClaim`   | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   | `role`             | The claim with the person's role. A list is joined with commas                    |
+| Operator file key          | Variable                              | Default            | What it sets                                                                        |
+| -------------------------- | ------------------------------------- | ------------------ | ----------------------------------------------------------------------------------- |
+| `proxyIdentity`            | `CLAWBOO_PROXY_IDENTITY`              | `off`              | `off`, `on` or `required`                                                           |
+| `proxyIdentityHeader`      | `CLAWBOO_PROXY_IDENTITY_HEADER`       | `clawboo-identity` | The header that carries the token. A `Bearer ` prefix is allowed                    |
+| `proxyIdentityJwksUrl`     | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`     | unset              | The proxy's key set. `https`, or plain `http` only to this computer                 |
+| `proxyIdentityPublicKey`   | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`   | unset              | The proxy's public key: a PEM public key, a JWK or a JWKS                           |
+| `proxyIdentityIssuer`      | `CLAWBOO_PROXY_IDENTITY_ISSUER`       | unset              | The `iss` every token must carry                                                    |
+| `proxyIdentityAudience`    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`     | unset              | The `aud` every token must carry                                                    |
+| `proxyIdentityBinding`     | `CLAWBOO_PROXY_IDENTITY_BINDING`      | `request`          | `request` or `session`                                                              |
+| `proxyIdentityMaxLifetime` | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` | `60`               | The longest `exp - iat` a request-bound token may have, in seconds, from 1 to 300   |
+| `proxyIdentityNameClaim`   | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   | `name`             | The claim with the person's name. Without it, `email`, then `preferred_username`    |
+| `proxyIdentityRoleClaim`   | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   | `role`             | The claim with the person's role. A list is joined with commas                      |
+| `proxyIdentityRoles`       | `CLAWBOO_PROXY_IDENTITY_ROLES`        | `off`              | `off`, or `enforce` to let the role decide what the person may do ([Roles](#roles)) |
 
 Set exactly one of `proxyIdentityJwksUrl` and `proxyIdentityPublicKey`, and both the issuer and the audience. Without the audience, a token your sign-in provider made for any other app would do. A claim name can be a dotted path into the token, such as `realm_access.roles`. In an environment variable, a PEM key can be written on one line with `\n` for each line break.
 
-Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; or when the header is one Clawboo or a browser already uses, such as `cookie` or `host`.
+Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; when the header is one Clawboo or a browser already uses, such as `cookie` or `host`; or when `proxyIdentityRoles` is `enforce` and `proxyIdentity` is not `required`.
 
 **Keep these settings out of agents' reach.** Agents run as the same user as Clawboo, so an agent that can change these settings can put in its own key and sign in as anyone after the next restart. Set the variables in your service manager, or keep the operator file somewhere that user can read but not change, such as a root-owned `/etc/clawboo/operator.json`: the file and every folder above it owned by another user, and none of them writable by Clawboo's user, except a sticky folder such as `/tmp`, which lets a user rename only what it owns. When the settings come from a file Clawboo's user owns, can write, or can replace through a folder above it, the server logs a `SECURITY:` warning at startup. On Windows, Clawboo cannot check who can change a file (Node reads neither owners nor access lists there), so it logs that warning whenever these settings come from the operator file. Let only administrators change the file, or set the variables in the service's environment.
 
@@ -184,6 +189,7 @@ Then restart Clawboo (`clawboo restart`, or your service manager). The startup l
 {
   "proxyIdentity": "required",
   "appLink": false,
+  "roles": "off",
   "person": { "id": "user-42", "name": "Ada Lovelace", "role": "admin" }
 }
 ```
@@ -204,15 +210,101 @@ The person is `{ "id", "name", "role" }`, taken from the token. It is recorded o
 
 When the Gateway's own broadcast settles an OpenClaw approval before Clawboo hears back, its event goes out without a name; the approval itself still records who answered. A name can be missing; it is never a guess.
 
+## Roles
+
+In releases after 0.8.0, with `proxyIdentityRoles` set to `enforce`, the role in each token decides what its person may do. 0.8.0 and older ignore the variable, and refuse to start when the operator file has the key, so an older server never runs with roles silently off from that file. Roles need `proxyIdentity` set to `required`, so that every request names a person; the server refuses to start otherwise. Your proxy names the role in the role claim (`role` unless you set `proxyIdentityRoleClaim`).
+
+| Role       | What the person may do                                                                                                                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`    | See and do the work, answer approvals, answer one with "Allow always", see the connected accounts and remove access, and read the audit log and the approval history                                                                            |
+| `operator` | See and do the work, set up agents, teams, routines, rules, connectors and skills, see costs and budgets, run the server (providers, keys, runtimes, settings, updates), and read the records. Never answer an approval or make agents ask less |
+| `member`   | See and do the work. Answer approvals, allowing once or denying, only when the token also says `"approve": true`                                                                                                                                |
+| `guest`    | See and do the work of the teams the token lists, and only until its `access_until`. Never answer an approval                                                                                                                                   |
+
+Seeing and doing the work covers the teams, agents, board, chats, rooms, task folders and memory: asking an agent or a team for work, writing and moving tasks, commenting, answering an agent's question, and pausing or stopping work.
+
+- **Roles add up.** A role claim that lists `owner` and `operator` gets what both get. A word Clawboo does not know, such as your provider's `offline_access`, is ignored. A token with no role Clawboo knows reaches only the four routes about the person and the server itself: `GET /api/access/identity` (which says so), `GET /api/health`, `GET /api/system/capabilities` and `POST /api/system/presence`.
+- **An answer that lasts is the owner's.** "Allow always" on an approval, and a connector grant made to act without asking (`approvalPolicy: "never"`), need the owner, so an operator can make agents ask more but never less. A grant that never asks needs both roles, owner and operator, and so does making a grant again in a way that brings back or widens one that never asks, or makes any grant ask less than it did. Turning a team's plan approval off, and letting a team's agents wake each other without asking (the team's setting, or "always in this team" on a card), need the owner too; an operator can turn them back on.
+- **A guest's limits** hold while guest is the person's one role. A guest reaches a route that names one of their teams, an agent or a task on one of them, or a chat of one of them, and four lists that Clawboo cuts down to their teams: `GET /api/teams`, `GET /api/agents`, `GET /api/board` and `GET /api/tools/approvals`. What a guest's write names in its body must be on one of their teams too: the parent of a new task, the agent it is for, the task it waits on. So must the work a guest's cancel or close carries along: the tasks waiting on a cancelled one, and the open work under a request. A retry, a reopen and a pause of a task reach its whole tree, from the main task down, so every task in that tree must be on their teams as well. A hand-off can file work on another team, so a tree it spread that way is out of a guest's reach for these. A task's parents and a main task's list of work show only the tasks on their teams. In notes the board writes, such as a waiting task's note or a list of sub-tasks that did not finish, a task of another team reads as "a task on another team", in notes stored before this release too. A board note that cannot be read that way with certainty, such as an old one whose titles hold quotes of their own, reads as "A note about work that is not shown here." Everything else is refused, and once `access_until` has passed so is every request but the four routes above. A stream a guest has open, such as a chat's live view, closes then too.
+- **The Gateway WebSocket** opens only for a person who both runs the server and answers approvals, standing ones included: an `owner` who is an `operator` too. OpenClaw's own commands travel on it, its approvals and "Allow always" among them, and are not checked one by one. Where the owner and the operator are different people, OpenClaw's Gateway is out of reach while roles are enforced.
+- **What decides whether anyone is asked needs both roles too.** An agent's command posture (`POST /api/exec-settings`) and OpenClaw's own settings (`PATCH /api/system/openclaw-config`, `POST /api/system/configure-openclaw`, `POST /api/system/auto-configure-openclaw`) can make agents ask less, so they need a person who is owner and operator. So does pairing a device with OpenClaw's Gateway (`POST /api/system/approve-device`), since a paired device talks to the Gateway directly. Bringing back a revoked grant that never asks needs the owner.
+- **A route Clawboo does not list** is the operator's.
+- **An operator is trusted with the server.** Connectors, runtimes and a team's verify command run programs as Clawboo's user, and an operator sets them up, so an operator can reach what that user can, the database and the Gateway's token included. The split between owner and operator decides who answers through the API; it does not hold against an operator who sets out to get around it. Give the operator role only to people you would trust with the server itself.
+
+The claims beside the role:
+
+| Claim          | Type                          | What it sets                                                                         |
+| -------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `approve`      | boolean                       | A member may answer approvals                                                        |
+| `teams`        | list of team ids              | The teams a guest reaches: at most 64 ids of at most 128 characters. None: no team   |
+| `access_until` | seconds since 1970 (a number) | When a guest's access ends: a guest's token must carry it. Not the token's own `exp` |
+| `roleLabel`    | text                          | How the person's role reads on screen, such as Expert. Never used for a decision     |
+| `svc`          | boolean                       | The token is a program's, not a person's (see below)                                 |
+| `rv`           | `1`                           | The version of these claims. Left out, it reads as 1                                 |
+
+The whole token may take at most 16 KiB. A claim that is there but malformed refuses the token with `claims`, as any bad token is: a `teams` that is not a list of ids, or lists more than 64, an `approve` or `svc` that is not true or false, or an `rv` this version of Clawboo does not know. For a guest, a `teams` left out or empty reaches no team, and a token with no `access_until` is refused.
+
+**A service token** (`"svc": true`) is for a program of your sign-in front's own, such as its health checks or its scheduler, rather than for a person. It gets its role's permissions, but it is never a person: nothing records it as one, every write that needs a person refuses it, and it never answers or makes an approval, whatever its role. It never opens the Gateway WebSocket. While roles are off, `svc` is not read.
+
+**The app link** follows the same rules: with roles enforced, its tokens need a role claim too, or they reach only those four routes. An app that sends none, as the desktop app does today, cannot use its link to an install that enforces roles.
+
+A refused request gets `403`:
+
+```json
+{
+  "ok": false,
+  "error": "role",
+  "reason": "not-allowed",
+  "message": "Your role in this workspace does not allow this."
+}
+```
+
+| `reason`        | Meaning                                                                                       |
+| --------------- | --------------------------------------------------------------------------------------------- |
+| `no-role`       | The token names no role Clawboo knows                                                         |
+| `not-allowed`   | The person's roles do not allow this route, or what its body asks for, such as "Allow always" |
+| `outside-teams` | A guest asked for something outside their teams                                               |
+| `ended`         | A guest's `access_until` has passed                                                           |
+| `person`        | No verified person, on a route that needs one                                                 |
+
+`GET /api/access/identity` then answers `"roles": "enforce"` and what this person may do:
+
+```json
+{
+  "proxyIdentity": "required",
+  "appLink": false,
+  "roles": "enforce",
+  "person": { "id": "user-7", "name": "Grace Hopper", "role": "guest" },
+  "access": {
+    "roles": ["guest"],
+    "label": "Expert",
+    "permissions": ["see", "work"],
+    "guest": true,
+    "teams": ["3f2c9a10-6b1e-4c4e-9a7d-2f0a51c8e6b4"],
+    "accessUntil": 1795132800,
+    "ended": false,
+    "service": false
+  }
+}
+```
+
+With roles enforced the answer also carries `"service"`: the program a service token names, else `null`.
+
+The dashboard does not yet hide what a role cannot use: an action the role does not allow fails when someone tries it.
+
+The roles are checked on every request through Clawboo's API. They do not keep an agent that runs as Clawboo's own user away from its database: set [`CLAWBOO_AGENT_USER`](/operating/agent-isolation) for that, and see [What it does not protect](#what-it-does-not-protect).
+
 ## Use the proxy instead of the access token
 
 With `proxyIdentity` set to `required`, you can turn the access token off with `STUDIO_ACCESS_TOKEN=` (set blank). Your proxy is then the only way in: every `/api/` request and the Gateway WebSocket need a token that verifies, and agents' own MCP calls still work by their attach token. This fits the default loopback bind behind a proxy on the same machine. A network bind (`HOST=0.0.0.0`) with the access token off still refuses to start.
 
 ## What it does not protect
 
-- **It is not access control.** Anyone who gets through your proxy can do everything the dashboard can. Roles are recorded, not enforced.
+- **Without roles it is not access control.** Anyone who gets through your proxy can do everything the dashboard can, and a role is only recorded. With [Roles](#roles) enforced, the role decides what each person may do through the API.
 - **The records live in Clawboo's database.** Agents and other programs running as Clawboo's user can change the database and its files directly. The records say who did what through the dashboard; they are not a tamper-proof audit log.
 - **In `on` mode, the access token still works.** Agents can read the access token file, so anything running as Clawboo's user can still act through the API, with no name recorded. Use `required` to refuse such requests.
+- **A removal or a role change waits for the tokens.** Clawboo knows a person only from the token on each request, so a change at your proxy reaches it once the proxy stops issuing tokens for that person, or issues them with the new role, and the tokens it issued before have expired. With `request` binding that is within seconds; with `session` binding a token can last hours (see [Choose a binding](#choose-a-binding)), so end the person's proxy session too. From then on a removed person's requests are refused, and a demoted person's may do only what the new role allows.
+- **A stream that is already open keeps running.** A live view, such as a chat's or the event stream, is checked when it opens, so it runs until it closes, unless its person is a guest whose `access_until` passes. Close a person's open connections at the proxy when you remove them or take a role away.
 - **A token someone copies works for its lifetime.** With `session` binding that can be hours, on any path. With `request` binding it is once, for one request, within seconds, per Clawboo server: the list of used tokens is kept in memory, so a token used just before a restart works once more after it until it expires, and so does one sent to a second server behind the same proxy. Clawboo never logs tokens, but your proxy's logs might.
 - **An agent that can use your signed-in browser can act as you.** If an agent drives a browser profile that is signed in to your proxy, its requests carry your token.
 - **The proxy must be the only way in from outside.** A request that reaches Clawboo without passing the proxy carries no token, which `required` refuses and `on` lets through unnamed.

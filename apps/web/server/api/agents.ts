@@ -22,6 +22,7 @@ import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo
 import { eq, sql, inArray, like } from 'drizzle-orm'
 import { refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
+import { inRoleScope } from '../lib/roles/guard'
 import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
@@ -84,7 +85,8 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
       // Native-first installs identify the native Boo Zero here, not the Gateway default.
       defaultId: resolveBooZero(db)?.id ?? '',
       mainKey: (getSetting(db, 'agent-source:openclaw:mainKey') ?? '').trim() || 'main',
-      agents: lists.flat(),
+      // A guest gets only the agents of the teams their role names (lib/roles).
+      agents: lists.flat().filter((a) => inRoleScope(req, a.teamId)),
       // Not stale while nothing uses the Gateway: there are no OpenClaw agents to
       // have gone out of date, and the source is not trying to connect.
       stale: health.inUse !== false && health.connection !== 'connected',

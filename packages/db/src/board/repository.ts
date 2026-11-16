@@ -19,6 +19,7 @@ import {
   LOCAL_PERSON,
   parseWaitingOn,
   personMoveAllowed,
+  quoteTitle,
   requestWaitsOn,
   strongerWakeReason,
   subtasksStillOut,
@@ -1961,7 +1962,8 @@ function releaseWaitersTx(
 ): BoardLifecycleEvent[] {
   const events: BoardLifecycleEvent[] = []
   const finished = to === 'done'
-  const name = `“${closed.title}”`
+  // Quoted so the note's quotes always mark where the title ends (see quoteTitle).
+  const name = quoteTitle(closed.title)
 
   const waiting = tx
     .select()
@@ -1974,12 +1976,18 @@ function releaseWaitersTx(
     const w = parseWaitingOn(waiter.waitingOn)
     if (w?.kind !== 'task' || w.taskId !== closed.id) continue
     if (finished) noteWaitOutcomeTx(tx, waiter.id, { waitedTaskDone: true })
+    // A wait can cross teams, and this text is stored on the waiter, where its own
+    // team reads it: a task on another team is not named there.
+    const what =
+      waiter.teamId === closed.teamId
+        ? `${name}, the task this waited on,`
+        : 'The task this waited on, on another team,'
     releaseWaiterTx(tx, waiter, now, events, {
       ready: finished,
-      note: `${name}, the task this waited on, is done.`,
+      note: `${what} is done.`,
       ifNot: finished
-        ? `${name}, the task this waited on, is done, and nothing started this one again. Retry it or decide what happens next.`
-        : `${name}, the task this waited on, was cancelled. Decide what happens next.`,
+        ? `${what} is done, and nothing started this one again. Retry it or decide what happens next.`
+        : `${what} was cancelled. Decide what happens next.`,
       reason: 'dependency_done',
     })
   }

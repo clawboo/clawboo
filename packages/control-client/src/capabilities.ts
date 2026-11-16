@@ -113,6 +113,10 @@ export const ENGINE_FEATURES = [
   // The app that started this engine (a desktop app) can name its own people on
   // the requests it signs, as `account:` people (CLAWBOO_APP_LINK_PUBLIC_KEY).
   'auth.appLink',
+  // The role in a sign-in proxy's token decides what its person may do
+  // (proxyIdentityRoles: enforce). What this person may do: the `access` of
+  // GET /api/access/identity.
+  'auth.roles',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 

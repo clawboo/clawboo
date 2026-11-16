@@ -471,7 +471,7 @@ The proxy rule blocks it, and releases after 0.5.0 also refuse an attach token t
 
 ## Limits
 
-- **One token, full access.** There are no accounts or roles. To rotate the token, change the variable, restart the server and sign in again in every browser.
+- **One token, full access.** There are no accounts or roles. To rotate the token, change the variable, restart the server and sign in again in every browser. Behind a [sign-in proxy](/guides/sso-proxy), each person can have a [role](/guides/sso-proxy#roles) that decides what they may do.
 - **One rate-limit allowance behind a proxy.** Clawboo counts requests by the connection's address, so every browser behind the proxy shares one allowance. See [Limits and defaults](/reference/limits-and-defaults).
 
 ## Next steps
