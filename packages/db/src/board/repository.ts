@@ -19,6 +19,7 @@ import {
   LOCAL_PERSON,
   parseWaitingOn,
   personMoveAllowed,
+  quoteTitle,
   requestWaitsOn,
   strongerWakeReason,
   subtasksStillOut,
@@ -1961,7 +1962,8 @@ function releaseWaitersTx(
 ): BoardLifecycleEvent[] {
   const events: BoardLifecycleEvent[] = []
   const finished = to === 'done'
-  const name = `“${closed.title}”`
+  // Quoted so the note's quotes always mark where the title ends (see quoteTitle).
+  const name = quoteTitle(closed.title)
 
   const waiting = tx
     .select()

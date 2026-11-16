@@ -6,7 +6,17 @@ import { describe, expect, it } from 'vitest'
 import { OTHER_TEAM_TASK, redactForGuest, redactTitles, type TitleCheck } from '../redact'
 
 const theirs: TitleCheck = (quoted) =>
-  quoted === 'Write the brief' || quoted === 'x'.repeat(60) /* a long title, cut at 60 */
+  quoted === 'Write the brief' ||
+  quoted === 'x'.repeat(60) /* a long title, cut at 60 */ ||
+  quoted === 'Menu ”draft” v2' /* their own title, with quotes of its own */ ||
+  quoted === 'Launch "Q4" menu'
+
+/** No character of `secret` that the guest may not read is left in `out`. */
+function leaksNothingOf(out: string, secret: string): void {
+  for (const part of secret.split(/[“”"]/).filter((p) => p.trim().length > 2)) {
+    expect(out).not.toContain(part)
+  }
+}
 
 describe('redactTitles', () => {
   it('reads an old release note as the one written now, unless the title is theirs', () => {
@@ -49,6 +59,73 @@ describe('redactTitles', () => {
   it('leaves other straight quotes alone: a hand-off’s own words are not another task', () => {
     const words = 'Spawn depth limit (3) reached, not delegating "Draft the menu".'
     expect(redactTitles(words, theirs)).toBe(words)
+  })
+})
+
+describe('redactTitles, failing closed', () => {
+  const secret = 'Plan ”Secret” notes'
+
+  it('hides all of a title of another team that holds quotes of its own', () => {
+    for (const note of [
+      `“${secret}”, the task this waited on, is done.`,
+      `“${secret}” did not finish. Retry them, or mark this task done.`,
+      `This closed over sub-tasks that did not get done. “${secret}” cancelled.`,
+    ]) {
+      const out = redactTitles(note, theirs)
+      leaksNothingOf(out, secret)
+      expect(out).toContain('another team')
+    }
+  })
+
+  it('hides it inside a list of sub-tasks, whatever comes after it', () => {
+    const out = redactTitles(
+      `“Write the brief”, “${secret}”, “Ads copy” did not finish. Retry them, or mark this task done.`,
+      theirs,
+    )
+    leaksNothingOf(out, secret)
+    expect(out).not.toContain('Ads copy')
+    // What comes before it reads as it did.
+    expect(out.startsWith('“Write the brief”, ')).toBe(true)
+  })
+
+  it('hides a title a long note was cut inside, to the end of the note', () => {
+    expect(redactTitles('“Write the brief”, “Unannounced lau', theirs)).toBe(
+      `“Write the brief”, ${OTHER_TEAM_TASK}`,
+    )
+    const cut = redactTitles(`“Write the brief”, “Plan ”Secret” no`, theirs)
+    expect(cut).toBe(`“Write the brief”, ${OTHER_TEAM_TASK}`)
+    // A list once cut at 1000 characters can end just after a quote inside a title.
+    const head = Array.from({ length: 50 }, () => '“Write the brief”').join(', ') + ', '
+    const long = `${head}“Plan ”Secr`.padStart(1000, ' ')
+    expect(long).toHaveLength(1000)
+    const shown = redactTitles(long, theirs)
+    expect(shown).not.toContain('Secr')
+    expect(shown.endsWith(OTHER_TEAM_TASK)).toBe(true)
+  })
+
+  it('still shows their own title that holds quotes, whole', () => {
+    const note =
+      '“Menu ”draft” v2”, “Write the brief” did not finish. Retry them, or mark this task done.'
+    expect(redactTitles(note, theirs)).toBe(note)
+    const old = '“Menu ”draft” v2”, the task this waited on, is done.'
+    expect(redactTitles(old, theirs)).toBe(old)
+  })
+
+  it('reads a straight-quoted title to the note’s own end, and hides all of it', () => {
+    const room = 'Task "Photos" now depends on "Launch "Acquisition" plan".'
+    expect(redactTitles(room, theirs)).toBe(`Task "Photos" now depends on ${OTHER_TEAM_TASK}.`)
+    const refused =
+      'Not handed to Bo: they handed out "Launch "Acquisition" plan", which is still open.'
+    expect(redactTitles(refused, theirs)).toBe(
+      `Not handed to Bo: they handed out ${OTHER_TEAM_TASK}, which is still open.`,
+    )
+    // Cut short before its end: everything from the opening quote goes.
+    expect(redactTitles('A hand-off did not start: Bo handed out "Launch "Acquisi', theirs)).toBe(
+      `A hand-off did not start: Bo handed out ${OTHER_TEAM_TASK}`,
+    )
+    // Their own, quotes and all, stays.
+    const own = 'Task "Photos" now depends on "Launch "Q4" menu".'
+    expect(redactTitles(own, theirs)).toBe(own)
   })
 })
 

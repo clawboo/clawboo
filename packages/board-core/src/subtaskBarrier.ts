@@ -179,20 +179,48 @@ export function unfinishedSubtasks(t: SubtaskTally): number {
   return t.notComing + t.stopped
 }
 
+/**
+ * A task's title as a note quotes it: in curly quotes, cut to `max` characters, with
+ * any curly quote of its own made straight. The note's quotes then always mark where
+ * the title ends, so a reader that hides a title it may not see (a guest reading
+ * another team's task) can find all of it. The stored title is untouched.
+ */
+export function quoteTitle(title: string, max = Infinity): string {
+  return `“${title.slice(0, max).replace(/[“”]/g, '"')}”`
+}
+
+/** The longest a list of sub-tasks quotes each title. */
+const LISTED_TITLE_MAX = 60
+
+function subtaskNameList(
+  views: readonly SubtaskView[],
+  standings: readonly SubtaskStanding[],
+): string[] {
+  return views
+    .filter((v) => standings.includes(subtaskStanding(v)))
+    .map((v) => quoteTitle(v.title ?? '', LISTED_TITLE_MAX))
+}
+
 /** The sub-tasks with these standings, as a person reads them. */
 export function subtaskNames(
   views: readonly SubtaskView[],
   ...standings: readonly SubtaskStanding[]
 ): string {
-  return views
-    .filter((v) => standings.includes(subtaskStanding(v)))
-    .map((v) => `“${(v.title ?? '').slice(0, 60)}”`)
-    .join(', ')
+  return subtaskNameList(views, standings).join(', ')
 }
 
+/** The longest an unfinished-work note may be. */
+const NEED_MAX = 1_000
+
 /** What a person is told when a task's agent has had its turn and work it handed out
- *  did not finish. The board keeps it true as those sub-tasks come back. */
+ *  did not finish. The board keeps it true as those sub-tasks come back. A long list
+ *  is cut between names, never inside one. */
 export function unfinishedNeed(views: readonly SubtaskView[]): string {
-  const names = subtaskNames(views, 'not_coming', 'stopped')
-  return `${names} did not finish. Retry them, or mark this task done.`.slice(0, 1_000)
+  const names = subtaskNameList(views, ['not_coming', 'stopped'])
+  const end = ' did not finish. Retry them, or mark this task done.'
+  let shown = names.length
+  const listed = (n: number): string =>
+    names.slice(0, n).join(', ') + (n < names.length ? `, and ${names.length - n} more` : '')
+  while (shown > 1 && listed(shown).length + end.length > NEED_MAX) shown -= 1
+  return `${listed(shown)}${end}`.slice(0, NEED_MAX)
 }
