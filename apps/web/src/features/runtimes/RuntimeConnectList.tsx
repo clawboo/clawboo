@@ -20,7 +20,9 @@
 // that expands the inline management body (subscription + Re-check + Disconnect +
 // a "Details" link to the read-only diagnostics drawer). The built-in native
 // runtime is a managed row (not the static foundation); the OpenClaw row carries
-// its MCP attach config inside Manage.
+// its MCP attach config inside Manage. While the server is connected to the
+// Gateway and this page has no Gateway client of its own, the connected OpenClaw
+// row also offers "Connect this page" beside Manage.
 //
 // The expandable body stays MOUNTED when a row is collapsed (a CSS grid
 // 0fr↔1fr height animation + `inert`, NOT display:none) so an in-flight SSE
@@ -89,6 +91,15 @@ export interface OpenClawTabConfig {
   /** Panel host: the row was opened while OpenClaw is not in use. Opening
    *  OpenClaw's view is a need, so the host asks the server to connect. */
   onOpen?: () => void | Promise<void>
+  /** Set only while the server is connected to the Gateway and this page has no
+   *  Gateway client of its own, as when a routine connected the server after the
+   *  page loaded. The connected row then offers Connect this page, which calls
+   *  it; OpenClaw's 1:1 chats need the page's client. Never set in a thin client,
+   *  where a page has no client by design. */
+  onConnectPage?: () => Promise<void>
+  /** This page is dialing its own Gateway connection already, from whichever
+   *  path: Connect this page then shows as busy. */
+  connectingPage?: boolean
 }
 
 // Concise one-liners for the row summary (the catalog blurbs are longer, sized
@@ -458,6 +469,11 @@ function OpenClawRow({
   }
 
   if (config.connected) {
+    // The server is connected but this page has no client of its own: offer to
+    // connect it, beside Manage.
+    const connectPage = config.onConnectPage ? (
+      <ConnectPageButton onConnect={config.onConnectPage} connecting={!!config.connectingPage} />
+    ) : null
     // Panel (has MCP + diagnostics): a small "Connected" (top-right) + a Manage
     // footer that expands the management body (ChatGPT subscription + MCP attach
     // + Re-check + Disconnect [stops the gateway] + Details). Onboarding (no
@@ -468,14 +484,18 @@ function OpenClawRow({
           {...rowProps}
           status={<StatusChip state="ready" />}
           footer={
-            <CtaToggle
-              expanded={userExpanded}
-              onToggle={() => setUserExpanded((v) => !v)}
-              bodyId={`${testId}-body`}
-              cta={MANAGE_CTA}
-              name="OpenClaw"
-              testId={testId}
-            />
+            // Stacked on a phone, so the name keeps its room; side by side above.
+            <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+              {connectPage}
+              <CtaToggle
+                expanded={userExpanded}
+                onToggle={() => setUserExpanded((v) => !v)}
+                bodyId={`${testId}-body`}
+                cta={MANAGE_CTA}
+                name="OpenClaw"
+                testId={testId}
+              />
+            </div>
           }
           expanded={userExpanded}
         >
@@ -503,7 +523,13 @@ function OpenClawRow({
         </AccordionRow>
       )
     }
-    return <AccordionRow {...rowProps} status={<StatusChip state="ready" />} />
+    return (
+      <AccordionRow
+        {...rowProps}
+        status={<StatusChip state="ready" />}
+        footer={connectPage ?? undefined}
+      />
+    )
   }
 
   const settingUp = !!config.setupOpen
@@ -592,6 +618,56 @@ function OpenClawRow({
         </div>
       )}
     </AccordionRow>
+  )
+}
+
+/** Connect this page: brings up this page's own Gateway client for a server that
+ *  is already connected. Busy while its dial runs, or while `connecting` says a
+ *  dial from elsewhere is, and a second click meanwhile does nothing (the host
+ *  shares the dial too). A failure is the host's toast; the button stays, so a
+ *  person can try again. */
+function ConnectPageButton({
+  onConnect,
+  connecting,
+}: {
+  onConnect: () => Promise<void>
+  connecting: boolean
+}) {
+  const [clicked, setClicked] = useState(false)
+  const busy = clicked || connecting
+  const busyRef = useRef(false)
+  const connect = () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setClicked(true)
+    void onConnect()
+      .catch(() => undefined)
+      .finally(() => {
+        busyRef.current = false
+        setClicked(false)
+      })
+  }
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={connect}
+      disabled={busy}
+      aria-label="Connect this page to OpenClaw"
+      title="OpenClaw is connected, but this page has no connection of its own yet. OpenClaw chats on this page need one."
+      data-testid="runtime-openclaw-connect-page"
+      className="shrink-0"
+    >
+      {busy ? (
+        <>
+          <Spinner size={12} /> Connecting…
+        </>
+      ) : (
+        <>
+          <Plug2 size={13} /> Connect this page
+        </>
+      )}
+    </Button>
   )
 }
 
