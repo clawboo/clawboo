@@ -949,6 +949,8 @@ While the server is held:
 
 When the last hold is released or lapses, the waiting runs start in the queue's order, the scheduler checks for due Routines and the pump runs a pass, which starts the tasks left in To do.
 
+In releases after 0.8.0 a server that has begun to stop holds itself the same way, under the owner id `server-stop`, so no run starts during the seconds it waits for its runs and runtime processes to end. The hold lives in memory and ends with the process: the next start is not held.
+
 The hold covers the runs this server starts. A 1:1 chat with an OpenClaw agent, and OpenClaw's own scheduled jobs and messaging channels, run inside the OpenClaw Gateway: they are neither held nor counted in `backgroundWork`, and stopping the server does not stop them.
 
 A hold belongs to the owner id its caller picks, and only that id releases it. Each hold lapses after its time to live, 60 seconds unless the caller asks for another, so a caller that crashes cannot leave the server held. To hold for longer, place the hold again before it lapses: that renews it. Several callers can each hold at once; the server stays held until every hold is gone. Holds live in memory, so a restart clears them.
@@ -1008,11 +1010,11 @@ Each entry in `holds`:
 
 Holds the server, or renews the hold this owner already placed. Body:
 
-| Field        | Type     | Required | Notes                                                                                                                                                          |
-| ------------ | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `owner`      | `string` | Yes      | 1 to 128 letters, digits or `.` `_` `:` `@` `-`, starting with a letter or digit. Pick one per caller. `self-update` is the in-app update's own and is refused |
-| `ttlSeconds` | `number` | No       | How long the hold lives unless renewed: a whole number from 5 to 900. Default 60                                                                               |
-| `reason`     | `string` | No       | Up to 200 characters, shown in `holds`. A renewal that leaves it out keeps the one given before                                                                |
+| Field        | Type     | Required | Notes                                                                                                                                                                                                                                                        |
+| ------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `owner`      | `string` | Yes      | 1 to 128 letters, digits or `.` `_` `:` `@` `-`, starting with a letter or digit. Pick one per caller. `self-update` is the in-app update's own and is refused, and in releases after 0.8.0 so is `server-stop`, the hold a stopping server places on itself |
+| `ttlSeconds` | `number` | No       | How long the hold lives unless renewed: a whole number from 5 to 900. Default 60                                                                                                                                                                             |
+| `reason`     | `string` | No       | Up to 200 characters, shown in `holds`. A renewal that leaves it out keeps the one given before                                                                                                                                                              |
 
 | Status | When                          | Body                                   |
 | ------ | ----------------------------- | -------------------------------------- |
@@ -1027,6 +1029,7 @@ Releases the hold `owner` placed. No other owner's hold is touched.
 | ------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | `200`  | Released                                                                 | The same answer as `GET`                                                                               |
 | `403`  | `self-update`, the in-app update's own hold, which ends with the update  | `{ "error": "self-update is the in-app update's own hold. It ends with the update." }`                 |
+| `403`  | In releases after 0.8.0: `server-stop`, a stopping server's own hold     | `{ "error": "server-stop is a stopping server's own hold. It ends with the server." }`                 |
 | `404`  | That owner holds no hold: it never placed one, released it, or it lapsed | `{ "error": "No hold is placed under that owner id. Only the owner that placed a hold releases it." }` |
 
 ### Example

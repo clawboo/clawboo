@@ -8,9 +8,11 @@
 //   3. Otherwise scan upward from `CLAWBOO_API_PORT_START` (default 18790)
 //      for the first free port, up to `MAX_PORT_ATTEMPTS` consecutive ports.
 //   4. After a successful bind, the chosen port is written to a runtime
-//      file (`<state-dir>/clawboo/api-port.txt`) so external tools (the
-//      CLI, Vite proxy fallback, e2e fixtures) can discover it without
-//      having to scan the network.
+//      file (`<clawboo-dir>/api-port.txt`) so external tools (the CLI, Vite
+//      proxy fallback, e2e fixtures) can discover it without having to scan
+//      the network. Right after it, the start marker `api-port.json` names
+//      this process too, so a reader can tell a live record from one a dead
+//      server left behind (see `@clawboo/process-lookup`'s `startMarker.ts`).
 //
 // This protects users from the canonical "port 3000 is already taken by
 // some random Next.js app" failure mode.
@@ -21,6 +23,13 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
+import {
+  API_PORT_FILE,
+  currentEngineIdentity,
+  readStartMarker,
+  START_MARKER_FILE,
+  type StartMarker,
+} from '@clawboo/process-lookup'
 
 /** First port to try when no explicit `CLAWBOO_API_PORT` is set. */
 export const DEFAULT_API_PORT = 18790
@@ -34,7 +43,12 @@ export const MAX_PORT_ATTEMPTS = 20
  * alongside the rest of the Clawboo state.
  */
 export function getApiPortFilePath(): string {
-  return path.join(resolveClawbooDir(process.env), 'api-port.txt')
+  return path.join(resolveClawbooDir(process.env), API_PORT_FILE)
+}
+
+/** Path to the start marker, beside the port file. */
+export function getStartMarkerPath(): string {
+  return path.join(resolveClawbooDir(process.env), START_MARKER_FILE)
 }
 
 /**
@@ -171,6 +185,61 @@ export function writeApiPortFile(port: number): boolean {
   } catch {
     // Non-fatal: the env var is still valid for in-process consumers.
     return false
+  }
+}
+
+/**
+ * Write the start marker for this process on `port`. Never throws; false when
+ * it did not land. Called right after `writeApiPortFile`.
+ *
+ * Written to a temp file of this process's own, then renamed over the marker,
+ * so a reader never sees half a file, and two servers starting together each
+ * land a whole marker (the last rename wins). A shared temp name would let two
+ * writers interleave into one torn file.
+ *
+ * Windows can refuse the rename while a reader holds the marker open without
+ * delete sharing. The marker is then written in place: a reader that catches it
+ * half written cannot parse it and goes by the port file alone, as it would
+ * with no marker.
+ */
+export function writeStartMarker(port: number, version: string): boolean {
+  const file = getStartMarkerPath()
+  const marker: StartMarker = { port, ...currentEngineIdentity(), version }
+  const body = `${JSON.stringify(marker)}\n`
+  const tmp = `${file}.${process.pid}.tmp`
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(tmp, body, 'utf8')
+    try {
+      fs.renameSync(tmp, file)
+    } catch {
+      fs.writeFileSync(file, body, 'utf8')
+      fs.rmSync(tmp, { force: true })
+    }
+    return true
+  } catch {
+    try {
+      fs.rmSync(tmp, { force: true })
+    } catch {
+      /* best effort */
+    }
+    return false
+  }
+}
+
+/**
+ * Remove the start marker only when it names THIS process. Another server (a
+ * second instance, or a restart successor that has already written its own)
+ * may have replaced it, and removing that one would leave a running server
+ * with no marker.
+ */
+export function removeStartMarkerIfOwned(): void {
+  const marker = readStartMarker(resolveClawbooDir(process.env))
+  if (!marker || marker.pid !== process.pid) return
+  try {
+    fs.unlinkSync(getStartMarkerPath())
+  } catch {
+    /* already gone */
   }
 }
 

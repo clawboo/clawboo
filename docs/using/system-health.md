@@ -112,7 +112,7 @@ If the result says the vault is unreadable instead, the details give the reason,
 
 <Accordion title="API port file is Degraded">
 
-**What it means:** `~/.clawboo/api-port.txt` names a different port from the one this server listens on, or is missing. The `clawboo` command reads this file to find the server, so `clawboo stop` and `clawboo restart` can miss this one. A common cause is a second Clawboo server that started later and wrote its own port.
+**What it means:** `~/.clawboo/api-port.txt` names a different port from the one this server listens on, or is missing. In releases after 0.8.0 the check also needs the [start marker](/reference/configuration#start-marker) `api-port.json` to name this server's process and port. The `clawboo` command reads these files to find the server, so `clawboo stop` and `clawboo restart` can miss this one. A common cause is a second Clawboo server that started later and wrote its own port.
 
 **Fix:** if you run more than one Clawboo server, stop the one you don't need with `CLAWBOO_API_PORT=<port> clawboo stop`. Then run `clawboo restart`, and the running server writes its port again. This server's port is the **API port** row under **Runtime state**.
 

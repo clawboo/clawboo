@@ -147,6 +147,46 @@ export function killProcessTreeByPid(
   timer.unref()
 }
 
+/**
+ * SIGKILL a child's whole tree now: no SIGTERM first and no timer, so it lands
+ * even when the server exits right after. For a child whose own planned stop
+ * has had its time (the Hermes gateway when the server stops, which reads a
+ * SIGTERM as a crash), and to sweep what is left of its group once it has
+ * exited. The same targets and pid-reuse guards as `killProcessTree`: a group
+ * id cannot be handed out again while any member of the group is alive, so
+ * `-pid` reaches this child's group or nothing (barring the whole group dying
+ * and the number being reissued to a new group leader in between, the bet
+ * `killProcessTree`'s escalation makes too).
+ */
+export function killProcessTreeNow(child: AgentProcess | null): void {
+  if (isHostedAgentProcess(child)) {
+    child.killTree(0)
+    return
+  }
+  const pid = child?.pid
+  if (!pid) return
+
+  if (isWindows) {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    } catch {
+      /* best-effort: already gone */
+    }
+    return
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    // ESRCH: no group with this id (not spawned detached, or nothing left in
+    // it). Walk the descendants only while Node has not reaped the child: until
+    // then its pid cannot have been handed to another process.
+    if (child && child.exitCode === null && child.signalCode === null) {
+      for (const target of [...descendantsOf(pid), pid]) signal(target, 'SIGKILL')
+    }
+  }
+}
+
 export function killProcessTree(child: AgentProcess | null, opts: { graceMs?: number } = {}): void {
   // A process the agent host started belongs to the agent user, whom this
   // process cannot signal. The host stops the tree, with the same timing.

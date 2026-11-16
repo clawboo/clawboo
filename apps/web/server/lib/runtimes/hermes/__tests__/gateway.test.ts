@@ -13,16 +13,42 @@ import { PassThrough } from 'node:stream'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+// The exit stop takes another path on Windows (no SIGINT to send). These cases
+// pick the platform themselves, so they read the same on every CI leg.
+const platform = vi.hoisted(() => ({ windows: false }))
+vi.mock('../../../platform', async (orig) => ({
+  ...(await orig<typeof import('../../../platform')>()),
+  get isWindows() {
+    return platform.windows
+  },
+}))
 vi.mock('../../subprocess', () => ({
-  registerRuntimeChild: () => undefined,
-  unregisterRuntimeChild: () => undefined,
+  recordRuntimeChildPid: () => undefined,
   isSubprocessShutdown: () => false,
 }))
 vi.mock('../../killTree', () => ({
   killProcessTree: (p: { kill: (s: string) => void }) => p.kill('SIGKILL'),
+  killProcessTreeNow: (p: FakeProcLike) => {
+    if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL')
+    else p.sweeps = (p.sweeps ?? 0) + 1
+  },
 }))
 
-const { HermesGatewaySupervisor, gatewayEnv } = await import('../gateway')
+/** What the killTree mock touches: a sweep after a clean exit is counted. */
+interface FakeProcLike {
+  kill: (s: string) => void
+  exitCode: number | null
+  signalCode: string | null
+  sweeps?: number
+}
+
+const {
+  EXIT_GRACE_DEFAULT_MS,
+  EXIT_GRACE_MAX_MS,
+  HermesGatewaySupervisor,
+  gatewayEnv,
+  hermesExitGraceMs,
+} = await import('../gateway')
 const { derivedHermesKey } = await import('../profiles')
 
 class FakeProc extends EventEmitter {
@@ -378,6 +404,96 @@ describe('HermesGatewaySupervisor', () => {
     expect(gw.status().state).toBe('stopped')
     await new Promise((r) => setTimeout(r, 100))
     expect(spawned).toHaveLength(1)
+  })
+
+  describe('at server exit', () => {
+    it('sends SIGINT to the gateway process alone, and waits for it to exit', async () => {
+      const gw = make()
+      await gw.ensureRunning()
+      expect(await gw.stopForExit(2_000)).toBe('stopped')
+      expect(procs[0]!.signals).toEqual(['SIGINT'])
+      // What it left in its process group is swept once it has exited.
+      expect((procs[0] as unknown as FakeProcLike).sweeps).toBe(1)
+      expect(gw.status().state).toBe('stopped')
+      await new Promise((r) => setTimeout(r, 100))
+      expect(spawned).toHaveLength(1)
+    })
+
+    it('kills its tree once the grace runs out, and waits no longer than the grace', async () => {
+      const gw = make()
+      await gw.ensureRunning()
+      procs[0]!.drainMs = 60_000
+      const t0 = Date.now()
+      expect(await gw.stopForExit(150)).toBe('killed')
+      const took = Date.now() - t0
+      expect(procs[0]!.signals).toEqual(['SIGINT', 'SIGKILL'])
+      expect(took).toBeGreaterThanOrEqual(140)
+      expect(took).toBeLessThan(1_500)
+    })
+
+    it('returns at once when no gateway runs', async () => {
+      const gw = make()
+      const t0 = Date.now()
+      expect(await gw.stopForExit(5_000)).toBe('not-running')
+      expect(Date.now() - t0).toBeLessThan(50)
+    })
+
+    it('never waits for a start under way, and starts nothing after it', async () => {
+      healthy = false
+      const gw = make({ startTimeoutMs: 60_000 })
+      const starting = gw.ensureRunning()
+      for (let i = 0; i < 100 && procs.length === 0; i++) await new Promise((r) => setTimeout(r, 5))
+      expect(procs).toHaveLength(1)
+      const t0 = Date.now()
+      expect(await gw.stopForExit(2_000)).toBe('stopped')
+      expect(Date.now() - t0).toBeLessThan(1_000)
+      expect(procs[0]!.signals).toEqual(['SIGINT'])
+      await expect(starting).rejects.toThrow()
+      healthy = true
+      await expect(gw.ensureRunning()).rejects.toThrow(/Clawboo is stopping/)
+      expect(procs).toHaveLength(1)
+    })
+
+    it('on Windows, where Node has no SIGINT to send, kills the tree at once', async () => {
+      const gw = make()
+      await gw.ensureRunning()
+      platform.windows = true
+      try {
+        expect(await gw.stopForExit(5_000)).toBe('killed')
+        expect(procs[0]!.signals).toEqual(['SIGKILL'])
+      } finally {
+        platform.windows = false
+      }
+    })
+
+    it('the synchronous last resort sends SIGINT only, and nothing once it has exited', async () => {
+      const gw = make()
+      await gw.ensureRunning()
+      gw.signalForExit()
+      expect(procs[0]!.signals).toEqual(['SIGINT'])
+      await new Promise((r) => setTimeout(r, 50))
+      gw.signalForExit()
+      expect(procs[0]!.signals).toEqual(['SIGINT'])
+      expect(spawned).toHaveLength(1)
+    })
+  })
+
+  it('reads CLAWBOO_HERMES_STOP_GRACE_MS, capped at 8 s, and the default for anything else', () => {
+    expect(EXIT_GRACE_DEFAULT_MS).toBe(5_000)
+    expect(EXIT_GRACE_MAX_MS).toBe(8_000)
+    const grace = (v?: string) =>
+      hermesExitGraceMs(v === undefined ? {} : { CLAWBOO_HERMES_STOP_GRACE_MS: v })
+    expect(grace()).toBe(5_000)
+    expect(grace('')).toBe(5_000)
+    expect(grace('3000')).toBe(3_000)
+    expect(grace(' 2500 ')).toBe(2_500)
+    expect(grace('0')).toBe(0)
+    expect(grace('8000')).toBe(8_000)
+    expect(grace('8001')).toBe(8_000)
+    expect(grace('600000')).toBe(8_000)
+    expect(grace('-1')).toBe(5_000)
+    expect(grace('soon')).toBe(5_000)
+    expect(grace('Infinity')).toBe(5_000)
   })
 
   it('marks the running install in use, so an update keeps its folder', async () => {

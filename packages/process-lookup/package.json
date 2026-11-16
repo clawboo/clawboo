@@ -2,7 +2,7 @@
   "name": "@clawboo/process-lookup",
   "version": "0.1.0",
   "private": true,
-  "description": "Resolve a TCP port to the PID listening on it, cross-platform: shared by the clawboo CLI's stop/restart and the server's managed-Gateway control",
+  "description": "Resolve a TCP port to the PID listening on it, tell whether a recorded pid is still the process recorded, and read the server's start marker, cross-platform: shared by the clawboo CLI and the server",
   "license": "MIT",
   "repository": {
     "type": "git",

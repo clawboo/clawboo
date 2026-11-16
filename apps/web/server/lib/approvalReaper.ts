@@ -114,11 +114,11 @@ export function startApprovalReaper(opts: { log: ReaperLog }): void {
   runOnce()
   timer = setInterval(runOnce, intervalMs)
   timer.unref()
+}
 
-  const stop = (): void => {
-    if (timer) clearInterval(timer)
-    timer = null
-  }
-  process.once('SIGTERM', stop)
-  process.once('SIGINT', stop)
+/** Stop the reaper, for a stop of the server. Called by the server's graceful
+ *  stop rather than from a signal listener of its own (see `stopRegistry`). */
+export function stopApprovalReaper(): void {
+  if (timer) clearInterval(timer)
+  timer = null
 }

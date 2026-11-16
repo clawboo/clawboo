@@ -27,7 +27,18 @@ import { readAccessTokenFile, resolveBasePathOrRoot, resolveClawbooDir } from '@
 import { openServerLog } from './server-log'
 
 import { VERSION } from './version'
-import { findListenerPid } from '@clawboo/process-lookup'
+import {
+  API_PORT_FILE,
+  checkStartMarker,
+  findListenerPid,
+  pidExists,
+  readPortRecord,
+  START_MARKER_FILE,
+  startTimesReader,
+  type MarkerCheck,
+  type PortRecord,
+  type StartMarker,
+} from '@clawboo/process-lookup'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,10 +111,16 @@ function urlHost(host: string): string {
  * answering with the gate's refusal could be another user's program imitating
  * it, so no token reaches it, not even one set in this shell: CLAWBOO_API_PORT
  * stays set while the server is down, when anyone could listen on that port.
- * The desktop app follows the same rule.
+ * An app that runs Clawboo follows the same rule.
+ *
+ * Never a record the start marker shows to be stale: the server that wrote it
+ * is gone, and any program may have taken its port since (see
+ * `readRecordedPort`).
  */
 function mayReceiveToken(host: string, port: number): boolean {
-  return host === dashboardHost() && port === readRuntimePort()
+  if (host !== dashboardHost()) return false
+  const record = readRecordedPort()
+  return record.trust !== 'stale' && record.port === port
 }
 
 /**
@@ -356,12 +373,14 @@ export function openUrlInBrowser(url: string, run: RunCommand = runCommand): Pro
 // Mirrors `apps/web/server/lib/portUtils.ts` — kept in lockstep:
 // - DEFAULT_API_PORT 18790 (one above OpenClaw Gateway 18789)
 // - 20-port fallback window (18790-18809)
-// - Runtime port file at ~/.clawboo/api-port.txt (CLAWBOO_HOME override)
+// - Runtime port file at ~/.clawboo/api-port.txt (CLAWBOO_HOME override),
+//   with the start marker api-port.json beside it
 //
 // On every `npx clawboo` launch we figure out where the dashboard is or
 // will be, in this priority order:
 //   1. CLAWBOO_API_PORT / CLAWBOO_API_URL env var (explicit user override)
-//   2. Runtime port file (server already running, wrote its port there)
+//   2. Runtime port file (server already running, wrote its port there),
+//      unless the start marker shows the server that wrote it is gone
 //   3. Probe DEFAULT_API_PORT, then scan upward 19 more ports
 //   4. Fall back to DEFAULT_API_PORT (we'll start a server there)
 
@@ -381,7 +400,62 @@ export function getRuntimePortFilePath(): string {
   // tsup) so the CLI and server agree on the home dir at every edge — a relative
   // CLAWBOO_HOME, an unset HOME, `~` expansion. Re-inlining it drifted at those
   // edges and broke port discovery (the API server writes api-port.txt there).
-  return path.join(resolveClawbooDir(), 'api-port.txt')
+  return path.join(resolveClawbooDir(), API_PORT_FILE)
+}
+
+/** The start marker beside the port file (see `readRecordedPort`). */
+export function getStartMarkerPath(): string {
+  return path.join(resolveClawbooDir(), START_MARKER_FILE)
+}
+
+/** How long the Windows start-time probe (a PowerShell start) may take before
+ *  the marker reads as unknown, and the port file counts on its own, as before
+ *  the marker. Tried once: the server's boot reap tries twice for 30 s each,
+ *  which a command someone is waiting on cannot afford. */
+const MARKER_PROBE_WINDOWS_TIMEOUT_MS = 8_000
+
+/** The last marker checked and what the check said. */
+let markerChecked: { key: string; check: MarkerCheck } | null = null
+
+/**
+ * Check a start marker once per command. The start-time probe is a process
+ * start (on Windows, PowerShell), and the token rule asks on every request.
+ * Whether its pid still exists is read again every time, so a server that dies
+ * while the command runs reads as gone.
+ */
+function checkMarkerOnce(marker: StartMarker): MarkerCheck {
+  const key = JSON.stringify(marker)
+  if (markerChecked?.key !== key) {
+    markerChecked = {
+      key,
+      check: checkStartMarker(marker, {
+        startTimes: startTimesReader(MARKER_PROBE_WINDOWS_TIMEOUT_MS),
+      }),
+    }
+  } else if (markerChecked.check.verdict === 'running' && !pidExists(marker.pid)) {
+    markerChecked = { key, check: { verdict: 'gone', reason: `no process has pid ${marker.pid}` } }
+  }
+  return markerChecked.check
+}
+
+/** Tests only: forget the cached marker check. */
+export function resetMarkerCheckForTests(): void {
+  markerChecked = null
+}
+
+/**
+ * The recorded port, checked through the start marker before it is trusted.
+ *
+ * - `verified`: the marker names a server that is still the process running
+ *   under its pid, and this is its port.
+ * - `unverified`: no marker to go by (a server from before the marker, one
+ *   that could not write it, or a marker this machine cannot check), so the
+ *   port file counts on its own, exactly as before the marker existed.
+ * - `stale`: the marker shows the server that recorded this port is gone, and
+ *   any program may hold its port now. Nothing trusts it.
+ */
+export function readRecordedPort(): PortRecord {
+  return readPortRecord(resolveClawbooDir(), checkMarkerOnce)
 }
 
 export function readRuntimePort(): number | null {
@@ -398,15 +472,25 @@ export function readRuntimePort(): number | null {
 }
 
 /**
- * Delete the runtime port file. Mirrors `portUtils.removeApiPortFile()`.
+ * Delete the runtime port file. Mirrors `portUtils.removeApiPortFile()`. The
+ * start marker goes with it only when it names a server that is gone: one that
+ * names a running server (another one, which wrote its marker last) stays.
  *
- * A server that exits on SIGINT/SIGTERM removes this itself, so on the graceful
- * path this is a no-op. It is load-bearing after a SIGKILL, and on Windows,
- * where `process.kill` is `TerminateProcess` and no shutdown handler ever runs.
+ * A server that exits on SIGINT/SIGTERM removes these itself, so on the
+ * graceful path this is a no-op. It is load-bearing after a SIGKILL, and on
+ * Windows, where `process.kill` is `TerminateProcess` and no shutdown handler
+ * ever runs.
  */
 export function removeRuntimePortFile(): void {
   try {
     fs.unlinkSync(getRuntimePortFilePath())
+  } catch {
+    /* already gone */
+  }
+  // With the port file gone, the marker is always checked here.
+  if (readRecordedPort().check?.verdict !== 'gone') return
+  try {
+    fs.unlinkSync(getStartMarkerPath())
   } catch {
     /* already gone */
   }
@@ -439,8 +523,12 @@ export async function inspectRecordedPort(
   opts: { timeoutMs?: number } = {},
 ): Promise<RecordedPort> {
   const timeoutMs = opts.timeoutMs ?? 2_000
-  const port = readRuntimePort()
+  const record = readRecordedPort()
+  const port = record.port
   if (port === null) return { port, state: 'none' }
+  // The start marker shows the server that recorded this port is gone, so
+  // whatever takes connections there now is not it, and the record is stale.
+  if (record.trust === 'stale') return { port, state: 'none' }
   const host = dashboardHost()
   if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return { port, state: 'none' }
   try {
@@ -483,8 +571,12 @@ function dashboardCandidates(): PortCandidate[] {
   if (explicit !== null) return [{ port: explicit, timeoutMs: 1_500 }]
 
   const candidates: PortCandidate[] = []
-  const fromFile = readRuntimePort()
-  if (fromFile !== null) candidates.push({ port: fromFile, timeoutMs: 1_500 })
+  // Not a record the start marker shows to be stale; the scan below still
+  // probes the standard window.
+  const record = readRecordedPort()
+  if (record.port !== null && record.trust !== 'stale') {
+    candidates.push({ port: record.port, timeoutMs: 1_500 })
+  }
   for (let i = 0; i < MAX_PORT_ATTEMPTS; i++) {
     candidates.push({ port: DEFAULT_API_PORT + i, timeoutMs: 800 })
   }
@@ -1182,9 +1274,9 @@ function isErrno(err: unknown, code: string): boolean {
  * Stop the dashboard server listening on `port`.
  *
  * The server is spawned detached and `unref`'d, so there is no `ChildProcess`
- * handle to signal and no PID file to read — `api-port.txt` records a port and
- * nothing else. So: prove the port is Clawboo, ask the OS who owns it, SIGTERM,
- * and watch the port rather than the PID.
+ * handle to signal. The start marker names the server's pid, but a stop never
+ * signals a pid read from a file: it proves the port is Clawboo, asks the OS who
+ * owns the port NOW, SIGTERMs that, and watches the port rather than the PID.
  *
  * WINDOWS: `process.kill(pid, 'SIGTERM')` maps to TerminateProcess whatever the
  * signal name, so the server never runs its shutdown handler there. Two

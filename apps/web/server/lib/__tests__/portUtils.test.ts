@@ -7,14 +7,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { currentBootAt, currentInitStart, currentPidNamespace } from '@clawboo/process-lookup'
 
 import {
   getApiPortFilePath,
+  getStartMarkerPath,
   readApiPortFile,
   removeApiPortFile,
   removeApiPortFileIfOwned,
+  removeStartMarkerIfOwned,
   writeApiPortFile,
+  writeStartMarker,
 } from '../portUtils'
 
 let home: string
@@ -116,5 +121,99 @@ describe('readApiPortFile rejects a non-integer port (lockstep with the CLI)', (
       fs.writeFileSync(path.join(home, 'api-port.txt'), raw, 'utf8')
       expect(readApiPortFile()).toBeNull()
     }
+  })
+})
+
+// The start marker beside the port file. Its field names are a contract an app
+// that runs Clawboo reads, so every one is checked by name here.
+describe('writeStartMarker', () => {
+  const readMarker = () => JSON.parse(fs.readFileSync(getStartMarkerPath(), 'utf8'))
+
+  it('writes every field, for this process, beside the port file', () => {
+    expect(writeStartMarker(18790, '0.9.0')).toBe(true)
+    expect(getStartMarkerPath()).toBe(path.join(home, 'api-port.json'))
+    const marker = readMarker()
+    expect(Object.keys(marker).sort()).toEqual(
+      ['bootAt', 'initStart', 'pid', 'pidNamespace', 'port', 'startedAt', 'version'].sort(),
+    )
+    expect(marker.port).toBe(18790)
+    expect(marker.pid).toBe(process.pid)
+    expect(marker.version).toBe('0.9.0')
+    expect(marker.bootAt).toBe(currentBootAt())
+    expect(marker.pidNamespace).toBe(currentPidNamespace())
+    expect(marker.initStart).toBe(currentInitStart())
+    expect(Math.abs(marker.startedAt - (Date.now() - process.uptime() * 1000))).toBeLessThan(1_000)
+  })
+
+  it('leaves the bare port file a bare integer, for older readers', () => {
+    writeApiPortFile(18790)
+    writeStartMarker(18790, '0.9.0')
+    expect(fs.readFileSync(getApiPortFilePath(), 'utf8')).toBe('18790')
+  })
+
+  it("writes through a temp file of this process's own, renamed over the marker", () => {
+    const rename = vi.spyOn(fs, 'renameSync')
+    writeStartMarker(18790, '0.9.0')
+    const tmp = `${getStartMarkerPath()}.${process.pid}.tmp`
+    expect(rename).toHaveBeenCalledWith(tmp, getStartMarkerPath())
+    expect(fs.existsSync(tmp)).toBe(false)
+    expect(fs.readdirSync(home).sort()).toEqual(['api-port.json'])
+    expect(readMarker().port).toBe(18790)
+  })
+
+  it('replaces a marker another server wrote whole, never leaving a mix of both', () => {
+    fs.writeFileSync(
+      getStartMarkerPath(),
+      JSON.stringify({ port: 18791, pid: 1, startedAt: 1, bootAt: 1, version: 'x'.repeat(500) }),
+    )
+    writeStartMarker(18790, '0.9.0')
+    expect(readMarker()).toMatchObject({ port: 18790, pid: process.pid, version: '0.9.0' })
+  })
+
+  it('still lands the marker when the rename is refused (Windows, a reader holding it)', () => {
+    vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw Object.assign(new Error('EPERM'), { code: 'EPERM' })
+    })
+    expect(writeStartMarker(18790, '0.9.0')).toBe(true)
+    expect(readMarker().pid).toBe(process.pid)
+    expect(fs.readdirSync(home)).toEqual(['api-port.json'])
+  })
+
+  it('returns false when the folder cannot be written', () => {
+    const blocker = path.join(home, 'not-a-dir')
+    fs.writeFileSync(blocker, 'x')
+    process.env['CLAWBOO_HOME'] = blocker
+    expect(writeStartMarker(18790, '0.9.0')).toBe(false)
+  })
+})
+
+describe('removeStartMarkerIfOwned', () => {
+  it('removes the marker when it names this process', () => {
+    writeStartMarker(18790, '0.9.0')
+    removeStartMarkerIfOwned()
+    expect(fs.existsSync(getStartMarkerPath())).toBe(false)
+  })
+
+  it("leaves another server's marker: it is still running and still needs it", () => {
+    const other = {
+      port: 18791,
+      pid: process.pid + 1,
+      startedAt: Date.now(),
+      bootAt: currentBootAt(),
+      pidNamespace: null,
+      initStart: null,
+      version: '0.9.0',
+    }
+    fs.writeFileSync(getStartMarkerPath(), JSON.stringify(other))
+    removeStartMarkerIfOwned()
+    expect(JSON.parse(fs.readFileSync(getStartMarkerPath(), 'utf8'))).toEqual(other)
+  })
+
+  it('leaves a marker it cannot read, and does not throw when there is none', () => {
+    fs.writeFileSync(getStartMarkerPath(), 'garbage')
+    removeStartMarkerIfOwned()
+    expect(fs.existsSync(getStartMarkerPath())).toBe(true)
+    fs.rmSync(getStartMarkerPath())
+    expect(() => removeStartMarkerIfOwned()).not.toThrow()
   })
 })

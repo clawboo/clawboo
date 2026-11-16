@@ -44,6 +44,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_API_PORT_START`               | `18790`                           | First port of the 20-port scan                                         |
 | `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset           |
 | `CLAWBOO_HERMES_GATEWAY_PORT`          | `8642`                            | First port the Hermes gateway tries, on `127.0.0.1`                    |
+| `CLAWBOO_HERMES_STOP_GRACE_MS`         | `5000`                            | The Hermes gateway's time to stop when Clawboo stops (at most 8000)    |
 | **Folders**                            |                                   |                                                                        |
 | `CLAWBOO_HOME`                         | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
 | `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
@@ -264,6 +265,16 @@ The port the Hermes gateway's API server listens on, on `127.0.0.1` only.
 - Example: `CLAWBOO_HERMES_GATEWAY_PORT=9642`
 
 Clawboo starts the gateway on the first free port from this one, trying 40 in all, and starts it on the port it used last when it restarts. When none of them is free, the gateway does not start and the **Gateway** section of the Hermes row says so. Any value that is not a whole number from 1 to 65535 means the default. It takes effect the next time the gateway starts. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+
+### CLAWBOO_HERMES_STOP_GRACE_MS
+
+In releases after 0.8.0: when Clawboo stops, how long the Hermes gateway gets to finish its planned stop after Clawboo sends it SIGINT, before Clawboo kills it and the processes it started.
+
+- Type: whole number of milliseconds, 0 to 8000
+- Default: `5000`
+- Example: `CLAWBOO_HERMES_STOP_GRACE_MS=3000`
+
+The cap is 8000: a larger value means 8000. It keeps a stop of Clawboo to about 9 seconds in all (this wait, then up to a second after the kill, alongside the 5-second wait for other runtime processes), inside the time an app that runs Clawboo, or a service manager, typically allows before it ends the process. Any value that is not a number of 0 or more means the default. It does not change a stop from the **Hermes** row, which waits 40 seconds. On Windows it has no effect: the gateway ends at once. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
 
 ## Folders
 

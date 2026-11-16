@@ -34,13 +34,15 @@ import { resolveClawbooDir } from '@clawboo/config'
 
 import {
   currentBootAt,
+  currentEngineIdentity,
   currentInitStart,
   currentPidNamespace,
+  engineStanding,
   isAlive,
-  linuxBootUnreadable,
   MAX_TRUSTED_AGE_MS,
   processStartTimes,
-  START_TIME_SLACK_MS,
+  startTimeMatch,
+  type EngineIdentity,
   type StartTimes,
 } from '../processIdentity'
 import { killProcessTreeByPid } from './killTree'
@@ -57,24 +59,6 @@ import { killProcessTreeByPid } from './killTree'
  * must not pass.
  */
 export const CHILD_START_TIME_SLACK_MS = 5_000
-
-/** The engine process that wrote a record file. */
-interface EngineIdentity {
-  pid: number
-  /** Epoch ms the engine process started. With `pid`, tells this engine from a
-   *  later process that was handed the same number. */
-  startedAt: number
-  /** See `currentBootAt`. Every child in the file shares it: none can outlive a
-   *  reboot. */
-  bootAt: number
-  /** See `currentPidNamespace`. Its pids mean these processes only inside it.
-   *  Absent in a file that predates it, which the reap then leaves alone. */
-  pidNamespace?: string | null
-  /** See `currentInitStart`. On Linux it tells this run of the namespace from an
-   *  earlier one the kernel gave the same id. Absent in a file that predates
-   *  it, which a Linux reap then leaves alone. */
-  initStart?: number | null
-}
 
 export interface RuntimePidEntry {
   pid: number
@@ -113,13 +97,8 @@ const noop = (): void => {}
  */
 export function startRuntimePidRecord(): void {
   if (own) return
-  const owner: EngineIdentity = {
-    pid: process.pid,
-    startedAt: Math.round(Date.now() - process.uptime() * 1000),
-    bootAt: currentBootAt(),
-    pidNamespace: currentPidNamespace(),
-    initStart: currentInitStart(),
-  }
+  // The same identity the start marker names (see `currentEngineIdentity`).
+  const owner: EngineIdentity = currentEngineIdentity()
   // The start time is in the name so a later engine handed the same pid gets a
   // file of its own instead of overwriting this one.
   own = { file: path.join(runtimePidDir(), `${owner.pid}-${owner.startedAt}.json`), owner }
@@ -272,10 +251,8 @@ function engineStillRunning(owner: EngineIdentity, probe: StartTimes): boolean {
   // number, now certainly gone.
   if (owner.pid === process.pid) return false
   if (!isAlive(owner.pid)) return false
-  // The pid is held and nothing can say by whom. Assume the engine.
-  if (!probe.ok) return true
-  const startedAt = probe.times.get(owner.pid)
-  return startedAt !== undefined && Math.abs(startedAt - owner.startedAt) <= START_TIME_SLACK_MS
+  // The pid is held and nothing can say by whom (`unknown`): assume the engine.
+  return startTimeMatch(owner.pid, owner.startedAt, probe) !== 'different'
 }
 
 export interface RuntimeReapReport {
@@ -341,16 +318,12 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
   // is an EARLIER RUN of this namespace, whose processes all died with it. One
   // that does not say, or a host that cannot read its own, proves nothing, so
   // that file is left alone too.
-  const pidNamespace = deps.pidNamespace !== undefined ? deps.pidNamespace : currentPidNamespace()
-  const initStart = deps.initStart !== undefined ? deps.initStart : currentInitStart()
-  const platform = deps.platform ?? process.platform
-  const standing = (owner: EngineIdentity): 'ours' | 'foreign' | 'earlierRun' => {
-    if (owner.pidNamespace === undefined || owner.pidNamespace !== pidNamespace) return 'foreign'
-    if (platform !== 'linux') return 'ours'
-    if (linuxBootUnreadable({ pidNamespace, initStart }, platform)) return 'foreign'
-    if (typeof owner.initStart !== 'number') return 'foreign'
-    return owner.initStart === initStart ? 'ours' : 'earlierRun'
+  const here = {
+    pidNamespace: deps.pidNamespace !== undefined ? deps.pidNamespace : currentPidNamespace(),
+    initStart: deps.initStart !== undefined ? deps.initStart : currentInitStart(),
+    platform: deps.platform ?? process.platform,
   }
+  const standing = (owner: EngineIdentity) => engineStanding(owner, here)
 
   const now = Date.now()
   const bootAt = currentBootAt()

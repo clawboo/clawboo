@@ -392,6 +392,8 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
 // ─── Module singleton (boot wiring) ──────────────────────────────────────────
 
 let singleton: RoutinesTicker | null = null
+/** Stops the running ticker and what it follows; set while one runs. */
+let stopSingleton: (() => void) | null = null
 
 /** Boot the Routines ticker: boot-resume + an immediate due-pass + arm.
  *  Idempotent; `.unref()`'d timers never hold the process open. */
@@ -413,15 +415,24 @@ export function startRoutinesTicker(opts: { log: TickerLog; mcpBaseUrl: string |
     if (connection === 'connected') ticker.requestRescan()
   })
 
-  const stop = (): void => {
+  stopSingleton = (): void => {
     stopFollowingHold()
     stopFollowingPauses()
     stopFollowingGateway()
     ticker.stop()
     singleton = null
+    stopSingleton = null
   }
-  process.once('SIGTERM', stop)
-  process.once('SIGINT', stop)
+}
+
+/**
+ * Stop the ticker, for a stop of the server, so no routine starts a run while
+ * the server waits for its runs to end. Called by the server's graceful stop,
+ * not from a signal listener of its own (see `stopRegistry` in
+ * agentSource/registry.ts). Nothing when none runs.
+ */
+export function stopRoutinesTicker(): void {
+  stopSingleton?.()
 }
 
 export function getRoutinesTicker(): RoutinesTicker | null {

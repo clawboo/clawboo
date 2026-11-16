@@ -135,3 +135,9 @@ export function findListenerPid(port: number, deps: LookupDeps = {}): number | n
     return null
   }
 }
+
+// Process identity (is a recorded pid still the process we recorded?) and the
+// server's start marker. Here so the `clawboo` command and the server share one
+// copy: neither can import the other.
+export * from './identity'
+export * from './startMarker'

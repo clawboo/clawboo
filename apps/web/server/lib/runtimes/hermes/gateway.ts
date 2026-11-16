@@ -5,8 +5,9 @@
 // - Started on demand (a run, the Runtimes card, a jobs read) and at boot when
 //   Hermes is installed and Clawboo has Hermes agents, so their own scheduled
 //   jobs fire. Restarted with backoff when it exits on its own. Stopped with
-//   Clawboo: it is a registered runtime child, so shutdown stops it and the next
-//   boot reaps one a crash left behind.
+//   Clawboo, by its own planned stop (`stopForExit`), not the generic reap that
+//   SIGTERMs every other runtime child. Its pid is still in the durable record,
+//   so the next boot reaps one a crash left behind.
 // - Only the API server is on, on loopback, with a key from the vault. It starts
 //   with a short allow-listed environment, never the server's own, so no chat
 //   token in the operator's shell can turn a Hermes channel on, and no Clawboo
@@ -25,12 +26,13 @@ import path from 'node:path'
 
 import { createLogger } from '@clawboo/logger'
 
+import { isWindows } from '../../platform'
 import { isLoopbackPortFree } from '../../portUtils'
 import { getRuntimeSecret, runtimeVaultReadable, setRuntimeSecret } from '../../secretsVault'
-import { killProcessTree } from '../killTree'
+import { killProcessTree, killProcessTreeNow } from '../killTree'
 import { isAgentPoolMode } from '../../agentUser/config'
 import { isAgentUserMode, spawnAgentProcess } from '../spawner'
-import { isSubprocessShutdown, registerRuntimeChild, unregisterRuntimeChild } from '../subprocess'
+import { isSubprocessShutdown, recordRuntimeChildPid } from '../subprocess'
 import { createHermesClient, type HermesClient } from './client'
 import { gatewayPortOwner, type PortOwner } from './portOwner'
 import { derivedHermesKey, hermesGatewayHome, provisionGatewayHome } from './profiles'
@@ -53,6 +55,19 @@ const HEALTH_POLL_MS = 500
 /** How long a planned stop waits after SIGINT before killing the tree. Hermes
  *  drains API runs for up to 30 s and forces its own exit by about 60 s. */
 const STOP_GRACE_MS = 40_000
+/**
+ * When Clawboo itself stops, how long the gateway gets after SIGINT before its
+ * tree is killed: `CLAWBOO_HERMES_STOP_GRACE_MS`, 5 s by default and never more
+ * than 8 s. The cap keeps the whole shutdown (this wait, then up to
+ * `EXIT_KILL_WAIT_MS` after the kill) near 9 s, well inside the 15 s an app that
+ * runs Clawboo may give a stop. An idle Hermes 0.23.1 stops in about a second:
+ * its chat drain is 0 s, and only cron jobs and API runs still going hold it, for
+ * up to 30 s (`agent.cron_drain_timeout`), which this cuts short.
+ */
+export const EXIT_GRACE_DEFAULT_MS = 5_000
+export const EXIT_GRACE_MAX_MS = 8_000
+/** After the SIGKILL at exit, how long to wait for the process to go. */
+const EXIT_KILL_WAIT_MS = 1_000
 /** Waits between restarts after unplanned exits, in order; the last repeats. */
 const RESTART_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000, 60_000]
 /** Up this long, a gateway's earlier crashes are forgiven. */
@@ -220,6 +235,42 @@ function preferredPortFromEnv(): number {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
+/** Whether `p` settles within `ms`. The timer is cleared when it does, so a
+ *  settled wait holds the event loop open no longer. */
+function settlesWithin(p: Promise<void>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms)
+    void p.then(() => {
+      clearTimeout(timer)
+      resolve(true)
+    })
+  })
+}
+
+/**
+ * `CLAWBOO_HERMES_STOP_GRACE_MS`, read for a stop of the server: milliseconds,
+ * 0 to `EXIT_GRACE_MAX_MS`. Larger values are cut to the cap; anything that is
+ * not a number of 0 or more means the default.
+ */
+export function hermesExitGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env['CLAWBOO_HERMES_STOP_GRACE_MS']?.trim()
+  if (!raw) return EXIT_GRACE_DEFAULT_MS
+  const ms = Number(raw)
+  if (!Number.isFinite(ms) || ms < 0) return EXIT_GRACE_DEFAULT_MS
+  return Math.min(Math.round(ms), EXIT_GRACE_MAX_MS)
+}
+
+/** How a stop at server exit ended. */
+export type HermesExitOutcome =
+  /** No gateway process was running. */
+  | 'not-running'
+  /** It exited after SIGINT, within the grace. */
+  | 'stopped'
+  /** The grace ran out, and it exited after its tree was killed. */
+  | 'killed'
+  /** Killed, and still not gone when the wait after the kill ran out. */
+  | 'still-running'
+
 export class HermesGatewaySupervisor {
   private proc: ChildProcess | null = null
   private state: HermesGatewayState = 'stopped'
@@ -232,6 +283,8 @@ export class HermesGatewaySupervisor {
   private stderrTail = ''
   private starting: Promise<HermesGatewayConnection> | null = null
   private stopping = false
+  /** Set once the server has begun to exit: no gateway starts after it. */
+  private exiting = false
   private stopInFlight: Promise<void> | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private masterKey: string | null = null
@@ -378,6 +431,75 @@ export class HermesGatewaySupervisor {
     this.state = 'stopped'
   }
 
+  /**
+   * The server is exiting. SIGINT the gateway process alone (not its tree:
+   * Hermes stops its own tools and MCP servers in its planned stop), wait up to
+   * `graceMs` for it to exit, then SIGKILL its tree and wait up to
+   * `EXIT_KILL_WAIT_MS`. Never a SIGTERM, which Hermes reads as a crash. Once it
+   * has exited, whatever is left in its process group is killed too, as the
+   * generic reap did, so nothing it started outlives the server.
+   *
+   * Unlike `stop()` it never waits for a start under way, which can take two
+   * minutes: a gateway already spawned is stopped now, and one not yet spawned
+   * never is (`exiting`). With no gateway process it returns at once.
+   *
+   * On Windows Node has no SIGINT to send (it ends the process at once and
+   * leaves its children), so the tree is killed there as before.
+   */
+  async stopForExit(graceMs: number): Promise<HermesExitOutcome> {
+    this.exiting = true
+    this.stopping = true
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    const proc = this.proc
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
+      this.state = 'stopped'
+      return 'not-running'
+    }
+    const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()))
+    if (isWindows) {
+      killProcessTreeNow(proc)
+      return (await settlesWithin(exited, EXIT_KILL_WAIT_MS)) ? 'killed' : 'still-running'
+    }
+    try {
+      proc.kill('SIGINT')
+    } catch {
+      // Gone already: the wait below settles at once.
+    }
+    if (await settlesWithin(exited, graceMs)) {
+      killProcessTreeNow(proc)
+      return 'stopped'
+    }
+    log.warn({ pid: proc.pid, graceMs }, 'hermes gateway did not stop in time; killing it')
+    // The SIGKILL fallback, sent at once: the grace was the wait.
+    killProcessTreeNow(proc)
+    return (await settlesWithin(exited, EXIT_KILL_WAIT_MS)) ? 'killed' : 'still-running'
+  }
+
+  /**
+   * The synchronous last resort (a `process.exit` from anywhere but the stop):
+   * nothing can wait, so the gateway only gets its SIGINT and finishes its
+   * planned stop on its own. A no-op once it has exited.
+   */
+  signalForExit(): void {
+    this.exiting = true
+    this.stopping = true
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    const proc = this.proc
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return
+    try {
+      if (isWindows) killProcessTreeNow(proc)
+      else proc.kill('SIGINT')
+    } catch {
+      // Gone already.
+    }
+  }
+
   async restart(): Promise<HermesGatewayConnection> {
     await this.stop()
     this.crashes = 0
@@ -460,6 +582,8 @@ export class HermesGatewaySupervisor {
   }
 
   private spawnGateway(command: string, home: string): void {
+    // The server is going: a gateway spawned now would outlive it.
+    if (this.exiting || isSubprocessShutdown()) throw new Error('Clawboo is stopping.')
     this.stderrTail = ''
     const spawn = this.deps.spawn ?? spawnAgentProcess
     const proc = spawn({
@@ -474,7 +598,10 @@ export class HermesGatewaySupervisor {
     })
     this.proc = proc
     this.lastExitCode = null
-    registerRuntimeChild(proc)
+    // In the durable pid record, so the next boot reaps a gateway a crash left
+    // behind, but NOT in the generic shutdown reap, which SIGTERMs its whole
+    // tree first: Hermes reads that as a crash. `stopForExit` stops it instead.
+    recordRuntimeChildPid(proc)
     if (proc.pid) {
       try {
         this.deps.onStarted?.(proc.pid)
@@ -491,7 +618,6 @@ export class HermesGatewaySupervisor {
       this.lastError = `Hermes could not be started: ${err.message}`
     })
     proc.once('exit', (code, signal) => {
-      unregisterRuntimeChild(proc)
       if (this.proc !== proc) return
       this.lastExitCode = code
       this.proc = null
