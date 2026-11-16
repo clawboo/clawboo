@@ -77,6 +77,12 @@ const INITIAL: LiveScreenState = {
   error: null,
 }
 
+/** The view ended for good. It holds nothing now: a take over it had is not
+ *  shown, and no key or click is captured for a screen it can no longer reach. */
+function endedFor(s: LiveScreenState, reason: string): LiveScreenState {
+  return { ...s, status: 'ended', endedReason: reason, control: 'agent', canControl: false }
+}
+
 function request(
   target: LiveScreenTarget,
   path: string,
@@ -249,15 +255,14 @@ export function useLiveScreen(
         case 'renew':
           renewNow = true
           break
-        case 'end':
+        case 'end': {
           stopped = true
-          setState((s) => ({
-            ...s,
-            status: 'ended',
-            endedReason:
-              typeof data['reason'] === 'string' ? data['reason'] : 'The live view ended.',
-          }))
+          viewerId.current = null
+          const reason =
+            typeof data['reason'] === 'string' ? data['reason'] : 'The live view ended.'
+          setState((s) => endedFor(s, reason))
           break
+        }
       }
     }
 
@@ -271,13 +276,13 @@ export function useLiveScreen(
         if (res.status === 401 || res.status === 403 || res.status === 404) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null
           stopped = true
-          setState((s) => ({
-            ...s,
-            status: 'ended',
-            endedReason: body?.error
-              ? refusalText(body, res.status)
-              : 'This live view is not available.',
-          }))
+          // A renewal refused while this view held control (the proxy stopped
+          // vouching for the person): no more input goes with this view's id.
+          viewerId.current = null
+          const reason = body?.error
+            ? refusalText(body, res.status)
+            : 'This live view is not available.'
+          setState((s) => endedFor(s, reason))
           return
         }
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)

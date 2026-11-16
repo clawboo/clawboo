@@ -98,10 +98,15 @@ function mockRes() {
   return { res, status: () => code, body: () => payload as Record<string, unknown> }
 }
 
+/** Every stream a test opened, so teardown can close them: a live stream's
+ *  heartbeat and renewal timers stop only on its 'close'. */
+const streams: EventEmitter[] = []
+
 /** A response a live view can stream into. `gone`: its connection went before
  *  the route ran, so it is destroyed and never emits 'close' again. */
 function streamRes(opts: { gone?: boolean } = {}) {
   const em = new EventEmitter()
+  streams.push(em)
   const chunks: string[] = []
   let status = 0
   let ended = false
@@ -231,6 +236,9 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  // Before the clock or the database goes: a heartbeat left running would read
+  // the database from a later test, or from no sandbox at all.
+  for (const s of streams.splice(0)) s.emit('close')
   vi.useRealTimers()
   resetLiveViewForTests()
   resetControlForTests()
@@ -363,6 +371,22 @@ describe('verified: every screen route needs a verified person', () => {
     computerLiveGET(req({ params: A1, person: ADA, hdrs: { 'x-clawboo-viewer': id } }), again.res)
     expect(again.viewerId()).toBe(id)
     expect(type(id, { person: ADA }).status()).toBe(200)
+  })
+
+  it('a renewal lets go of a key the person held, rather than leave it down', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] })
+    const id = watch({ person: ADA }).viewerId()
+    expect(take(id, { person: ADA }).status()).toBe(200)
+    expect(type(id, { person: ADA }).status()).toBe(200)
+    vi.advanceTimersByTime(VERIFIED_STREAM_MS + 1_000)
+    const again = streamRes()
+    computerLiveGET(req({ params: A1, person: ADA, hdrs: { 'x-clawboo-viewer': id } }), again.res)
+    expect(again.viewerId()).toBe(id)
+    expect(release(id, { person: ADA }).status()).toBe(200)
+    expect(rfb.keys).toEqual([
+      [97, true],
+      [97, false],
+    ])
   })
 
   it('opens no view for a connection that went before the route ran', () => {

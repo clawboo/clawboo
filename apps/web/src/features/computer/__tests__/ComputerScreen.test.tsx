@@ -269,6 +269,35 @@ describe('ComputerScreen behind a sign-in proxy', () => {
     expect(headers['x-clawboo-viewer']).toBe('v-1')
   })
 
+  it('drops control when a renewal is refused, and captures no more keys', async () => {
+    await openOnDisplay()
+    send('control', { state: 'you', canControl: true })
+    await screen.findByRole('button', { name: 'Hand back' })
+    calls.live = { status: 403, body: { ok: false, error: 'person_only' } }
+    send('renew', { afterMs: 0 })
+    act(() => calls.close!())
+    expect(await screen.findByText(/needs a person your sign-in proxy signed in/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Hand back' })).toBeNull()
+    expect(screen.queryByLabelText(/You have control/)).toBeNull()
+    const canvas = screen.getByLabelText("The agent's screen")
+    expect(canvas.tabIndex).toBe(-1)
+    // Tab stays with the page (not cancelled), and nothing goes to the agent.
+    expect(fireEvent.keyDown(canvas, { key: 'Tab', code: 'Tab' })).toBe(true)
+    fireEvent.keyDown(canvas, { key: 'a', code: 'KeyA' })
+    await new Promise((r) => setTimeout(r, 80))
+    expect(calls.list.some((c) => c.path.endsWith('/computer/input'))).toBe(false)
+  })
+
+  it('drops control when the server ends the view for good', async () => {
+    await openOnDisplay()
+    send('control', { state: 'you', canControl: true })
+    await screen.findByRole('button', { name: 'Hand back' })
+    send('end', { reason: 'This agent is gone.' })
+    expect(await screen.findByText('This agent is gone.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Hand back' })).toBeNull()
+    expect(screen.queryByLabelText(/You have control/)).toBeNull()
+  })
+
   it("a link sends this address's cookies, so a sign-in proxy can tell who it is", async () => {
     render(<ComputerScreen target={{ kind: 'link', token: 'cbcl_x' }} />)
     await waitFor(() => expect(calls.push).not.toBeNull())

@@ -488,6 +488,11 @@ function closeViewer(v: Viewer): void {
   const hub = hubs.get(v.agentId)
   if (!hub || !hub.viewers.delete(v)) return
   totalViewers -= 1
+  // The view in control went (a renewal, a dropped connection), or the last one
+  // did: nothing can send the release for what it held, a held key repeats on
+  // the agent's screen meanwhile, and a new hub would not know it was held. Let
+  // go now, while the display is still at hand.
+  if (controllerOf(v.agentId)?.viewerId === v.id || hub.viewers.size === 0) letGoOfInput(hub)
   viewerDetached(v.agentId, v.id)
   if (hub.viewers.size === 0) {
     stopBrowserPolling(hub)
