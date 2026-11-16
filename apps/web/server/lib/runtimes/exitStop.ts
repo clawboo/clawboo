@@ -8,10 +8,11 @@
 //   `CLAWBOO_HERMES_STOP_GRACE_MS` (5 s by default, never more than 8 s) to
 //   exit, then SIGKILL and up to 1 s more.
 //
-// The two waits run AT THE SAME TIME, so the whole stop takes the longer of
-// them (about 9 s at most), not their sum: well inside the 15 s an app that
-// runs Clawboo may allow a stop before it ends the process. With no gateway
-// started the Hermes side waits for nothing.
+// The two waits run AT THE SAME TIME, so this part of the stop takes the
+// longer of them (about 9 s at most), not their sum; with the trace flush after
+// it (`stopServerParts`) the stop stays inside the 15 s an app that runs
+// Clawboo may allow before it ends the process. With no gateway started the
+// Hermes side waits for nothing.
 
 import { stopHermesGatewayForExit } from './hermes'
 import { shutdownLiveSubprocesses } from './subprocess'

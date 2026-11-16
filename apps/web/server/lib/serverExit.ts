@@ -9,9 +9,12 @@
 //    killed as it registered, and leave its task claimed until the next boot.
 // 2. Then, side by side, each bounded: close the OpenClaw connection; stop
 //    every runtime child and give the Hermes gateway its planned stop
-//    (`stopRuntimesForExit`, about 9 s at most); flush the trace exporter (2 s
-//    at most). The whole wait is the longest of them, well inside the 15 s an
-//    app that runs Clawboo may allow a stop.
+//    (`stopRuntimesForExit`, about 9 s at most).
+// 3. Then flush the trace exporter (2 s at most). Only after the runtimes: a
+//    run those stops end closes its span as its process exits, and the trace
+//    SDK drops a span that ends once its shutdown has begun. The whole wait is
+//    about 11 s at most, inside the 15 s an app that runs Clawboo may allow a
+//    stop.
 //
 // Each of these parts used to stop itself from a `process.once('SIGTERM')` of
 // its own. The OpenClaw registry wired one at module load, so a SIGTERM sent
@@ -52,5 +55,6 @@ export async function stopServerParts(log: ExitStopLog, opts: ExitStopOptions = 
       log.warn({ err, part }, 'Failed to stop a part of the server on shutdown (non-fatal)')
     }
   }
-  await Promise.all([stopRegistry(), stopRuntimesForExit(log, opts), shutdownOtel()])
+  await Promise.all([stopRegistry(), stopRuntimesForExit(log, opts)])
+  await shutdownOtel()
 }

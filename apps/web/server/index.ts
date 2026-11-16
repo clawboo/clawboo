@@ -1442,11 +1442,12 @@ async function main() {
   // bounded (SHUTDOWN_WAIT_MS) so a hung child can never block the exit, and it
   // never throws.
   //
-  // The Hermes gateway's planned stop runs AT THE SAME TIME, not after, and so do
-  // closing the OpenClaw connection and flushing traces, after the parts that
-  // start work are stopped (see `stopServerParts`): the whole wait stays under
-  // about 9 s, well inside the 15 s an app that runs Clawboo may allow a stop.
-  // With no gateway started it waits for nothing.
+  // The Hermes gateway's planned stop runs AT THE SAME TIME, not after, and so
+  // does closing the OpenClaw connection, after the parts that start work are
+  // stopped; traces are flushed last, so the spans of the runs those stops end
+  // are kept (see `stopServerParts`). The whole wait stays under about 11 s,
+  // inside the 15 s an app that runs Clawboo may allow a stop. With no gateway
+  // started and no trace exporter it waits for nothing.
   const gracefulExit = async (): Promise<void> => {
     await stopServerParts(log)
     cleanup()

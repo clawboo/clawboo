@@ -9,6 +9,7 @@ import {
   currentEngineIdentity,
   engineStanding,
   pidExists,
+  processStartTimes,
   START_TIME_SLACK_MS,
   startTimeMatch,
 } from '../index'
@@ -73,4 +74,24 @@ describe('currentEngineIdentity', () => {
     expect(Math.abs(me.startedAt - (Date.now() - process.uptime() * 1000))).toBeLessThan(1_000)
     expect(me.bootAt % 10_000).toBe(0)
   })
+})
+
+describe('processStartTimes', () => {
+  it.skipIf(process.platform === 'win32')(
+    "reads this process's real start time whatever time zone it runs in",
+    () => {
+      const saved = process.env['TZ']
+      process.env['TZ'] = 'Asia/Kathmandu'
+      try {
+        const got = processStartTimes([process.pid])
+        expect(got.ok).toBe(true)
+        const startedAt = got.times.get(process.pid)
+        // `ps` reports whole seconds.
+        expect(Math.abs(startedAt! - currentEngineIdentity().startedAt)).toBeLessThan(2_000)
+      } finally {
+        if (saved === undefined) delete process.env['TZ']
+        else process.env['TZ'] = saved
+      }
+    },
+  )
 })

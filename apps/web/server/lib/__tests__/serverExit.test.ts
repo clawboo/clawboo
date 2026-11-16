@@ -148,6 +148,56 @@ describe('the graceful stop', () => {
     expect(ticker.getRoutinesTicker()).toBeNull()
   })
 
+  it('flushes traces only once the runtime stops are done, so their spans are kept', async () => {
+    // The runtime stop, held open until the test lets it end.
+    let endRuntimes!: () => void
+    const runtimesStopped = new Promise<void>((resolve) => {
+      endRuntimes = resolve
+    })
+    vi.doMock('../runtimes/exitStop', () => ({ stopRuntimesForExit: () => runtimesStopped }))
+    const shutdown = vi.fn(async () => undefined)
+    vi.doMock('@opentelemetry/sdk-node', () => ({
+      NodeSDK: class {
+        start(): void {}
+        shutdown = shutdown
+      },
+      api: {
+        trace: {
+          getTracer: () => ({ startActiveSpan: () => undefined }),
+          setSpanContext: () => ({}),
+        },
+        context: { active: () => ({}) },
+        SpanStatusCode: { ERROR: 2 },
+        TraceFlags: { SAMPLED: 1 },
+      },
+    }))
+    vi.doMock('@opentelemetry/exporter-trace-otlp-http', () => ({
+      OTLPTraceExporter: class {},
+    }))
+    vi.stubEnv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://127.0.0.1:9')
+    try {
+      const otel = await import('../obs/otel')
+      await otel.initOtel()
+      expect(otel.getObsTracer()).not.toBeNull()
+      const { stopServerParts } = await import('../serverExit')
+      let done = false
+      const stopping = stopServerParts(log()).then(() => {
+        done = true
+      })
+      await new Promise((r) => setTimeout(r, 50))
+      // A run the runtime stop ends closes its span while that stop waits.
+      expect(shutdown).not.toHaveBeenCalled()
+      expect(done).toBe(false)
+      endRuntimes()
+      await stopping
+      expect(shutdown).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.doUnmock('../runtimes/exitStop')
+      vi.doUnmock('@opentelemetry/sdk-node')
+      vi.doUnmock('@opentelemetry/exporter-trace-otlp-http')
+    }
+  })
+
   it('waits for nothing when no part was ever started', async () => {
     const { stopServerParts } = await import('../serverExit')
     const t0 = performance.now()

@@ -209,6 +209,22 @@ describe('removeStartMarkerIfOwned', () => {
     expect(JSON.parse(fs.readFileSync(getStartMarkerPath(), 'utf8'))).toEqual(other)
   })
 
+  it('leaves a marker another server with the same pid wrote (two containers sharing the folder)', () => {
+    writeStartMarker(18790, '0.9.0')
+    const mine = JSON.parse(fs.readFileSync(getStartMarkerPath(), 'utf8'))
+    // The other container's server is pid 1 too, in its own PID namespace run.
+    const other = {
+      ...mine,
+      port: 18791,
+      startedAt: mine.startedAt + 5_000,
+      pidNamespace: 'pid:[4026532999]',
+      initStart: 987_654,
+    }
+    fs.writeFileSync(getStartMarkerPath(), JSON.stringify(other))
+    removeStartMarkerIfOwned()
+    expect(JSON.parse(fs.readFileSync(getStartMarkerPath(), 'utf8'))).toEqual(other)
+  })
+
   it('leaves a marker it cannot read, and does not throw when there is none', () => {
     fs.writeFileSync(getStartMarkerPath(), 'garbage')
     removeStartMarkerIfOwned()

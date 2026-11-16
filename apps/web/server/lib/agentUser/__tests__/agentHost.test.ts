@@ -8,7 +8,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { childEnvFor } from '../../../agentHost/host'
-import { killProcessTree } from '../../runtimes/killTree'
+import { killProcessTree, killProcessTreeNow } from '../../runtimes/killTree'
 import { AgentHostError } from '../client'
 import { AGENT_HOST_PROTOCOL_VERSION, encodeFrame } from '../protocol'
 import {
@@ -149,6 +149,44 @@ describe.runIf(posix)('agent host protocol', () => {
       }
     }
     expect(alive).toBe(false)
+  })
+
+  /** A process the host runs (`sleep`, in its own group or not), and how it exits. */
+  async function sleeper(group: boolean): Promise<{
+    p: ReturnType<InProcessHost['client']['spawn']>
+    exit: Promise<[number | null, NodeJS.Signals | null]>
+  }> {
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: ['-c', 'exec sleep 30'],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group,
+    })
+    const exit = new Promise<[number | null, NodeJS.Signals | null]>((resolve) =>
+      p.once('exit', (code: number | null, signal: NodeJS.Signals | null) =>
+        resolve([code, signal]),
+      ),
+    )
+    await new Promise<void>((resolve) => p.once('spawn', () => resolve()))
+    return { p, exit }
+  }
+
+  it.each([true, false])(
+    'kills at once and sends no SIGTERM first when asked with no grace (group: %s)',
+    async (group) => {
+      // The exit stop's kill of the Hermes gateway, which reads a SIGTERM as a
+      // crash: a SIGTERM first would end `sleep` with SIGTERM, not SIGKILL.
+      const { p, exit } = await sleeper(group)
+      killProcessTreeNow(p)
+      expect(await exit).toEqual([null, 'SIGKILL'])
+    },
+  )
+
+  it('still sends SIGTERM first when asked with a grace', async () => {
+    const { p, exit } = await sleeper(true)
+    p.killTree(2_000)
+    expect(await exit).toEqual([null, 'SIGTERM'])
   })
 
   /** A group whose leader has closed while a member with output of its own

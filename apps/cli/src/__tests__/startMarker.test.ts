@@ -24,6 +24,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as lifecycle from '../lifecycle'
 import { startListening } from './startListening'
 
+// The start-time probe the CLI uses, which one case below shifts: the pid of a
+// server that died, handed to a process that started later.
+const probe = vi.hoisted(() => ({ shiftMs: 0 }))
+vi.mock('@clawboo/process-lookup', async (orig) => {
+  const real = await orig<typeof import('@clawboo/process-lookup')>()
+  return {
+    ...real,
+    startTimesReader: (windowsTimeoutMs: number) => {
+      const read = real.startTimesReader(windowsTimeoutMs)
+      return (safe: readonly number[]) => {
+        const got = read(safe)
+        if (probe.shiftMs === 0) return got
+        const times = new Map([...got.times].map(([pid, t]) => [pid, t + probe.shiftMs]))
+        return { ...got, times }
+      }
+    },
+  }
+})
+
 const TOKEN = 'test-token-5678'
 const GATE_401 = {
   error: 'Clawboo access token required. Open /?access_token=<token> once to set a cookie.',
@@ -39,6 +58,7 @@ beforeEach(() => {
   vi.stubEnv('CLAWBOO_API_PORT', '')
   vi.stubEnv('STUDIO_ACCESS_TOKEN', TOKEN)
   lifecycle.resetMarkerCheckForTests?.()
+  probe.shiftMs = 0
 })
 afterEach(async () => {
   for (const close of closers.splice(0)) await close()
@@ -133,6 +153,19 @@ describe('the access token and the start marker', () => {
     expect((await lifecycle.discoverDashboard()).port).toBeNull()
     expect(gated.cookies).not.toContain(withToken)
     expect(lifecycle.readRecordedPort().trust).toBe('stale')
+  })
+
+  it('checks a running server again on each request, so a pid reused mid-command gets no token', async () => {
+    const gated = await gatedDashboard()
+    recordPort(gated.port)
+    writeMarker(liveMarker(gated.port))
+    expect(lifecycle.readRecordedPort().trust).toBe('verified')
+    // The server dies hard (both files stay) and its pid goes to a process that
+    // started an hour later, which takes the port too.
+    probe.shiftMs = 3_600_000
+    expect(lifecycle.readRecordedPort().trust).toBe('stale')
+    expect((await lifecycle.discoverDashboard()).port).toBeNull()
+    expect(gated.cookies).not.toContain(withToken)
   })
 
   it('falls back to the port file alone when there is no marker, as before it', async () => {

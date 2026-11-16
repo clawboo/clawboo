@@ -31,7 +31,6 @@ import {
   API_PORT_FILE,
   checkStartMarker,
   findListenerPid,
-  pidExists,
   readPortRecord,
   START_MARKER_FILE,
   startTimesReader,
@@ -418,22 +417,23 @@ const MARKER_PROBE_WINDOWS_TIMEOUT_MS = 8_000
 let markerChecked: { key: string; check: MarkerCheck } | null = null
 
 /**
- * Check a start marker once per command. The start-time probe is a process
- * start (on Windows, PowerShell), and the token rule asks on every request.
- * Whether its pid still exists is read again every time, so a server that dies
- * while the command runs reads as gone.
+ * Check a start marker. A `gone` or `unknown` verdict is kept for the rest of
+ * the command, so a probe that is slow or cannot run (on Windows, a PowerShell
+ * start) is not paid again on every request. A `running` verdict is checked in
+ * full again each time, start time included: a server that dies while the
+ * command runs can have its pid handed to another process, which a check of
+ * the pid alone would take for the server.
  */
-function checkMarkerOnce(marker: StartMarker): MarkerCheck {
+function checkMarkerCached(marker: StartMarker): MarkerCheck {
   const key = JSON.stringify(marker)
-  if (markerChecked?.key !== key) {
-    markerChecked = {
-      key,
-      check: checkStartMarker(marker, {
-        startTimes: startTimesReader(MARKER_PROBE_WINDOWS_TIMEOUT_MS),
-      }),
-    }
-  } else if (markerChecked.check.verdict === 'running' && !pidExists(marker.pid)) {
-    markerChecked = { key, check: { verdict: 'gone', reason: `no process has pid ${marker.pid}` } }
+  if (markerChecked?.key === key && markerChecked.check.verdict !== 'running') {
+    return markerChecked.check
+  }
+  markerChecked = {
+    key,
+    check: checkStartMarker(marker, {
+      startTimes: startTimesReader(MARKER_PROBE_WINDOWS_TIMEOUT_MS),
+    }),
   }
   return markerChecked.check
 }
@@ -455,7 +455,7 @@ export function resetMarkerCheckForTests(): void {
  *   any program may hold its port now. Nothing trusts it.
  */
 export function readRecordedPort(): PortRecord {
-  return readPortRecord(resolveClawbooDir(), checkMarkerOnce)
+  return readPortRecord(resolveClawbooDir(), checkMarkerCached)
 }
 
 export function readRuntimePort(): number | null {
@@ -1260,9 +1260,12 @@ export type StopOutcome =
   | { status: 'still-alive'; port: number; pid: number }
 
 const TERM_POLL_MS = 100
-/** 4 s. The server's SIGTERM handler opens a fresh SQLite connection to run
- *  `wal_checkpoint(TRUNCATE)`, which is not instant on a large board. */
-const TERM_POLL_ATTEMPTS = 40
+/** 15 s. The server keeps its port while its stop runs, which takes up to
+ *  about 11 s (the Hermes gateway's planned stop, up to 8 s and then 1 s after
+ *  its kill, then up to 2 s to flush traces), and then opens a fresh SQLite
+ *  connection to run `wal_checkpoint(TRUNCATE)`, which is not instant on a
+ *  large board. A SIGKILL sooner would cut that stop short. */
+const TERM_POLL_ATTEMPTS = 150
 /** 2 s. After SIGKILL we are only waiting on the OS to release the socket. */
 const KILL_POLL_ATTEMPTS = 20
 

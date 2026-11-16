@@ -200,11 +200,13 @@ function probeError(err: unknown): string {
  * died in the meantime is left out of the answer.
  *
  * On POSIX, `lstart` rather than `etimes`: the latter is Linux-only and macOS
- * rejects it. `ps` formats `lstart` in the user's locale, and `Date.parse` cannot
- * read most month names outside English (a German "Okt." or "Dez."), so it runs
- * under the C locale. On Windows there is no `ps`, so PowerShell reports the
- * same fact, emitted as a round-trip ISO string so parsing does not depend on
- * the machine's locale.
+ * rejects it. `ps` formats `lstart` in the user's locale, and most month names
+ * outside English (a German "Okt." or "Dez.") cannot be read, so it runs under
+ * the C locale. It also formats it in local time with no offset, and in the
+ * hour a DST change repeats, two start times an hour apart print the same, so
+ * it runs in UTC and is read as UTC. On Windows there is no `ps`, so
+ * PowerShell reports the same fact, emitted as a round-trip ISO string so
+ * parsing does not depend on the machine's locale.
  */
 export function processStartTimes(
   pids: readonly number[],
@@ -232,6 +234,19 @@ export function startTimesReader(
   windowsTimeoutMs: number,
 ): (safe: readonly number[]) => StartTimes {
   return (safe) => readStartTimes(safe, windowsTimeoutMs)
+}
+
+const LSTART_MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')
+
+/** `ps`'s `lstart` under the C locale and `TZ=UTC0` (`Mon Nov 16 20:04:01 2026`),
+ *  as epoch ms. NaN for anything else. */
+function parseUtcLstart(text: string): number {
+  const m = text
+    .trim()
+    .match(/^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})$/)
+  const month = m ? LSTART_MONTHS.indexOf(m[1]!) : -1
+  if (!m || month === -1) return NaN
+  return Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]))
 }
 
 function readStartTimes(
@@ -263,7 +278,7 @@ function readStartTimes(
     } else {
       const raw = execFileSync('ps', ['-o', 'pid=,lstart=', '-p', safe.join(',')], {
         encoding: 'utf8',
-        env: { ...process.env, LC_ALL: 'C' },
+        env: { ...process.env, LC_ALL: 'C', TZ: 'UTC0' },
         // Captured, not inherited: telling "none exist" from an error reads it.
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 10_000,
@@ -275,7 +290,7 @@ function readStartTimes(
         const space = trimmed.indexOf(' ')
         if (space === -1) continue
         const id = Number(trimmed.slice(0, space))
-        const parsed = Date.parse(trimmed.slice(space + 1).trim())
+        const parsed = parseUtcLstart(trimmed.slice(space + 1))
         if (Number.isInteger(id) && Number.isFinite(parsed)) times.set(id, parsed)
       }
     }

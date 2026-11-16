@@ -274,7 +274,7 @@ In releases after 0.8.0: when Clawboo stops, how long the Hermes gateway gets to
 - Default: `5000`
 - Example: `CLAWBOO_HERMES_STOP_GRACE_MS=3000`
 
-The cap is 8000: a larger value means 8000. It keeps a stop of Clawboo to about 9 seconds in all (this wait, then up to a second after the kill, alongside the 5-second wait for other runtime processes), inside the time an app that runs Clawboo, or a service manager, typically allows before it ends the process. Any value that is not a number of 0 or more means the default. It does not change a stop from the **Hermes** row, which waits 40 seconds. On Windows it has no effect: the gateway ends at once. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+The cap is 8000: a larger value means 8000. It keeps a stop of Clawboo to about 9 seconds in all (this wait, then up to a second after the kill, alongside the 5-second wait for other runtime processes), plus up to 2 seconds to flush traces when you export them, inside the time an app that runs Clawboo, or a service manager, typically allows before it ends the process. Any value that is not a number of 0 or more means the default. It does not change a stop from the **Hermes** row, which waits 40 seconds. On Windows it has no effect: the gateway ends at once. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
 
 ## Folders
 

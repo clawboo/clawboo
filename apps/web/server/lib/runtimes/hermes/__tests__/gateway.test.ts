@@ -26,8 +26,13 @@ vi.mock('../../subprocess', () => ({
   recordRuntimeChildPid: () => undefined,
   isSubprocessShutdown: () => false,
 }))
+/** Calls of killProcessTree, which sends SIGTERM first (a crash to Hermes). */
+const treeKills = vi.hoisted(() => ({ count: 0 }))
 vi.mock('../../killTree', () => ({
-  killProcessTree: (p: { kill: (s: string) => void }) => p.kill('SIGKILL'),
+  killProcessTree: (p: { kill: (s: string) => void }) => {
+    treeKills.count += 1
+    p.kill('SIGKILL')
+  },
   killProcessTreeNow: (p: FakeProcLike) => {
     if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL')
     else p.sweeps = (p.sweeps ?? 0) + 1
@@ -452,6 +457,24 @@ describe('HermesGatewaySupervisor', () => {
       healthy = true
       await expect(gw.ensureRunning()).rejects.toThrow(/Clawboo is stopping/)
       expect(procs).toHaveLength(1)
+    })
+
+    it('a start that times out during the grace leaves the gateway to the exit stop (no SIGTERM)', async () => {
+      healthy = false
+      const gw = make({ startTimeoutMs: 300 })
+      const startFailure = gw.ensureRunning().then(
+        () => null,
+        (err: unknown) => err,
+      )
+      for (let i = 0; i < 100 && procs.length === 0; i++) await new Promise((r) => setTimeout(r, 5))
+      expect(procs).toHaveLength(1)
+      procs[0]!.drainMs = 60_000
+      treeKills.count = 0
+      // The start's deadline passes while the exit stop waits out its grace.
+      expect(await gw.stopForExit(1_000)).toBe('killed')
+      expect(await startFailure).toBeInstanceOf(Error)
+      expect(treeKills.count).toBe(0)
+      expect(procs[0]!.signals).toEqual(['SIGINT', 'SIGKILL'])
     })
 
     it('on Windows, where Node has no SIGINT to send, kills the tree at once', async () => {

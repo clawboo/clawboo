@@ -188,6 +188,9 @@ export function writeApiPortFile(port: number): boolean {
   }
 }
 
+/** The marker this process wrote, which is the only one its exit removes. */
+let writtenMarker: StartMarker | null = null
+
 /**
  * Write the start marker for this process on `port`. Never throws; false when
  * it did not land. Called right after `writeApiPortFile`.
@@ -216,6 +219,7 @@ export function writeStartMarker(port: number, version: string): boolean {
       fs.writeFileSync(file, body, 'utf8')
       fs.rmSync(tmp, { force: true })
     }
+    writtenMarker = marker
     return true
   } catch {
     try {
@@ -228,14 +232,26 @@ export function writeStartMarker(port: number, version: string): boolean {
 }
 
 /**
- * Remove the start marker only when it names THIS process. Another server (a
- * second instance, or a restart successor that has already written its own)
- * may have replaced it, and removing that one would leave a running server
- * with no marker.
+ * Remove the start marker only when it is still the one THIS process wrote.
+ * Another server (a second instance, or a restart successor that has already
+ * written its own) may have replaced it, and removing that one would leave a
+ * running server with no marker. The pid alone does not say: two containers
+ * that share the folder each run their server as pid 1, so the start time,
+ * boot and PID namespace run must match too.
  */
 export function removeStartMarkerIfOwned(): void {
+  const mine = writtenMarker
+  if (!mine) return
   const marker = readStartMarker(resolveClawbooDir(process.env))
-  if (!marker || marker.pid !== process.pid) return
+  if (
+    !marker ||
+    marker.pid !== mine.pid ||
+    marker.startedAt !== mine.startedAt ||
+    marker.bootAt !== mine.bootAt ||
+    marker.pidNamespace !== mine.pidNamespace ||
+    marker.initStart !== mine.initStart
+  )
+    return
   try {
     fs.unlinkSync(getStartMarkerPath())
   } catch {

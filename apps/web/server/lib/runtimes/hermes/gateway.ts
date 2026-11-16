@@ -575,7 +575,12 @@ export class HermesGatewaySupervisor {
       this.state = 'failed'
       const proc = this.proc
       this.proc = null
-      if (proc && proc.exitCode === null && proc.signalCode === null) killProcessTree(proc)
+      // Not while the server exits: its stop already has this gateway (SIGINT,
+      // the grace, then SIGKILL), and killProcessTree's SIGTERM would read to
+      // Hermes as a crash. A start that times out during that grace gets here.
+      if (!this.exiting && proc && proc.exitCode === null && proc.signalCode === null) {
+        killProcessTree(proc)
+      }
       log.warn({ reason }, 'hermes gateway did not start')
       throw new Error(reason)
     }

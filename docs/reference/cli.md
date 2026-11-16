@@ -107,7 +107,7 @@ Stops the dashboard server that `clawboo` would open, after the agent runs it is
 1. It finds the server through [port discovery](#port-discovery) and confirms the port really is a Clawboo dashboard.
 2. Unless you pass `--force`, it holds the server, so it starts no new agent run, and waits for the runs already going to finish. The spinner says how many are left and how long it will still wait. At the bound it prints "Waited 10m; stopping N agent runs still going." and stops anyway. See [Waiting for agent runs](#waiting-for-agent-runs).
 3. It looks up the process listening on that port (`lsof` on macOS and Linux, `netstat -ano` on Windows) and sends it SIGTERM.
-4. It waits up to 4 seconds for the port to close. If it is still open, it checks that the same process still holds it, sends SIGKILL, and waits up to 2 more seconds.
+4. It waits up to 15 seconds for the port to close, which covers the server's own stop (below). If it is still open, it checks that the same process still holds it, sends SIGKILL, and waits up to 2 more seconds.
 5. It prints "Clawboo stopped (pid N)", or "(pid N, forced)" when SIGKILL was needed.
 
 With nothing running, it prints "No Clawboo server is running.", removes a leftover `api-port.txt` that names a dead server (and, in releases after 0.8.0, a start marker that shows its server is gone), and exits 0, so it is safe in teardown scripts. It never signals process 1, itself or its parent.
@@ -121,7 +121,7 @@ When the stop fails it exits 1 and prints a manual stop command after one of the
 - "Port N is held by a process this launcher refuses to signal."
 - "Could not identify the process listening on port N." (also printed when neither `lsof` nor `netstat` is available)
 
-Stopping the server interrupts the agent runs still going: all of them with `--force`, and the ones left when the wait runs out. On macOS and Linux the server first signals the runtime processes it started and waits up to 5 seconds for them, removes `api-port.txt` if it still names its port (and, in releases after 0.8.0, `api-port.json` if it names this server), and checkpoints the database. In releases after 0.8.0 the Hermes gateway gets its planned stop at the same time (see [Hermes](/runtimes/hermes#the-hermes-gateway)), so the whole wait stays under about 9 seconds. On Windows the stop ends the process at once, so none of that runs: `clawboo stop` removes the port file itself and the database recovers when it is next opened. Routines are re-armed when the server starts again. An OpenClaw Gateway that Clawboo started keeps running.
+Stopping the server interrupts the agent runs still going: all of them with `--force`, and the ones left when the wait runs out. On macOS and Linux the server first signals the runtime processes it started and waits up to 5 seconds for them, removes `api-port.txt` if it still names its port (and, in releases after 0.8.0, `api-port.json` if it names this server), and checkpoints the database. In releases after 0.8.0 the Hermes gateway gets its planned stop at the same time (see [Hermes](/runtimes/hermes#the-hermes-gateway)), and traces are flushed last, for up to 2 seconds when you export them, so the whole wait stays under about 11 seconds. On Windows the stop ends the process at once, so none of that runs: `clawboo stop` removes the port file itself and the database recovers when it is next opened. Routines are re-armed when the server starts again. An OpenClaw Gateway that Clawboo started keeps running.
 
 ## clawboo restart
 
