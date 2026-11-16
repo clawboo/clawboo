@@ -28,7 +28,7 @@ This is off by default. Only an administrator turns it on, in the [operator sett
 
 <Note>
 
-On its own this puts names on what people do. It adds no accounts or permissions: everyone who gets through your proxy can still do everything the dashboard can, and a role from the token is recorded, not enforced. To let that role decide what each person may do, turn on [Roles](#roles).
+On its own this puts names on what people do. It adds no accounts or permissions: everyone who gets through your proxy can still do everything the dashboard can, and a role from the token is recorded, not enforced. To let that role decide what each person may do, turn on [Roles](#roles), in releases after 0.8.0.
 
 </Note>
 
@@ -212,7 +212,7 @@ When the Gateway's own broadcast settles an OpenClaw approval before Clawboo hea
 
 ## Roles
 
-With `proxyIdentityRoles` set to `enforce`, the role in each token decides what its person may do. It needs `proxyIdentity` set to `required`, so that every request names a person; the server refuses to start otherwise. Your proxy names the role in the role claim (`role` unless you set `proxyIdentityRoleClaim`).
+In releases after 0.8.0, with `proxyIdentityRoles` set to `enforce`, the role in each token decides what its person may do. 0.8.0 and older ignore the variable, and refuse to start when the operator file has the key, so an older server never runs with roles silently off from that file. Roles need `proxyIdentity` set to `required`, so that every request names a person; the server refuses to start otherwise. Your proxy names the role in the role claim (`role` unless you set `proxyIdentityRoleClaim`).
 
 | Role       | What the person may do                                                                                                                                                                                                                          |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -223,12 +223,13 @@ With `proxyIdentityRoles` set to `enforce`, the role in each token decides what 
 
 Seeing and doing the work covers the teams, agents, board, chats, rooms, task folders and memory: asking an agent or a team for work, writing and moving tasks, commenting, answering an agent's question, and pausing or stopping work.
 
-- **Roles add up.** A role claim that lists `owner` and `operator` gets what both get. A word Clawboo does not know, such as your provider's `offline_access`, is ignored. A token with no role Clawboo knows reaches only `GET /api/access/identity`, which says so.
-- **An answer that lasts is the owner's.** "Allow always" on an approval, and a connector grant made to act without asking (`approvalPolicy: "never"`), need the owner, so an operator can make agents ask more but never less. A grant that never asks needs both roles, owner and operator.
-- **A guest's limits** hold while guest is the person's one role. A guest reaches a route that names one of their teams, an agent or a task on one of them, or a chat of one of them, and four lists that Clawboo cuts down to their teams: `GET /api/teams`, `GET /api/agents`, `GET /api/board` and `GET /api/tools/approvals`. What a guest's write names in its body must be on one of their teams too: the parent of a new task, the agent it is for, the task it waits on. So must the work a guest's cancel or close carries along: the tasks waiting on a cancelled one, and the open work under a request. Everything else is refused, and so is every request once `access_until` has passed. A stream a guest has open, such as a chat's live view, closes then too.
+- **Roles add up.** A role claim that lists `owner` and `operator` gets what both get. A word Clawboo does not know, such as your provider's `offline_access`, is ignored. A token with no role Clawboo knows reaches only the four routes about the person and the server itself: `GET /api/access/identity` (which says so), `GET /api/health`, `GET /api/system/capabilities` and `POST /api/system/presence`.
+- **An answer that lasts is the owner's.** "Allow always" on an approval, and a connector grant made to act without asking (`approvalPolicy: "never"`), need the owner, so an operator can make agents ask more but never less. A grant that never asks needs both roles, owner and operator, and so does making a grant again in a way that brings back or widens one that never asks, or makes any grant ask less than it did. Turning a team's plan approval off, and letting a team's agents wake each other without asking (the team's setting, or "always in this team" on a card), need the owner too; an operator can turn them back on.
+- **A guest's limits** hold while guest is the person's one role. A guest reaches a route that names one of their teams, an agent or a task on one of them, or a chat of one of them, and four lists that Clawboo cuts down to their teams: `GET /api/teams`, `GET /api/agents`, `GET /api/board` and `GET /api/tools/approvals`. What a guest's write names in its body must be on one of their teams too: the parent of a new task, the agent it is for, the task it waits on. So must the work a guest's cancel or close carries along: the tasks waiting on a cancelled one, and the open work under a request. A retry, a reopen and a pause of a task reach its whole tree, from the main task down, so every task in that tree must be on their teams as well. A hand-off can file work on another team, so a tree it spread that way is out of a guest's reach for these. A task's parents and a main task's list of work show only the tasks on their teams. Everything else is refused, and once `access_until` has passed so is every request but the four routes above. A stream a guest has open, such as a chat's live view, closes then too.
 - **The Gateway WebSocket** opens only for a person who both runs the server and answers approvals, standing ones included: an `owner` who is an `operator` too. OpenClaw's own commands travel on it, its approvals and "Allow always" among them, and are not checked one by one. Where the owner and the operator are different people, OpenClaw's Gateway is out of reach while roles are enforced.
-- **What decides whether anyone is asked needs both roles too.** An agent's command posture (`POST /api/exec-settings`) and OpenClaw's own settings (`PATCH /api/system/openclaw-config`, `POST /api/system/configure-openclaw`, `POST /api/system/auto-configure-openclaw`) can make agents ask less, so they need a person who is owner and operator. Bringing back a revoked grant that never asks needs the owner.
+- **What decides whether anyone is asked needs both roles too.** An agent's command posture (`POST /api/exec-settings`) and OpenClaw's own settings (`PATCH /api/system/openclaw-config`, `POST /api/system/configure-openclaw`, `POST /api/system/auto-configure-openclaw`) can make agents ask less, so they need a person who is owner and operator. So does pairing a device with OpenClaw's Gateway (`POST /api/system/approve-device`), since a paired device talks to the Gateway directly. Bringing back a revoked grant that never asks needs the owner.
 - **A route Clawboo does not list** is the operator's.
+- **An operator is trusted with the server.** Connectors, runtimes and a team's verify command run programs as Clawboo's user, and an operator sets them up, so an operator can reach what that user can, the database and the Gateway's token included. The split between owner and operator decides who answers through the API; it does not hold against an operator who sets out to get around it. Give the operator role only to people you would trust with the server itself.
 
 The claims beside the role:
 
@@ -245,7 +246,7 @@ The whole token may take at most 16 KiB. A claim that is there but malformed ref
 
 **A service token** (`"svc": true`) is for a program of your sign-in front's own, such as its health checks or its scheduler, rather than for a person. It gets its role's permissions, but it is never a person: nothing records it as one, every write that needs a person refuses it, and it never answers or makes an approval, whatever its role. It never opens the Gateway WebSocket. While roles are off, `svc` is not read.
 
-**The app link** follows the same rules: with roles enforced, its tokens need a role claim too, or they reach only `GET /api/access/identity`. An app that sends none, as the desktop app does today, cannot use its link to an install that enforces roles.
+**The app link** follows the same rules: with roles enforced, its tokens need a role claim too, or they reach only those four routes. An app that sends none, as the desktop app does today, cannot use its link to an install that enforces roles.
 
 A refused request gets `403`:
 

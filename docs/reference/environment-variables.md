@@ -618,7 +618,7 @@ The claim with the person's role. A list is joined with commas. The role is reco
 - Default: `off`
 - Example: `CLAWBOO_PROXY_IDENTITY_ROLES=enforce`
 
-With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
+In releases after 0.8.0. With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
 
 ## Provider keys
 

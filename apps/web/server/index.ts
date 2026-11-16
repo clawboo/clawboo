@@ -394,7 +394,7 @@ async function main() {
   if (rolesMode === 'enforce') {
     log.info(
       'Roles enforced: each request may do only what the role in its token allows. ' +
-        'A token with no role this engine knows can only ask who it names.',
+        'A token with no role this engine knows reaches only who it names, health, capabilities and presence.',
     )
   }
 

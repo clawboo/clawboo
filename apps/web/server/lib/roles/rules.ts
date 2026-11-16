@@ -15,13 +15,13 @@
 
 import {
   capabilityGrants,
+  createGrantBody,
   getDependents,
   getGrant,
   getTask,
   grantKey,
   mainTaskState,
   type ClawbooDb,
-  type GrantIdentity,
 } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request } from 'express'
@@ -39,6 +39,10 @@ export type GuestReach =
   | { by: 'agent'; param: string }
   /** `req.params[param]` is a task id: the task's team. */
   | { by: 'task'; param: string }
+  /** `req.params[param]` is a task id, on a write that can reach the rest of its
+   *  tree (the main task above, the work under it): the team of every task in
+   *  the tree, all of which must be the guest's. */
+  | { by: 'task-tree'; param: string }
   /** `req.params[param]` is an agent question's id: its task's team. */
   | { by: 'question'; param: string }
   /** `req.query.teamId`, or the team of `req.query.roomId`. */
@@ -106,6 +110,8 @@ const mcp: RouteRule = { need: 'system', runtime: true }
 const team = (param = 'id'): GuestReach => ({ by: 'team', param })
 const agent = (param = 'agentId'): GuestReach => ({ by: 'agent', param })
 const task = (param = 'taskId'): GuestReach => ({ by: 'task', param })
+/** A write that can reach the rest of the task's tree. */
+const tree = (param = 'taskId'): GuestReach => ({ by: 'task-tree', param })
 const list: GuestReach = { by: 'list' }
 
 function bodyOf(req: Request): Record<string, unknown> {
@@ -124,30 +130,50 @@ function standingIf(field: string, ...values: string[]) {
     values.includes(String(bodyOf(req)[field])) ? 'standing' : null
 }
 
-/** A grant sent without a policy keeps the one it has, so re-granting a revoked
- *  grant that never asks brings it back that way: the owner's to do, as the
- *  resume is. */
-function grantNeverAsks(req: Request): Need | null {
-  const body = bodyOf(req)
-  if (body['approvalPolicy'] === 'never') return 'standing'
-  if (body['approvalPolicy'] !== undefined) return null
-  const { subjectKind, capabilityKind } = body
-  if (typeof subjectKind !== 'string' || typeof capabilityKind !== 'string') return null
-  const text = (key: string): string | null =>
-    typeof body[key] === 'string' ? (body[key] as string) : null
-  const identity = {
-    subjectKind,
-    subjectId: text('subjectId'),
-    capabilityKind,
-    connectorId: text('connectorId'),
-    capabilityId: text('capabilityId'),
-  } as GrantIdentity
-  const row = getDb()
+/** An answer that would stand for every later call, as an exact body value (a
+ *  boolean, say): the owner's alone. Exact, as the route's handler reads it. */
+function standingWhen(field: string, value: unknown) {
+  return (req: Request): Need | null => (bodyOf(req)[field] === value ? 'standing' : null)
+}
+
+/** How much each grant policy asks, least first. */
+const POLICY_ASKS: Readonly<Record<string, number>> = { never: 0, risk: 1, writes: 2, always: 3 }
+
+/**
+ * POST /api/grants makes a grant or, for one with the same identity, updates it
+ * and makes it active again, keeping the policy it had unless the body names
+ * another. So the owner is needed whenever the grant comes out as one that
+ * never asks (a revoked one brought back, or a live one widened), and whenever
+ * it would ask less than it did.
+ */
+function grantNeed(req: Request): Need | null {
+  const parsed = createGrantBody.safeParse(req.body)
+  // The handler refuses a body it cannot read before it writes anything; the
+  // body's own policy is still checked, so the guard never reads it as less.
+  if (!parsed.success) return standingIf('approvalPolicy', 'never')(req)
+  const b = parsed.data
+  const existing = getDb()
     .select({ approvalPolicy: capabilityGrants.approvalPolicy })
     .from(capabilityGrants)
-    .where(eq(capabilityGrants.grantKey, grantKey(identity)))
+    .where(
+      eq(
+        capabilityGrants.grantKey,
+        grantKey({
+          subjectKind: b.subjectKind,
+          subjectId: b.subjectId ?? null,
+          capabilityKind: b.capabilityKind,
+          connectorId: b.connectorId ?? null,
+          capabilityId: b.capabilityId ?? null,
+        }),
+      ),
+    )
     .get()
-  return row?.approvalPolicy === 'never' ? 'standing' : null
+  const result = b.approvalPolicy ?? existing?.approvalPolicy ?? 'risk'
+  if (result === 'never') return 'standing'
+  if (existing && (POLICY_ASKS[result] ?? 0) < (POLICY_ASKS[existing.approvalPolicy] ?? 0)) {
+    return 'standing'
+  }
+  return null
 }
 
 /** The tasks a cancel or a close carries along with the one it names: the
@@ -268,7 +294,8 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'GET /api/system/openclaw-config': system,
   'PATCH /api/system/openclaw-config': { need: 'system', more: ASKS_LESS },
   'GET /api/system/models': system,
-  'POST /api/system/approve-device': system,
+  // A paired device talks to the Gateway directly, approvals included: a standing grant.
+  'POST /api/system/approve-device': { need: 'system', more: ASKS_LESS },
   'GET /api/system/self-version': system,
   'GET /api/system/capabilities': ANY_PERSON,
   'POST /api/system/self-update': system,
@@ -319,11 +346,19 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'GET /api/team-rules/:teamId': see(team('teamId')),
   'PUT /api/team-rules/:teamId': ownerOrOperator,
   'GET /api/team-plan-approval/:teamId': see(team('teamId')),
-  'PUT /api/team-plan-approval/:teamId': ownerOrOperator,
+  // Turning plan approval off lets plans start without anyone's yes.
+  'PUT /api/team-plan-approval/:teamId': {
+    need: OWNER_OR_OPERATOR,
+    more: standingWhen('on', false),
+  },
   'GET /api/team-verify-command/:teamId': setup,
   'PUT /api/team-verify-command/:teamId': setup,
   'GET /api/team-agent-wakes/:teamId': see(team('teamId')),
-  'PUT /api/team-agent-wakes/:teamId': ownerOrOperator,
+  // The team's "always allow": agents wake each other without asking anyone.
+  'PUT /api/team-agent-wakes/:teamId': {
+    need: OWNER_OR_OPERATOR,
+    more: standingWhen('always', true),
+  },
 
   // ── Agents ─────────────────────────────────────────────────────────────────
   'GET /api/agents': see(list),
@@ -404,16 +439,21 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
     guestAlso: [{ by: 'body-agent', key: 'authorAgentId' }],
   },
   'PUT /api/board/:taskId/labels': work(task()),
-  'POST /api/board/:taskId/retry': work(task()),
+  // A retry or a reopen can move the main task above and the work under it.
+  'POST /api/board/:taskId/retry': work(tree()),
   'POST /api/board/:taskId/assign': {
     need: 'work',
     guest: task(),
     guestAlso: [{ by: 'body-agent', key: 'agentId' }],
   },
-  'POST /api/board/:taskId/reopen': work(task()),
+  'POST /api/board/:taskId/reopen': work(tree()),
   'POST /api/board/:taskId/assign-person': work(task()),
   'GET /api/board/:taskId/questions': see(task()),
-  'POST /api/board/agent-wakes/:jobTaskId': ownerOrOperator,
+  // "Always in this team" stands for every later wake: the owner's.
+  'POST /api/board/agent-wakes/:jobTaskId': {
+    need: OWNER_OR_OPERATOR,
+    more: standingIf('decision', 'team'),
+  },
   'POST /api/board/job-limit/:jobTaskId': ownerOrOperator,
   'POST /api/board/questions/:questionId/answer': work({ by: 'question', param: 'questionId' }),
   'GET /api/board/:taskId/plan': see(task()),
@@ -487,7 +527,8 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'PUT /api/connectors/:slug/config': setup,
   'GET /api/grants': accounts,
   // A grant that never asks lets agents act on an account without anyone's yes.
-  'POST /api/grants': { need: 'setup', more: grantNeverAsks },
+  // Bringing back or widening one, or making one ask less, likewise.
+  'POST /api/grants': { need: 'setup', more: grantNeed },
   'POST /api/grants/:id/revoke': accounts,
   // Undoing a revoke brings back what the grant allowed, a grant that never asks
   // included: that one is the owner's to bring back.

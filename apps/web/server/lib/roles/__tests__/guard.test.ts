@@ -210,6 +210,74 @@ describe('decideRole', () => {
       expect(resume(never, ['owner', 'operator'])).toBe(true)
       expect(resume(grant('risk'), ['operator'])).toBe(true)
     })
+
+    it('needs the owner to bring back, widen or loosen a grant by making it again', () => {
+      const gmail = {
+        subjectKind: 'agent',
+        subjectId: 'a1',
+        capabilityKind: 'connector',
+        connectorId: 'gmail',
+      } as const
+      const made = upsertGrant(db, {
+        ...gmail,
+        capabilityId: null,
+        mode: 'write',
+        approvalPolicy: 'never',
+        origin: 'operator',
+      })
+      revokeGrant(db, made.id, null)
+      const post = (roles: Role[], body: Record<string, unknown>) =>
+        decide('POST /api/grants', { access: access(roles), body }).ok
+      // Making it again, with no policy, brings it back as one that never asks.
+      expect(post(['operator'], gmail)).toBe(false)
+      expect(post(['operator'], { ...gmail, mode: 'admin', toolAllow: ['*'] })).toBe(false)
+      expect(post(['owner', 'operator'], gmail)).toBe(true)
+      // Making it ask more is an operator's.
+      expect(post(['operator'], { ...gmail, approvalPolicy: 'always' })).toBe(true)
+
+      const drive = { ...gmail, connectorId: 'drive' }
+      upsertGrant(db, {
+        ...drive,
+        capabilityId: null,
+        approvalPolicy: 'always',
+        origin: 'operator',
+      })
+      expect(post(['operator'], { ...drive, approvalPolicy: 'risk' })).toBe(false)
+      expect(post(['operator'], { ...drive, approvalPolicy: 'writes' })).toBe(false)
+      expect(post(['operator'], { ...drive, toolAllow: ['read_file'] })).toBe(true)
+      expect(post(['owner', 'operator'], { ...drive, approvalPolicy: 'risk' })).toBe(true)
+
+      // A new grant that asks is an operator's.
+      expect(post(['operator'], { ...gmail, connectorId: 'calendar' })).toBe(true)
+    })
+
+    it("needs the owner to let a team's plans start unasked, or its agents wake each other unasked", () => {
+      const cases: Array<[string, Record<string, string>, unknown, unknown]> = [
+        ['PUT /api/team-plan-approval/:teamId', { teamId: 'T' }, { on: false }, { on: true }],
+        ['PUT /api/team-agent-wakes/:teamId', { teamId: 'T' }, { always: true }, { always: false }],
+        [
+          'POST /api/board/agent-wakes/:jobTaskId',
+          { jobTaskId: taskInT },
+          { decision: 'team' },
+          { decision: 'job' },
+        ],
+      ]
+      for (const [key, params, asksLess, asksMore] of cases) {
+        const as = (roles: Role[], body: unknown) =>
+          decide(key, { access: access(roles), params, body }).ok
+        expect(as(['operator'], asksLess), key).toBe(false)
+        expect(as(['owner'], asksLess), key).toBe(true)
+        expect(as(['operator'], asksMore), key).toBe(true)
+        expect(as(['owner'], asksMore), key).toBe(true)
+      }
+    })
+
+    it('needs owner and operator to pair a device with the Gateway', () => {
+      const key = 'POST /api/system/approve-device'
+      expect(decide(key, { access: access(['operator']) }).ok).toBe(false)
+      expect(decide(key, { access: access(['owner']) }).ok).toBe(false)
+      expect(decide(key, { access: access(['owner', 'operator']) }).ok).toBe(true)
+    })
   })
 
   describe('setting up and running the workspace', () => {
@@ -493,6 +561,45 @@ describe('decideRole', () => {
       ).toBe(true)
       expect(decide('POST /api/pauses', { access: guest, body: { kind: 'all', id: 'x' } }).ok).toBe(
         false,
+      )
+    })
+
+    it('retries, reopens or pauses a task only when its whole tree is on their teams', () => {
+      // A main task on T, with work a hand-off filed on OTHER under it.
+      const main = createTask(db, { title: 'Launch', teamId: 'T' }).id
+      createTask(db, { title: 'Ads copy', teamId: 'OTHER', parentTaskId: main })
+
+      // A retry or a reopen can move the main task above and the work under it.
+      // (A cancel or a close is checked by what it carries along: see above.)
+      for (const key of ['POST /api/board/:taskId/retry', 'POST /api/board/:taskId/reopen']) {
+        const as = (who: PersonAccess, taskId: string) =>
+          decide(key, { access: who, params: { taskId } }).ok
+        expect(as(guest, main), key).toBe(false)
+        expect(as(guest, taskInT), key).toBe(true)
+        // With both teams in the token, all of it is theirs.
+        const both = access(['guest'], { teams: ['T', 'OTHER'], until: NOW / 1000 + 3600 })
+        expect(as(both, main), key).toBe(true)
+      }
+      // A pause covers the whole tree, from any task in it.
+      expect(
+        decide('POST /api/pauses', { access: guest, body: { kind: 'task', id: main } }).ok,
+      ).toBe(false)
+      expect(
+        decide('DELETE /api/pauses/:kind/:id', {
+          access: guest,
+          params: { kind: 'task', id: main },
+        }).ok,
+      ).toBe(false)
+      // What stays on the task itself still reaches it.
+      expect(
+        decide('POST /api/board/:taskId/comments', {
+          access: guest,
+          params: { taskId: main },
+          body: { content: 'Looks good' },
+        }).ok,
+      ).toBe(true)
+      expect(decide('GET /api/board/:taskId', { access: guest, params: { taskId: main } }).ok).toBe(
+        true,
       )
     })
 

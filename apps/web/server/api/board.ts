@@ -83,7 +83,7 @@ import { eq } from 'drizzle-orm'
 import { actingPerson, actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, readStatesOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
-import { inRoleScope } from '../lib/roles/guard'
+import { inRoleScope, roleScopeOf, teamOfTask } from '../lib/roles/guard'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
@@ -214,8 +214,14 @@ export function boardGetGET(req: Request, res: Response): void {
         pendingWake: pendingWakeOf(db, taskId),
       },
       comments: getComments(db, taskId),
-      ancestors: getAncestors(db, taskId),
-      ...(task.isMainTask === 1 ? { subtasks: subtasksForDetail(db, taskId) } : {}),
+      // A guest sees only their teams' tasks: a task of this tree on another team
+      // (a hand-off files work there) stays out of their answer (lib/roles).
+      ancestors: roleScopeOf(req)
+        ? getAncestors(db, taskId).filter((a) => inRoleScope(req, teamOfTask(db, a.id)))
+        : getAncestors(db, taskId),
+      ...(task.isMainTask === 1
+        ? { subtasks: subtasksForDetail(db, taskId).filter((t) => inRoleScope(req, t.teamId)) }
+        : {}),
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -1703,7 +1709,11 @@ export async function agentWorkspacesGET(req: Request, res: Response): Promise<v
   try {
     const agentId = (req.params['agentId'] as string | undefined) ?? ''
     const db = getDb()
-    const assigned = listTasks(db).filter((t) => t.assigneeAgentId === agentId)
+    // A guest gets only the tasks of their teams: an agent moved between teams keeps
+    // its tasks on the team it left (lib/roles).
+    const assigned = listTasks(db).filter(
+      (t) => t.assigneeAgentId === agentId && inRoleScope(req, t.teamId),
+    )
     const tasks = assigned.filter((t) => t.worktreeRef)
     const foldersToCheck = assigned
       .filter((t) => !t.worktreeRef)
