@@ -209,7 +209,7 @@ Before it connects, the server checks the folder's and the socket's owners and m
 
 ## A user per agent
 
-Available in releases after 0.7.0. Clawboo 0.7.0 and older ignore `CLAWBOO_AGENT_USERS`. Run `clawboo --version` to see yours.
+Available from 0.8.0. Clawboo 0.7.0 and older ignore `CLAWBOO_AGENT_USERS`. Run `clawboo --version` to see yours.
 
 With `CLAWBOO_AGENT_USERS` (Linux only for now), each agent runs as a user of its own, taken from a pool of users you make once. It is used instead of `CLAWBOO_AGENT_USER`, never with it, and everything above still holds. On top of it, one agent cannot:
 
