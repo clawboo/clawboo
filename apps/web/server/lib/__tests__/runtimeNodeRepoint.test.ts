@@ -407,6 +407,45 @@ describe('a runtime whose Node is gone', () => {
     },
   )
 
+  it.skipIf(isWindows)(
+    "records the `node` formula's versioned Node, since its link moves to each new major",
+    async () => {
+      // Majors the test's own Node is not on, so no lookup moves to it.
+      const m = Number(process.version.slice(1).split('.')[0]) + 1
+      const cellar = path.join(base, 'homebrew', 'Cellar', 'node')
+      const link = path.join(base, 'homebrew', 'opt', 'node')
+      const brew = async (version: string, was?: string): Promise<string> => {
+        const keg = fakeNode(`homebrew/Cellar/node/${version}/bin/node`)
+        mkdirSync(path.dirname(link), { recursive: true })
+        await rm(link, { force: true })
+        await symlink(path.join(cellar, version), link)
+        if (was) await rm(path.join(cellar, was), { recursive: true })
+        return keg
+      }
+      const old = fakeNode('old/bin/node')
+      installOn('openclaw', old, `v${m}.0.0`)
+      await unlink(old)
+
+      const first = await brew(`${m}.1.0`)
+      const moved = repointRuntimeNode('openclaw', env, { execPath: first, version: `v${m}.1.0` })
+      expect(moved?.interpreter?.path).toBe(first)
+
+      // `brew upgrade node` within the major deletes that keg; the next start moves on.
+      const second = await brew(`${m}.2.0`, `${m}.1.0`)
+      const again = repointRuntimeNode('openclaw', env, { execPath: second, version: `v${m}.2.0` })
+      expect(again?.interpreter?.path).toBe(second)
+
+      // To the next major: the link now leads to it, and the runtime stays refused
+      // rather than running there.
+      const third = await brew(`${m + 1}.0.0`, `${m}.2.0`)
+      expect(ownedRuntimeLaunch('openclaw', env)).toBeNull()
+      expect(
+        repointRuntimeNode('openclaw', env, { execPath: third, version: `v${m + 1}.0.0` }),
+      ).toBeNull()
+      expect(readRuntimeInstall('openclaw', env)?.interpreter?.path).toBe(second)
+    },
+  )
+
   it('moves every runtime on record at boot', async () => {
     const old = fakeNode('old/bin/node')
     installOn('openclaw', old, process.version)

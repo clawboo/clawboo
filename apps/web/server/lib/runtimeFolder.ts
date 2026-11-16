@@ -809,12 +809,21 @@ async function pruneInstallFolders(runtimeDir: string, keep: Set<string>): Promi
 export const HOMEBREW_KEG_NODE =
   /^(.*)[/\\]Cellar[/\\]([^/\\]+)[/\\][^/\\]+[/\\]bin[/\\]node(\.exe)?$/
 
+/** A Homebrew formula held to one major version of Node, such as `node@24`. */
+const PINNED_NODE_FORMULA = /^node@\d+$/
+
 /**
  * The path to record for the Node a runtime runs on: `execPath`, except for a
- * Homebrew keg, whose versioned folder an upgrade deletes. There it is the
- * formula's `opt` link (`<prefix>/opt/<formula>/bin/node`) when that link leads
- * to the same Node today, so the runtime keeps working after `brew upgrade` on
- * the same formula (a `node@24` stays on Node 24).
+ * keg of a formula held to one major (`node@24`), whose versioned folder an
+ * upgrade deletes. There it is the formula's `opt` link
+ * (`<prefix>/opt/node@24/bin/node`) when that link leads to the same Node today,
+ * so the runtime keeps working after `brew upgrade`, which keeps it on Node 24.
+ *
+ * The `node` formula's link moves to each new major on `brew upgrade`, and a
+ * link is never gone, so a runtime recorded by it would run on that major with
+ * no `nodeVersionCovers` check. Its keg path is kept instead: an upgrade within
+ * the major deletes it, and the next start moves the runtime to the new keg
+ * (`repointRuntimeNode`); a new major leaves it refused.
  */
 export function stableNodePath(
   execPath: string = process.execPath,
@@ -822,7 +831,7 @@ export function stableNodePath(
 ): string {
   const realpath = lookup.realpath ?? realPathOf
   const keg = HOMEBREW_KEG_NODE.exec(execPath)
-  if (!keg) return execPath
+  if (!keg || !PINNED_NODE_FORMULA.test(keg[2] ?? '')) return execPath
   const sep = execPath.includes('\\') && !execPath.includes('/') ? '\\' : '/'
   const opt = [keg[1], 'opt', keg[2], 'bin', `node${keg[3] ?? ''}`].join(sep)
   const a = realpath(opt)

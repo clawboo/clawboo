@@ -121,8 +121,20 @@ describe('stableNodePath', () => {
     expect(stableNodePath(keg, { realpath })).toBe(opt)
   })
 
+  it("keeps the `node` formula's keg, since its opt link moves to each new major", () => {
+    // A runtime recorded by that link would run on Node 26 after `brew upgrade`
+    // with nothing checking that 26 can run what was installed on 24.
+    const keg = '/opt/homebrew/Cellar/node/24.22.1/bin/node'
+    const opt = '/opt/homebrew/opt/node/bin/node'
+    const realpath = (p: string) => (p === opt || p === keg ? keg : null)
+    expect(stableNodePath(keg, { realpath })).toBe(keg)
+    // Nor any other formula's link that is not held to one major.
+    const lts = '/home/linuxbrew/.linuxbrew/Cellar/node-lts/24.22.1/bin/node'
+    expect(stableNodePath(lts, { realpath: () => lts })).toBe(lts)
+  })
+
   it('keeps the keg when the opt link leads elsewhere, and any other Node as it is', () => {
-    const keg = '/opt/homebrew/Cellar/node/24.2.0/bin/node'
+    const keg = '/opt/homebrew/Cellar/node@24/24.2.0/bin/node'
     expect(stableNodePath(keg, { realpath: (p) => (p === keg ? keg : '/other') })).toBe(keg)
     expect(stableNodePath('/home/u/.nvm/versions/node/v24.22.1/bin/node')).toBe(
       '/home/u/.nvm/versions/node/v24.22.1/bin/node',

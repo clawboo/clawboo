@@ -254,15 +254,39 @@ export function buildChildEnv(
   const keepAwsCreds = isTruthyFlag(process.env['CLAUDE_CODE_USE_BEDROCK'])
   const dropIdentity = agentUserModeOn() && !opts.serverSide
   const env: NodeJS.ProcessEnv = {}
+  let droppedPycachePrefix = false
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue
     if (isScrubbedKey(key, { keepAwsCreds })) continue
-    if (dropIdentity && SERVER_IDENTITY_ENV_KEYS.has(key.toUpperCase())) continue
+    if (dropIdentity && SERVER_IDENTITY_ENV_KEYS.has(key.toUpperCase())) {
+      if (key.toUpperCase() === 'PYTHONPYCACHEPREFIX') droppedPycachePrefix = true
+      continue
+    }
     env[key] = value
   }
   for (const [key, value] of Object.entries(extra)) {
     if (value !== undefined) env[key] = value
   }
+  if (droppedPycachePrefix) noBytecodeInPlaceOfPrefix(env)
   keepLoopbackOffProxy(env)
   return env
+}
+
+/**
+ * Without the server's PYTHONPYCACHEPREFIX, which an agent user's Python must
+ * not write into, a child's Python would write `__pycache__` beside the sources
+ * instead. Turn bytecode off in its place, unless the caller gave a folder of
+ * its own or a bytecode setting is already there. The spawn seam does the same
+ * for an environment that still carries the server's folder (`agentEnv` in
+ * spawner.ts). Names match in any case, as everywhere in this file; an empty
+ * value counts as unset, as it does for Python.
+ */
+function noBytecodeInPlaceOfPrefix(env: NodeJS.ProcessEnv): void {
+  const keyOf = (name: string): string | undefined =>
+    Object.keys(env).find((k) => k.toUpperCase() === name)
+  const prefix = keyOf('PYTHONPYCACHEPREFIX')
+  if (prefix !== undefined && env[prefix]) return
+  const own = keyOf('PYTHONDONTWRITEBYTECODE')
+  if (own !== undefined && env[own]) return
+  env[own ?? 'PYTHONDONTWRITEBYTECODE'] = '1'
 }
