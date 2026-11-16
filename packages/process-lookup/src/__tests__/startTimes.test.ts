@@ -7,6 +7,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// vi.mock is hoisted above this import, so it reads the stand-in `ps`.
+import { processStartTimes } from '../identity'
+
 const ps = vi.hoisted(() => ({
   out: '',
   envs: [] as (NodeJS.ProcessEnv | undefined)[],
@@ -18,8 +21,6 @@ vi.mock('node:child_process', async (orig) => ({
     return ps.out
   },
 }))
-
-const { processStartTimes } = await import('../identity')
 
 const savedTz = process.env['TZ']
 afterEach(() => {

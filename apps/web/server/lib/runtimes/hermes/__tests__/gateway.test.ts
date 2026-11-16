@@ -26,12 +26,14 @@ vi.mock('../../subprocess', () => ({
   recordRuntimeChildPid: () => undefined,
   isSubprocessShutdown: () => false,
 }))
-/** Calls of killProcessTree, which sends SIGTERM first (a crash to Hermes). */
-const treeKills = vi.hoisted(() => ({ count: 0 }))
+/** Calls of killProcessTree, which sends SIGTERM first (a crash to Hermes).
+ *  With `outlived`, the gateway outlives it: its SIGKILL is a timer that would
+ *  end with the server. */
+const treeKills = vi.hoisted(() => ({ count: 0, outlived: false }))
 vi.mock('../../killTree', () => ({
   killProcessTree: (p: { kill: (s: string) => void }) => {
     treeKills.count += 1
-    p.kill('SIGKILL')
+    if (!treeKills.outlived) p.kill('SIGKILL')
   },
   killProcessTreeNow: (p: FakeProcLike) => {
     if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL')
@@ -475,6 +477,39 @@ describe('HermesGatewaySupervisor', () => {
       expect(await startFailure).toBeInstanceOf(Error)
       expect(treeKills.count).toBe(0)
       expect(procs[0]!.signals).toEqual(['SIGINT', 'SIGKILL'])
+    })
+
+    it('a stop already under way sends no SIGTERM once the server exits', async () => {
+      const gw = make({ stopGraceMs: 200 })
+      await gw.ensureRunning()
+      procs[0]!.drainMs = 60_000
+      treeKills.count = 0
+      const stopping = gw.stop()
+      // That stop's own grace runs out while the exit stop waits out its grace.
+      expect(await gw.stopForExit(1_000)).toBe('killed')
+      await stopping
+      expect(treeKills.count).toBe(0)
+      expect(procs[0]!.signals).toEqual(['SIGINT', 'SIGINT', 'SIGKILL'])
+    })
+
+    it('sees out a gateway a failed start let go of while it still ran', async () => {
+      healthy = false
+      const gw = make({ startTimeoutMs: 100 })
+      treeKills.count = 0
+      treeKills.outlived = true
+      try {
+        await expect(gw.ensureRunning()).rejects.toThrow()
+        expect(procs).toHaveLength(1)
+        // It had the failed start's SIGTERM, and outlived it.
+        expect(treeKills.count).toBe(1)
+        expect(procs[0]!.exitCode === null && procs[0]!.signalCode === null).toBe(true)
+        const t0 = Date.now()
+        expect(await gw.stopForExit(300)).toBe('not-running')
+        expect(Date.now() - t0).toBeGreaterThanOrEqual(250)
+        expect(procs[0]!.signalCode).toBe('SIGKILL')
+      } finally {
+        treeKills.outlived = false
+      }
     })
 
     it('on Windows, where Node has no SIGINT to send, kills the tree at once', async () => {

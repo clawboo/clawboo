@@ -107,7 +107,7 @@ Stops the dashboard server that `clawboo` would open, after the agent runs it is
 1. It finds the server through [port discovery](#port-discovery) and confirms the port really is a Clawboo dashboard.
 2. Unless you pass `--force`, it holds the server, so it starts no new agent run, and waits for the runs already going to finish. The spinner says how many are left and how long it will still wait. At the bound it prints "Waited 10m; stopping N agent runs still going." and stops anyway. See [Waiting for agent runs](#waiting-for-agent-runs).
 3. It looks up the process listening on that port (`lsof` on macOS and Linux, `netstat -ano` on Windows) and sends it SIGTERM.
-4. It waits up to 15 seconds for the port to close, which covers the server's own stop (below). If it is still open, it checks that the same process still holds it, sends SIGKILL, and waits up to 2 more seconds.
+4. It waits up to 15 seconds for the port to close. The server's own stop (below) normally ends within that, but the database checkpoint at its end has no bound and can run past it on a large database; the database stays crash-safe either way. If the port is still open, it checks that the same process still holds it, sends SIGKILL, and waits up to 2 more seconds.
 5. It prints "Clawboo stopped (pid N)", or "(pid N, forced)" when SIGKILL was needed.
 
 With nothing running, it prints "No Clawboo server is running.", removes a leftover `api-port.txt` that names a dead server (and, in releases after 0.8.0, a start marker that shows its server is gone), and exits 0, so it is safe in teardown scripts. It never signals process 1, itself or its parent.

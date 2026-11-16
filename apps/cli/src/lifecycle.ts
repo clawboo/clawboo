@@ -37,6 +37,7 @@ import {
   type MarkerCheck,
   type PortRecord,
   type StartMarker,
+  type StartTimes,
 } from '@clawboo/process-lookup'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -416,17 +417,28 @@ const MARKER_PROBE_WINDOWS_TIMEOUT_MS = 8_000
 /** The last marker checked and what the check said. */
 let markerChecked: { key: string; check: MarkerCheck } | null = null
 
+/** The marker checks that need no start-time probe: the PID namespace run and
+ *  whether the pid is free. A probe that "cannot run" stands in for the rest. */
+const NO_PROBE = (): StartTimes => ({ ok: false, times: new Map(), error: 'not probed again' })
+
 /**
- * Check a start marker. A `gone` or `unknown` verdict is kept for the rest of
- * the command, so a probe that is slow or cannot run (on Windows, a PowerShell
- * start) is not paid again on every request. A `running` verdict is checked in
- * full again each time, start time included: a server that dies while the
- * command runs can have its pid handed to another process, which a check of
- * the pid alone would take for the server.
+ * Check a start marker. A `gone` verdict is kept for the rest of the command.
+ * So is an `unknown` one, so a probe that is slow or cannot run (on Windows, a
+ * PowerShell start) is not paid again on every request, but the checks that
+ * need no probe run again: a server that exits while the command runs leaves
+ * its pid free, and its port to anyone. A `running` verdict is checked in full
+ * again each time, start time included: a server that dies while the command
+ * runs can have its pid handed to another process, which a check of the pid
+ * alone would take for the server.
  */
 function checkMarkerCached(marker: StartMarker): MarkerCheck {
   const key = JSON.stringify(marker)
-  if (markerChecked?.key === key && markerChecked.check.verdict !== 'running') {
+  if (markerChecked?.key === key && markerChecked.check.verdict === 'gone') {
+    return markerChecked.check
+  }
+  if (markerChecked?.key === key && markerChecked.check.verdict === 'unknown') {
+    const again = checkStartMarker(marker, { startTimes: NO_PROBE })
+    if (again.verdict === 'gone') markerChecked = { key, check: again }
     return markerChecked.check
   }
   markerChecked = {
@@ -1264,7 +1276,8 @@ const TERM_POLL_MS = 100
  *  about 11 s (the Hermes gateway's planned stop, up to 8 s and then 1 s after
  *  its kill, then up to 2 s to flush traces), and then opens a fresh SQLite
  *  connection to run `wal_checkpoint(TRUNCATE)`, which is not instant on a
- *  large board. A SIGKILL sooner would cut that stop short. */
+ *  large board and has no bound: a very slow one can still run past this, and
+ *  the WAL recovers on the next open. A SIGKILL sooner would cut the stop short. */
 const TERM_POLL_ATTEMPTS = 150
 /** 2 s. After SIGKILL we are only waiting on the OS to release the socket. */
 const KILL_POLL_ATTEMPTS = 20

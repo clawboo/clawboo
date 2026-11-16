@@ -248,6 +248,19 @@ function settlesWithin(p: Promise<void>, ms: number): Promise<boolean> {
 }
 
 /**
+ * See out a gateway that already has its stop signal: up to `graceMs` for it
+ * to exit, then SIGKILL to its tree and up to `EXIT_KILL_WAIT_MS` more; what
+ * is left in its process group is killed either way.
+ */
+async function seeOutForExit(proc: ChildProcess, graceMs: number): Promise<void> {
+  if (proc.exitCode !== null || proc.signalCode !== null) return
+  const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()))
+  const done = await settlesWithin(exited, graceMs)
+  killProcessTreeNow(proc)
+  if (!done) await settlesWithin(exited, EXIT_KILL_WAIT_MS)
+}
+
+/**
  * `CLAWBOO_HERMES_STOP_GRACE_MS`, read for a stop of the server: milliseconds,
  * 0 to `EXIT_GRACE_MAX_MS`. Larger values are cut to the cap; anything that is
  * not a number of 0 or more means the default.
@@ -285,6 +298,10 @@ export class HermesGatewaySupervisor {
   private stopping = false
   /** Set once the server has begun to exit: no gateway starts after it. */
   private exiting = false
+  /** Gateways a failed start let go of while they still ran: they have had
+   *  killProcessTree's SIGTERM, and its SIGKILL is a timer that ends with this
+   *  process, so the exit stop sees them out too. Each leaves on its exit. */
+  private readonly leaving = new Set<ChildProcess>()
   private stopInFlight: Promise<void> | null = null
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private masterKey: string | null = null
@@ -423,7 +440,10 @@ export class HermesGatewaySupervisor {
     }
     const grace = this.deps.stopGraceMs ?? STOP_GRACE_MS
     const timedOut = await Promise.race([exited.then(() => false), sleep(grace).then(() => true)])
-    if (timedOut) {
+    // Not once the server exits: its stop has this gateway now (SIGINT, its
+    // grace, then SIGKILL), and killProcessTree's SIGTERM reads to Hermes as a
+    // crash.
+    if (timedOut && !this.exiting) {
       killProcessTree(proc)
       await Promise.race([exited, sleep(5_000)])
     }
@@ -441,10 +461,14 @@ export class HermesGatewaySupervisor {
    *
    * Unlike `stop()` it never waits for a start under way, which can take two
    * minutes: a gateway already spawned is stopped now, and one not yet spawned
-   * never is (`exiting`). With no gateway process it returns at once.
+   * never is (`exiting`). With no gateway process (and none `leaving`) it
+   * returns at once.
    *
    * On Windows Node has no SIGINT to send (it ends the process at once and
    * leaves its children), so the tree is killed there as before.
+   *
+   * A gateway a failed start let go of while it still ran (`leaving`) already
+   * has its SIGTERM; it gets the same grace and SIGKILL, at the same time.
    */
   async stopForExit(graceMs: number): Promise<HermesExitOutcome> {
     this.exiting = true
@@ -453,6 +477,13 @@ export class HermesGatewaySupervisor {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
     }
+    const leftovers = Promise.all([...this.leaving].map((p) => seeOutForExit(p, graceMs)))
+    const outcome = await this.stopCurrentForExit(graceMs)
+    await leftovers
+    return outcome
+  }
+
+  private async stopCurrentForExit(graceMs: number): Promise<HermesExitOutcome> {
     const proc = this.proc
     if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
       this.state = 'stopped'
@@ -481,7 +512,8 @@ export class HermesGatewaySupervisor {
   /**
    * The synchronous last resort (a `process.exit` from anywhere but the stop):
    * nothing can wait, so the gateway only gets its SIGINT and finishes its
-   * planned stop on its own. A no-op once it has exited.
+   * planned stop on its own, and one a failed start let go of gets its SIGKILL
+   * now. A no-op once they have exited.
    */
   signalForExit(): void {
     this.exiting = true
@@ -490,6 +522,9 @@ export class HermesGatewaySupervisor {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
     }
+    // These have had their SIGTERM, and the SIGKILL after it is a timer that
+    // ends with this process.
+    for (const leftover of this.leaving) killProcessTreeNow(leftover)
     const proc = this.proc
     if (!proc || proc.exitCode !== null || proc.signalCode !== null) return
     try {
@@ -579,6 +614,8 @@ export class HermesGatewaySupervisor {
       // the grace, then SIGKILL), and killProcessTree's SIGTERM would read to
       // Hermes as a crash. A start that times out during that grace gets here.
       if (!this.exiting && proc && proc.exitCode === null && proc.signalCode === null) {
+        this.leaving.add(proc)
+        proc.once('exit', () => this.leaving.delete(proc))
         killProcessTree(proc)
       }
       log.warn({ reason }, 'hermes gateway did not start')

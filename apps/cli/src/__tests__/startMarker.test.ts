@@ -24,9 +24,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as lifecycle from '../lifecycle'
 import { startListening } from './startListening'
 
-// The start-time probe the CLI uses, which one case below shifts: the pid of a
-// server that died, handed to a process that started later.
-const probe = vi.hoisted(() => ({ shiftMs: 0 }))
+// The start-time probe the CLI uses, which the cases below shift (the pid of a
+// server that died, handed to a process that started later) or break (a host
+// whose probe cannot run, or a Windows one that timed out).
+const probe = vi.hoisted(() => ({ shiftMs: 0, broken: false }))
 vi.mock('@clawboo/process-lookup', async (orig) => {
   const real = await orig<typeof import('@clawboo/process-lookup')>()
   return {
@@ -34,6 +35,7 @@ vi.mock('@clawboo/process-lookup', async (orig) => {
     startTimesReader: (windowsTimeoutMs: number) => {
       const read = real.startTimesReader(windowsTimeoutMs)
       return (safe: readonly number[]) => {
+        if (probe.broken) return { ok: false, times: new Map<number, number>(), error: 'stand-in' }
         const got = read(safe)
         if (probe.shiftMs === 0) return got
         const times = new Map([...got.times].map(([pid, t]) => [pid, t + probe.shiftMs]))
@@ -59,6 +61,7 @@ beforeEach(() => {
   vi.stubEnv('STUDIO_ACCESS_TOKEN', TOKEN)
   lifecycle.resetMarkerCheckForTests?.()
   probe.shiftMs = 0
+  probe.broken = false
 })
 afterEach(async () => {
   for (const close of closers.splice(0)) await close()
@@ -198,6 +201,29 @@ describe('the access token and the start marker', () => {
     child.kill('SIGKILL')
     await exited
     expect(lifecycle.readRecordedPort().trust).toBe('stale')
+  })
+
+  it('reads a server that dies while the command runs as gone, though its start time could not be read', async () => {
+    probe.broken = true
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+    })
+    closers.push(async () => {
+      child.kill('SIGKILL')
+    })
+    await new Promise((r) => setTimeout(r, 200))
+    const gated = await gatedDashboard()
+    recordPort(gated.port)
+    writeMarker({ ...liveMarker(gated.port), pid: child.pid! })
+    // No start time to go by: the port file counts on its own, as before the marker.
+    expect(lifecycle.readRecordedPort().trust).toBe('unverified')
+    const exited = new Promise((r) => child.once('exit', r))
+    child.kill('SIGKILL')
+    await exited
+    // Its pid is free now, and its port anyone's: no token.
+    expect(lifecycle.readRecordedPort().trust).toBe('stale')
+    expect((await lifecycle.discoverDashboard()).port).toBeNull()
+    expect(gated.cookies).not.toContain(withToken)
   })
 })
 
