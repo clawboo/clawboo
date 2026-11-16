@@ -197,7 +197,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search emoji…"
-                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+                className="w-full rounded-lg border border-border bg-field px-3 py-2 text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
               />
             </div>
 
@@ -239,7 +239,7 @@ export function TeamIconPicker({ value, onChange, accentColor }: TeamIconPickerP
                   if (v) onChange(v)
                 }}
                 placeholder="Paste any emoji"
-                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-center text-[14px] outline-none transition placeholder:text-[11px] placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-field px-2 py-1.5 text-center text-[14px] outline-none transition placeholder:text-[11px] placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
               />
             </div>
           </div>,

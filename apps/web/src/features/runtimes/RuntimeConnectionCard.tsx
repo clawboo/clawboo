@@ -397,7 +397,7 @@ export function RuntimeConnectionCard({
               }}
               placeholder={entry.keyPlaceholder}
               aria-label={`${entry.name} API key`}
-              className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 pr-10 font-mono text-[12.5px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 placeholder:text-foreground/30"
+              className="w-full rounded-lg border border-border bg-field px-3 py-2.5 pr-10 font-mono text-[12.5px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 placeholder:text-foreground/30"
             />
             <button
               type="button"

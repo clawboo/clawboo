@@ -41,7 +41,7 @@ flowchart TD
     init["inline script in index.html"] -->|"sets .dark before React mounts"| dark
 ```
 
-The indirection is what makes the theme switch at runtime. A utility such as `bg-surface` resolves to `--color-surface`, which the `@theme inline` block maps to `var(--surface)`, which `:root` sets to `#ffffff` and `.dark` sets to `#111827`. Flip the class and every `bg-surface` element repaints, with no rebuild. Component code names a semantic token, never a color.
+The indirection is what makes the theme switch at runtime. A utility such as `bg-surface` resolves to `--color-surface`, which the `@theme inline` block maps to `var(--surface)`, which `:root` sets to `#ffffff` and `.dark` sets to `#212025`. Flip the class and every `bg-surface` element repaints, with no rebuild. Component code names a semantic token, never a color.
 
 ## Theme architecture
 
@@ -53,7 +53,7 @@ Just above that block, `@custom-variant dark (&:where(.dark, .dark *))` makes `d
 
 ### `:root` light, `.dark` overrides
 
-Light is the default. `:root` declares every token with its light value and `color-scheme: light`; `.dark` redeclares the same names with dark values and `color-scheme: dark`. The light theme is paper white (`--background: #f8fafc`, `--surface: #ffffff`, slate-900 text). The dark theme uses `--background: #0a0e1a`, `--surface: #111827` and `#e8e8e8` text. Brand colors are deeper in light mode for contrast on white: OpenClaw Red is `#d82947` in light and `#e94762` in dark, mint `#059669` and `#34d399`, amber `#d97706` and `#fbbf24`.
+Light is the default. `:root` declares every token with its light value and `color-scheme: light`; `.dark` redeclares the same names with dark values and `color-scheme: dark`. The light theme is paper white (`--background: #f8fafc`, `--surface: #ffffff`, slate-900 text). The dark theme is a neutral near-black palette, greys with a faint violet lean, in three steps: the frame (`--frame` and `--frame-column`, `#131215`: the team rail, the agent column and the top bar), the content (`--background`, `#1b1a1f`: every view's main area), and the raised step (`--surface`, `#212025`: panes, the account bar, the composer; `--card` and `--surface-raised` are `#232227`). Text is `#f6f5fa`, secondary text `#b1b2b6` and muted text `#96989e`; a selected row is `--muted` (`#2c2b30`), and a field (`--input`, `#18181b`) sits a little darker than the surface it is on. In light mode `--frame` is the paper grey and `--frame-column` stays white, so the light theme looks as it always has. Brand colors are deeper in light mode for contrast on white: OpenClaw Red is `#d82947` in light and `#eb556e` in dark, mint `#059669` and `#34d399`, amber `#d97706` and `#fbbf24`.
 
 A few tokens look the same in both themes:
 
@@ -67,7 +67,7 @@ Two pieces apply the `.dark` class, and they must agree:
 1. **`ThemeProvider`** (`apps/web/src/features/theme/ThemeProvider.tsx`) is a React context with the preference `theme: 'system' | 'light' | 'dark'` and the result `resolvedTheme: 'light' | 'dark'`. It reads `clawboo.theme` through the scoped storage helper (`apps/web/src/lib/clientStorage.ts`, which puts the base path in front of the key under `CLAWBOO_BASE_PATH`) and defaults to `'light'` when nothing is stored, so onboarding happens in light mode. It follows `prefers-color-scheme` only while the preference is System, and adds or removes `.dark` on `document.documentElement` whenever `resolvedTheme` changes. `useTheme()` returns `{ theme, resolvedTheme, setTheme }` and throws outside the provider. The provider wraps the app in `apps/web/src/app/providers.tsx`.
 2. **An inline script in `apps/web/index.html`** runs before React mounts, so the page never flashes the wrong theme. It repeats the provider's logic: read `clawboo.theme` (spelled with the base path from `window.__CLAWBOO_BASE__` in front, as the helper spells it, falling back to the unprefixed key), default to `'light'`, resolve System through `matchMedia`, set `.dark`.
 
-The switch the user clicks is `ThemeToggle` (`apps/web/src/features/theme/ThemeToggle.tsx`): a segmented System, Light and Dark radio group with icons only (Monitor, Sun, Moon). Each segment calls `setTheme` directly, and the System segment's tooltip shows the mode it resolves to, such as "System (dark)".
+The switch the user clicks is `ThemeToggle` (`apps/web/src/features/theme/ThemeToggle.tsx`): a segmented System, Light and Dark radio group with icons only (Monitor, Sun, Moon), in the account bar at the bottom of the sidebar (`apps/web/src/features/layout/AccountBar.tsx`), stacked upright when the sidebar is only the team rail. Each segment calls `setTheme` directly, and the System segment's tooltip shows the mode it resolves to, such as "System (dark)".
 
 <Info>
 The inline script and `ThemeProvider`'s resolver are deliberate copies, because the script must run before any bundle loads. Keep the storage key, the light default and the System branch identical in both; `themePrePaint.test.ts` fails when the script's key stops matching the helper's. A hard refresh that flashes the wrong theme means they have drifted.
@@ -86,7 +86,7 @@ The visual hierarchy has four tiers. Tier 1 is the base `--surface`. Tiers 2 to 
 | 3: Floating | `.surface-floating-tier` | Popovers, dropdowns, context menus, tooltips | Glass: translucent + `blur(16px) saturate(140%)`                 |
 | 4: Overlay  | `.surface-overlay-tier`  | Modals, sheets, command palettes, wizards    | Glass: translucent + `blur(20px) saturate(140%)` + lifted shadow |
 
-The raised tier uses `--surface-raised` (`#fdfdfe` light, `#141b2e` dark), `--border` and `--shadow-raised`. The floating and overlay tiers use translucent surfaces (`--surface-floating`, `--surface-overlay`), borders that read on glass (`--border-floating`, `--border-overlay`) and heavier shadows (`--shadow-floating`, `--shadow-overlay`). Shadows follow the theme: soft and slate-tinted in light mode, a deep black drop in dark mode.
+The raised tier uses `--surface-raised` (`#fdfdfe` light, `#232227` dark), `--border` and `--shadow-raised`. The floating and overlay tiers use translucent surfaces (`--surface-floating`, `--surface-overlay`), borders that read on glass (`--border-floating`, `--border-overlay`) and heavier shadows (`--shadow-floating`, `--shadow-overlay`). Shadows follow the theme: soft and slate-tinted in light mode, a deep black drop in dark mode.
 
 A tier class brings only background, border, shadow and blur. Radius, padding, an accent border and positioning stay on the element. A glass tier sits over a scrim: `--overlay-scrim` (modal strength) or `--overlay-scrim-soft` (sheet strength). `--code-block-bg` is the matching token for code rows and command previews.
 
@@ -127,13 +127,13 @@ Reduced motion is handled in three places:
 
 A global `:focus-visible` rule draws a 2px ring (`outline: 2px solid var(--primary)`) on every keyboard-focused control. CodeMirror, which draws its own focus, and React Flow's pane and handles are excluded. `.react-flow__node` is not excluded, because nodes are real Tab stops; Boo nodes draw the ring on their inner `.group`, since the node wrapper is a large transparent box around a smaller shape.
 
-`--muted-foreground` holds at least 4.5:1 against the five surface tokens the test checks (`--background`, `--surface`, `--card`, `--popover`, `--surface-raised`) in both themes. `apps/web/src/app/__tests__/tokenContrast.test.ts` parses `globals.css` and enforces the floors: every text token clears 4.5:1 on every surface it is painted on, every status color clears 3:1, and both button-label-on-fill pairs clear 4.5:1. Its `KNOWN_DEBT` list is empty; adding to it means shipping text below AA on purpose.
+`--muted-foreground` holds at least 4.5:1 against the seven surface tokens the test checks (`--background`, `--surface`, `--card`, `--popover`, `--surface-raised`, `--frame`, `--frame-column`) in both themes. `apps/web/src/app/__tests__/tokenContrast.test.ts` parses `globals.css` and enforces the floors: every text token clears 4.5:1 on every surface it is painted on, every status color clears 3:1, and both button-label-on-fill pairs clear 4.5:1. Its `KNOWN_DEBT` list is empty; adding to it means shipping text below AA on purpose.
 
 The brand red is two tokens, because one value cannot do both jobs in dark mode. As text, the red must be light enough to read on dark surfaces; under a white button label, it must be dark enough for the label to read.
 
 | Token             | Role                         | Dark                          | Light               |
 | ----------------- | ---------------------------- | ----------------------------- | ------------------- |
-| `--primary`       | Text, accents, focus ring    | `#e94762` (4.52:1 as text)    | `#d82947`           |
+| `--primary`       | Text, accents, focus ring    | `#eb556e` (4.56:1 as text)    | `#d82947`           |
 | `--primary-solid` | The fill under a white label | `#c83b53` (4.99:1 with white) | aliases `--primary` |
 
 `--destructive` and `--destructive-solid` follow the same pattern. Light mode has no conflict, so the `-solid` tokens alias their base there. Use `bg-primary-solid` or `bg-destructive-solid` when a filled button carries `text-primary-foreground` or `text-destructive-foreground`, and plain `bg-primary` for tints, rings and borders. The contrast test checks the label pairs against the `-solid` fills, and `apps/web/src/app/__tests__/solidFillPairing.test.ts` fails any `.tsx` file that puts a label token on a plain `bg-primary`, `bg-destructive` or `var(--primary)` fill.
@@ -164,7 +164,7 @@ The brand is three accents (OpenClaw Red as primary, mint and amber) plus a cate
 
 | Token       | Light     | Dark      | Role                           |
 | ----------- | --------- | --------- | ------------------------------ |
-| `--primary` | `#d82947` | `#e94762` | OpenClaw Red: accent, emphasis |
+| `--primary` | `#d82947` | `#eb556e` | OpenClaw Red: accent, emphasis |
 | `--mint`    | `#059669` | `#34d399` | Success, working, done         |
 | `--amber`   | `#d97706` | `#fbbf24` | Warning, pending               |
 

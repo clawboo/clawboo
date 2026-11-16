@@ -58,7 +58,7 @@ export function ContentArea() {
   useEffect(() => {
     if (selectedTeamId !== null && !teams.some((t) => t.id === selectedTeamId)) {
       useTeamStore.getState().selectTeam(null)
-      useViewStore.getState().setViewMode({ type: 'welcome' })
+      useViewStore.getState().replaceViewMode({ type: 'welcome' })
     }
   }, [selectedTeamId, teams])
 
@@ -67,7 +67,7 @@ export function ContentArea() {
     if (viewMode.type === 'agent') {
       const exists = agents.some((a) => a.id === viewMode.agentId)
       if (!exists) {
-        useViewStore.getState().setViewMode({ type: 'welcome' })
+        useViewStore.getState().replaceViewMode({ type: 'welcome' })
       }
     }
   }, [viewMode, agents])
@@ -80,7 +80,7 @@ export function ContentArea() {
         const newBooZero = identifyBooZero(agents)
         useBooZeroStore.getState().setBooZeroAgentId(newBooZero)
         if (!newBooZero) {
-          useViewStore.getState().setViewMode({ type: 'welcome' })
+          useViewStore.getState().replaceViewMode({ type: 'welcome' })
         }
       }
     }
@@ -90,7 +90,7 @@ export function ContentArea() {
   useEffect(() => {
     if (viewMode.type === 'groupChat' || viewMode.type === 'teamspace') {
       if (!teams.some((t) => t.id === viewMode.teamId)) {
-        useViewStore.getState().setViewMode({ type: 'welcome' })
+        useViewStore.getState().replaceViewMode({ type: 'welcome' })
       }
     }
   }, [viewMode, teams])
@@ -108,7 +108,7 @@ export function ContentArea() {
     }
     const rooms = roomsByTeam.get(viewMode.teamId) ?? []
     if (!rooms.some((r) => r.id === viewMode.roomId)) {
-      useViewStore.getState().openGroupChat(viewMode.teamId)
+      useViewStore.getState().replaceViewMode({ type: 'groupChat', teamId: viewMode.teamId })
     }
   }, [viewMode, roomsByTeam, roomsLoaded])
 

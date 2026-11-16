@@ -125,6 +125,10 @@ export const ENGINE_FEATURES = [
   // sign-in proxy token whose `control` claim names that agent
   // (proxyIdentityControlClaim: required).
   'computer.controlClaim',
+  // The dashboard draws a slim top bar when an app that shows it in its own window
+  // sets `data-clawboo-embed-titlebar` on <html> (with --clawboo-titlebar-inset and
+  // --clawboo-titlebar-left). A layout the dashboard supports; it has no route.
+  'ui.embedTitlebar',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 

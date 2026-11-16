@@ -510,7 +510,7 @@ export function AgentModelSelector({
                       placeholder="provider/model-id"
                       autoFocus
                       spellCheck={false}
-                      className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+                      className="min-w-0 flex-1 rounded-lg border border-border bg-field px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
                     />
                     <Button
                       variant="primary"

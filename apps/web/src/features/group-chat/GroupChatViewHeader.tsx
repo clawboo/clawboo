@@ -139,7 +139,7 @@ export function GroupChatViewHeader({
           shrunk 30→24 px and the count pill moved inline (no vertical stack)
           to fit comfortably in 44 px. Tighter at phone width, where the card
           toggles share the row with the room's name and members. */}
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 max-sm:gap-2">
+      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-page-header px-3 max-sm:gap-2">
         <CollapsedSidebarToggle className="-mr-1" />
         {/* Left out at phone width, where the room's name and members need the
             room; the drawer's rail shows the team. */}

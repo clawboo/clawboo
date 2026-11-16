@@ -801,7 +801,8 @@ The answer is built from the running process alone: no database read, no network
     "auth.appLink": false,
     "auth.roles": false,
     "auth.personCheck": false,
-    "computer.controlClaim": false
+    "computer.controlClaim": false,
+    "ui.embedTitlebar": true
   }
 }
 ```
@@ -858,6 +859,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `auth.roles`                                                                | An administrator enforces [roles](/guides/sso-proxy#roles) (`proxyIdentityRoles: enforce`): the role in each token decides what its person may do. `GET /api/access/identity` says what this person may do.                                                                                                                                                              |
 | `auth.personCheck`                                                          | In releases after 0.8.0. Only a person a verified token names acts as a person (`personCheck: verified`, or the lane's `required` mode): the dashboard's page alone does not, and the Gateway WebSocket and every route of an agent's screen need such a person too. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). |
 | `computer.controlClaim`                                                     | In releases after 0.8.0. Taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent (`proxyIdentityControlClaim: required`). See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen).                                                                                                  |
+| `ui.embedTitlebar`                                                          | Always, in releases after 0.8.0. An app that shows the dashboard in its own window can ask for the slim top bar by setting `data-clawboo-embed-titlebar` on the page. It has no route. See [Show the dashboard in an app's window](/guides/app-window).                                                                                                                  |
 
 ### For client authors
 

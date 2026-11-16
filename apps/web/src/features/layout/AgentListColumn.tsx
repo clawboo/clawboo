@@ -12,7 +12,6 @@ import {
   Network,
   Pin,
   Plus,
-  Settings,
   Plug,
   Search,
   ShoppingCart,
@@ -30,7 +29,6 @@ import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useTeamStore, type Team } from '@/stores/team'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useViewStore, type NavView } from '@/stores/view'
-import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { useToastStore } from '@/stores/toast'
@@ -38,7 +36,6 @@ import { confirm } from '@/stores/confirm'
 import { useBooZeroStore, identifyBooZero, isBooZeroEligibleForTeam } from '@/stores/booZero'
 import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
-import { ThemeToggle } from '@/features/theme/ThemeToggle'
 import { OpenOnAnotherDeviceButton } from '@/features/access/OpenOnAnotherDevice'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
@@ -49,6 +46,7 @@ import { RoomDialog } from '@/features/group-chat/RoomDialog'
 import { RoomActionsMenu } from '@/features/group-chat/RoomActionsMenu'
 import { DEFAULT_ROOM_NAME, updateRoom } from '@/lib/roomsClient'
 import type { AgentStatus } from '@clawboo/gateway-client'
+import { useEmbedTitlebar } from '@/features/embedder/embedTitlebar'
 import { closePhoneNav, usePhoneLayout } from './phoneLayout'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -253,12 +251,12 @@ interface NavItem {
   subtitle?: string
 }
 
-// The sidebar's nav, in order (the team's Home sits above it when a team is open, and
-// Settings below it). Settings opens the modal that houses the management /
-// config / insights surfaces (Providers, Runtimes, Fleet, Capabilities, Routines,
-// Tokens Used, Observability, Governance, System, System Health). Memory is
-// DELIBERATELY in both places: here as the graph + list, in the modal as a list
-// (see stores/settingsModal.ts).
+// The sidebar's nav, in order (the team's Home sits above it when a team is open).
+// Settings, in the account bar at the bottom of the sidebar, opens the modal that
+// houses the management / config / insights surfaces (Providers, Runtimes, Fleet,
+// Capabilities, Routines, Tokens Used, Observability, Governance, System, System
+// Health). Memory is DELIBERATELY in both places: here as the graph + list, in
+// the modal as a list (see stores/settingsModal.ts).
 const NAV: NavItem[] = [
   // `'graph'` is the Org chart: every team, with Boo Zero at the top.
   { id: 'graph', icon: Network },
@@ -593,11 +591,12 @@ export function AgentListColumn() {
 
   const viewMode = useViewStore((s) => s.viewMode)
   const inboxCount = useInboxCount()
-  const settingsOpen = useSettingsModalStore((s) => s.open)
 
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const columnCollapsed = useViewStore((s) => s.columnCollapsed)
+  // Under the slim top bar the sidebar toggle sits in the bar, not here.
+  const embedBar = useEmbedTitlebar()
   const phone = usePhoneLayout()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showRoomDialog, setShowRoomDialog] = useState(false)
@@ -764,7 +763,7 @@ export function AgentListColumn() {
   return (
     // Width, border and the drag handle belong to the sidebar shell (AppSidebar),
     // which lays this out at its natural width or wider and clips it when narrower.
-    <div className="flex h-full w-full flex-col bg-surface" data-testid="agent-list-column">
+    <div className="flex h-full w-full flex-col bg-frame-column" data-testid="agent-list-column">
       {/* Top row: the team's name, a search icon that opens into a field in this
           same row, and the sidebar toggle. */}
       <div className="flex h-11 shrink-0 items-center gap-1 pl-3.5 pr-2 pt-1.5">
@@ -813,11 +812,13 @@ export function AgentListColumn() {
         )}
         {/* In the hover peek of a collapsed sidebar the rail holds the toggle,
             right under the pointer that opened the peek. At phone width the
-            column sits in the drawer, and its toggle closes the drawer. */}
+            column sits in the drawer, and its toggle closes the drawer. Under
+            the slim top bar the toggle lives in the bar. */}
         {phone ? (
           <SidebarToggle collapsed={false} onClick={closePhoneNav} />
         ) : (
-          !columnCollapsed && (
+          !columnCollapsed &&
+          !embedBar && (
             <SidebarToggle
               collapsed={false}
               onClick={() => useViewStore.getState().setColumnCollapsed(true)}
@@ -974,7 +975,8 @@ export function AgentListColumn() {
       {/* Divider between Create Boo and nav */}
       <div className="mx-3 my-2 border-t border-border" />
 
-      {/* Nav: Home (when a team is open), the work surfaces, then Settings. */}
+      {/* Nav: Home (when a team is open), then the work surfaces. Settings and
+          the theme switch sit in the account bar under the whole sidebar. */}
       <div className="flex flex-col gap-0.5 px-2">
         {hasTeam && selectedTeam && (
           <TeamspaceButton
@@ -992,34 +994,13 @@ export function AgentListColumn() {
             onClick={() => useViewStore.getState().navigateTo(item.id)}
           />
         ))}
-        <button
-          type="button"
-          data-testid="nav-settings"
-          onClick={() => useSettingsModalStore.getState().openSettings()}
-          title="Settings (⌘,)"
-          className={[
-            'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150 cursor-pointer',
-            settingsOpen
-              ? 'bg-foreground/[0.06] font-semibold text-foreground'
-              : 'font-medium text-foreground/60 hover:bg-foreground/[0.035] hover:text-foreground/90',
-          ].join(' ')}
-        >
-          <Settings
-            size={17}
-            strokeWidth={2}
-            aria-hidden
-            style={{ color: settingsOpen ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)' }}
-          />
-          <span className="truncate">Settings</span>
-        </button>
       </div>
 
-      {/* Footer: a sign-in link for a second browser or a phone, then the theme
-          toggle. The GitHub Star CTA lives in the top bar. */}
+      {/* Footer: a sign-in link for a second browser or a phone. The GitHub Star
+          CTA lives in the top bar. */}
       <div className="mx-3 my-1.5 border-t border-border" />
-      <div className="flex flex-col gap-0.5 px-2 pb-3">
+      <div className="flex flex-col gap-0.5 px-2 pb-2">
         <OpenOnAnotherDeviceButton />
-        <ThemeToggle />
       </div>
 
       <CreateBooModal

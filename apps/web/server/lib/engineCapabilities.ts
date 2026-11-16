@@ -231,6 +231,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'auth.personCheck': personCheckMode() === 'verified',
     // The administrator's switch: a take over needs the proxy's control claim.
     'computer.controlClaim': controlClaimRequired(),
+    // The dashboard page's own layout, so no route and no switch: an app that
+    // shows it in its own window can ask for the slim top bar.
+    'ui.embedTitlebar': true,
   }
   return {
     version,
