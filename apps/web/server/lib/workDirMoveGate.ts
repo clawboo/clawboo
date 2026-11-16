@@ -4,6 +4,8 @@
 // may run until the folders are where the rest of the server expects them:
 // - `GET /api/health` answers 200 with `"status": "migrating"` and the count of
 //   items done and left;
+// - the liveness probe (`GET /api/system/live`), which anyone may ask, answers
+//   503 with `{ "ok": false }` and nothing about why;
 // - every other request answers 503 with `Retry-After: 2`;
 // - a WebSocket upgrade is refused the same way.
 // Mounted after the access gate, so the answers need the same sign-in as ever.
@@ -12,12 +14,21 @@ import type { Duplex } from 'node:stream'
 
 import type { NextFunction, Request, Response } from 'express'
 
+import { isLivenessRequest } from '@clawboo/gateway-proxy'
+
 import { workDirMoveProgress } from './workDirMigration'
 
 export function refuseWhileMoving(req: Request, res: Response, next: NextFunction): void {
   const moving = workDirMoveProgress()
   if (!moving) {
     next()
+    return
+  }
+  if (isLivenessRequest(req)) {
+    res.removeHeader('X-Powered-By')
+    res.setHeader('Retry-After', '2')
+    res.setHeader('Cache-Control', 'no-store')
+    res.status(503).json({ ok: false })
     return
   }
   if (req.method === 'GET' && req.path === '/api/health') {

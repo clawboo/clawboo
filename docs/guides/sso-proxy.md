@@ -25,6 +25,11 @@ keywords:
     'take over',
     'proxyIdentityControlClaim',
     'CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM',
+    'reader key',
+    'proxyIdentityReaderPublicKey',
+    'CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY',
+    'liveness',
+    '/api/system/live',
   ]
 ---
 
@@ -77,31 +82,32 @@ With `request` binding every token must carry:
 
 - `htm`, the request's method, and `htu`, its path. Only the path is compared, never the query, and exactly as written: the same letter case, percent-encoding and `.` or `..` segments as the request's. `htu` can also be a full `https` or `http` URL, of which only the path counts; a URL whose path has `.` or `..` segments matches no request. It is the path as Clawboo receives it, after any rewriting your proxy does, so it includes the [path prefix](/guides/self-host-securely#serve-clawboo-under-a-path-prefix) when you use one.
 - `iat` and `exp`, with `exp` no more than `proxyIdentityMaxLifetime` seconds after `iat` (60 by default, 300 at most).
-- `jti`, a unique id. Clawboo accepts each one once. It remembers them in the server's memory, so a restart forgets them, and two Clawboo servers behind one proxy each accept a token once (see [What it does not protect](#what-it-does-not-protect)).
+- `jti`, a unique id. Clawboo accepts each one once. In releases after 0.8.0 it remembers them in its database, so a restart does not forget them; 0.8.0 and older remember them in memory only, so a restart forgets them. Two Clawboo servers with databases of their own each accept a token once (see [What it does not protect](#what-it-does-not-protect)).
 
 With `session` binding a token needs only `sub` and `exp`. If it carries `htm` or `htu`, those are still checked.
 
 ## Settings
 
-| Operator file key           | Variable                               | Default            | What it sets                                                                                                                                                                      |
-| --------------------------- | -------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `proxyIdentity`             | `CLAWBOO_PROXY_IDENTITY`               | `off`              | `off`, `on` or `required`                                                                                                                                                         |
-| `proxyIdentityHeader`       | `CLAWBOO_PROXY_IDENTITY_HEADER`        | `clawboo-identity` | The header that carries the token. A `Bearer ` prefix is allowed                                                                                                                  |
-| `proxyIdentityJwksUrl`      | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`      | unset              | The proxy's key set. `https`, or plain `http` only to this computer                                                                                                               |
-| `proxyIdentityPublicKey`    | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`    | unset              | The proxy's public key: a PEM public key, a JWK or a JWKS                                                                                                                         |
-| `proxyIdentityIssuer`       | `CLAWBOO_PROXY_IDENTITY_ISSUER`        | unset              | The `iss` every token must carry                                                                                                                                                  |
-| `proxyIdentityAudience`     | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`      | unset              | The `aud` every token must carry                                                                                                                                                  |
-| `proxyIdentityBinding`      | `CLAWBOO_PROXY_IDENTITY_BINDING`       | `request`          | `request` or `session`                                                                                                                                                            |
-| `proxyIdentityMaxLifetime`  | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME`  | `60`               | The longest `exp - iat` a request-bound token may have, in seconds, from 1 to 300                                                                                                 |
-| `proxyIdentityNameClaim`    | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`    | `name`             | The claim with the person's name. Without it, `email`, then `preferred_username`                                                                                                  |
-| `proxyIdentityRoleClaim`    | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`    | `role`             | The claim with the person's role. A list is joined with commas                                                                                                                    |
-| `proxyIdentityRoles`        | `CLAWBOO_PROXY_IDENTITY_ROLES`         | `off`              | `off`, or `enforce` to let the role decide what the person may do ([Roles](#roles))                                                                                               |
-| `proxyIdentityControlClaim` | `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM` | `off`              | `off`, or `required` for a take over to need the proxy's `control` claim ([Taking over a screen](#taking-over-a-screen)). In releases after 0.8.0                                 |
-| `personCheck`               | `CLAWBOO_PERSON_CHECK`                 | `page`             | `page`, or `verified` for only a person a token names to act as a person ([Only signed requests act as a person](#only-signed-requests-act-as-a-person)). In releases after 0.8.0 |
+| Operator file key              | Variable                                   | Default            | What it sets                                                                                                                                                                                    |
+| ------------------------------ | ------------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proxyIdentity`                | `CLAWBOO_PROXY_IDENTITY`                   | `off`              | `off`, `on` or `required`                                                                                                                                                                       |
+| `proxyIdentityHeader`          | `CLAWBOO_PROXY_IDENTITY_HEADER`            | `clawboo-identity` | The header that carries the token. A `Bearer ` prefix is allowed                                                                                                                                |
+| `proxyIdentityJwksUrl`         | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`          | unset              | The proxy's key set. `https`, or plain `http` only to this computer                                                                                                                             |
+| `proxyIdentityPublicKey`       | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`        | unset              | The proxy's public key: a PEM public key, a JWK or a JWKS                                                                                                                                       |
+| `proxyIdentityIssuer`          | `CLAWBOO_PROXY_IDENTITY_ISSUER`            | unset              | The `iss` every token must carry                                                                                                                                                                |
+| `proxyIdentityAudience`        | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`          | unset              | The `aud` every token must carry                                                                                                                                                                |
+| `proxyIdentityBinding`         | `CLAWBOO_PROXY_IDENTITY_BINDING`           | `request`          | `request` or `session`                                                                                                                                                                          |
+| `proxyIdentityMaxLifetime`     | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME`      | `60`               | The longest `exp - iat` a request-bound token may have, in seconds, from 1 to 300                                                                                                               |
+| `proxyIdentityNameClaim`       | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`        | `name`             | The claim with the person's name. Without it, `email`, then `preferred_username`                                                                                                                |
+| `proxyIdentityRoleClaim`       | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`        | `role`             | The claim with the person's role. A list is joined with commas                                                                                                                                  |
+| `proxyIdentityRoles`           | `CLAWBOO_PROXY_IDENTITY_ROLES`             | `off`              | `off`, or `enforce` to let the role decide what the person may do ([Roles](#roles))                                                                                                             |
+| `proxyIdentityControlClaim`    | `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM`     | `off`              | `off`, or `required` for a take over to need the proxy's `control` claim ([Taking over a screen](#taking-over-a-screen)). In releases after 0.8.0                                               |
+| `proxyIdentityReaderPublicKey` | `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY` | unset              | The public key of a program running beside Clawboo that makes its own reads: a PEM public key, a JWK or a JWKS ([A program beside Clawboo](#a-program-beside-clawboo)). In releases after 0.8.0 |
+| `personCheck`                  | `CLAWBOO_PERSON_CHECK`                     | `page`             | `page`, or `verified` for only a person a token names to act as a person ([Only signed requests act as a person](#only-signed-requests-act-as-a-person)). In releases after 0.8.0               |
 
 Set exactly one of `proxyIdentityJwksUrl` and `proxyIdentityPublicKey`, and both the issuer and the audience. Without the audience, a token your sign-in provider made for any other app would do. A claim name can be a dotted path into the token, such as `realm_access.roles`. In an environment variable, a PEM key can be written on one line with `\n` for each line break.
 
-Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; when the header is one Clawboo or a browser already uses, such as `cookie` or `host`; or when `proxyIdentityRoles` is `enforce` and `proxyIdentity` is not `required`. In releases after 0.8.0 it also refuses `personCheck: verified` with `proxyIdentity` off, and `proxyIdentityControlClaim: required` with `proxyIdentity` off or with `session` binding.
+Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; when the header is one Clawboo or a browser already uses, such as `cookie` or `host`; or when `proxyIdentityRoles` is `enforce` and `proxyIdentity` is not `required`. In releases after 0.8.0 it also refuses `personCheck: verified` with `proxyIdentity` off, and `proxyIdentityControlClaim: required` with `proxyIdentity` off or with `session` binding. In releases after 0.8.0 it also refuses `proxyIdentityReaderPublicKey` with `proxyIdentity` off, or when it holds a key that `proxyIdentityPublicKey` or `CLAWBOO_APP_LINK_PUBLIC_KEY` holds too.
 
 **Keep these settings out of agents' reach.** Agents run as the same user as Clawboo, so an agent that can change these settings can put in its own key and sign in as anyone after the next restart. Set the variables in your service manager, or keep the operator file somewhere that user can read but not change, such as a root-owned `/etc/clawboo/operator.json`: the file and every folder above it owned by another user, and none of them writable by Clawboo's user, except a sticky folder such as `/tmp`, which lets a user rename only what it owns. When the settings come from a file Clawboo's user owns, can write, or can replace through a folder above it, the server logs a `SECURITY:` warning at startup. On Windows, Clawboo cannot check who can change a file (Node reads neither owners nor access lists there), so it logs that warning whenever these settings come from the operator file. Let only administrators change the file, or set the variables in the service's environment.
 
@@ -351,7 +357,7 @@ It works with either `personCheck` mode and needs the lane on. Both switches are
 - **Script on the dashboard's own address passes every check.** Your proxy signs whatever the signed-in person's browser sends, so a page served from the dashboard's address could act as them, a signed token included. Keep anything an agent wrote off that address.
 - **A removal or a role change waits for the tokens.** Clawboo knows a person only from the token on each request, so a change at your proxy reaches it once the proxy stops issuing tokens for that person, or issues them with the new role, and the tokens it issued before have expired. With `request` binding that is within seconds; with `session` binding a token can last hours (see [Choose a binding](#choose-a-binding)), so end the person's proxy session too. From then on a removed person's requests are refused, and a demoted person's may do only what the new role allows.
 - **A stream that is already open keeps running.** A live view, such as a chat's or the event stream, is checked when it opens, so it runs until it closes, unless its person is a guest whose `access_until` passes. Close a person's open connections at the proxy when you remove them or take a role away.
-- **A token someone copies works for its lifetime.** With `session` binding that can be hours, on any path. With `request` binding it is once, for one request, within seconds, per Clawboo server: the list of used tokens is kept in memory, so a token used just before a restart works once more after it until it expires, and so does one sent to a second server behind the same proxy. Clawboo never logs tokens, but your proxy's logs might.
+- **A token someone copies works for its lifetime.** With `session` binding that can be hours, on any path. With `request` binding it is once, for one request, within seconds. In releases after 0.8.0 the list of used tokens is kept in Clawboo's database, so a restart does not forget it; in 0.8.0 and older it is kept in memory only, so a token used just before a restart works once more after it until it expires. A token sent to a second Clawboo server with a database of its own works there once too. Clawboo never logs tokens, but your proxy's logs might.
 - **An agent that can use your signed-in browser can act as you.** If an agent drives a browser profile that is signed in to your proxy, its requests carry your token.
 - **The proxy must be the only way in from outside.** A request that reaches Clawboo without passing the proxy carries no token, which `required` refuses and `on` lets through unnamed.
 - **Some actions carry no name.** OpenClaw agents' 1:1 chat and everything else sent over the Gateway WebSocket (the connection is checked when it opens, but the messages on it are not), edits to a task's title, description or priority, and work started by routines.
@@ -379,6 +385,62 @@ An app's person may allow an approval once or deny it, but not allow it always: 
 
 `GET /api/access/identity` answers `"appLink": true` when Clawboo has the app's key, so the app can check its link. A request it signed should come back with its person.
 
+## A program beside Clawboo
+
+Available in releases after 0.8.0. Clawboo 0.8.0 and older ignore `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY`, and refuse to start with `proxyIdentityReaderPublicKey` in the operator file.
+
+A companion process running beside Clawboo, such as one that tells you when an approval is waiting, may need to read a few things on its own, when no person is there to sign. With `proxyIdentity` set to `required`, a request without a token is refused, and signing these reads as a person would record them as that person's. Give the program a key pair of its own instead, and set its public key in `proxyIdentityReaderPublicKey` (or `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY`), in the same forms the proxy's key takes. It signs a token for each read:
+
+- in the `clawboo-reader-identity` header, with or without a `Bearer ` prefix;
+- signed with any algorithm the proxy's tokens may use, with its own key;
+- `iss` `clawboo-reader` and `aud` `clawboo-engine`;
+- `sub` the program's id, which must start with `reader:` and have more after it, such as `reader:approvals`;
+- request-bound, always: `htm`, `htu`, `iat`, `exp` no more than `proxyIdentityMaxLifetime` after `iat`, and a `jti` it never reuses.
+
+Its token reaches these reads and nothing else, each a `GET` (or `HEAD`) with exactly this query:
+
+| Read                                                                                 | Query                                                                                                                               |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| [Is the server up](#the-liveness-probe)                                              | `GET /api/system/live`, no query                                                                                                    |
+| [The running version](/reference/rest-api/system#get-%2Fapi%2Fsystem%2Fself-version) | `GET /api/system/self-version?local=1`                                                                                              |
+| The runtimes                                                                         | `GET /api/runtimes`, no query                                                                                                       |
+| The teams                                                                            | `GET /api/teams`, no query                                                                                                          |
+| The agents                                                                           | `GET /api/agents`, no query                                                                                                         |
+| The approvals waiting for an answer                                                  | `GET /api/tools/approvals?status=pending`                                                                                           |
+| Approvals asked and answered, live                                                   | `GET /api/obs/stream?kinds=approval_requested,approval_resolved&afterSeq=<n>`, or the `Last-Event-ID` header in place of `afterSeq` |
+| The newest or oldest approval event                                                  | `GET /api/obs/events?kinds=approval_requested,approval_resolved&limit=1`, with `order=desc`, `order=asc` or no `order`              |
+
+Anything else gets `403` before the token is checked, so a refused request never spends it: another route, another method, another query (other `kinds`, a missing `kinds`, a `limit` other than `1`, a key added or repeated), a trailing slash or another letter case:
+
+```json
+{
+  "ok": false,
+  "error": "role",
+  "reason": "reader",
+  "message": "The reader key may make only the reads on its list."
+}
+```
+
+Clawboo matches the parsed query, not the text: the same keys with the same values, in any order, and nothing more. A key sent twice is refused. Each value is compared exactly once decoded, so the comma in `kinds` may be sent as `%2C`, but `kinds` must name the two kinds in the order above, and `limit=01` or `order=DESC` is refused. `afterSeq` and `Last-Event-ID` are digits only. Under [`CLAWBOO_BASE_PATH`](/reference/environment-variables#clawboo_base_path) the list is matched on the path after the base path, and `htu` names the path as sent, base path included, as for a person's token.
+
+Each of these reads is workspace-wide by design: no team scoping applies, with or without [Roles](#roles), and with roles enforced the program gets exactly this list whatever its token says. The two event reads stay limited to the two approval kinds. What else it holds to:
+
+- **It is never a person.** Its token never names a person, passes no [person check](#only-signed-requests-act-as-a-person), even with the dashboard's own marks on the request, and nothing records it as anyone. No name, role or other claim is read from it.
+- **One token per request.** A request that carries its token and a sign-in proxy's or an app's is refused with `two-tokens`. While its key is set, a sign-in proxy's token may not name a `reader:` subject (refused with `claims`).
+- **Never the Gateway WebSocket.** An upgrade that carries its token gets `401 Unauthorized`, and the server logs `binding`, even beside a good person's token. A route under `/api/mcp/` gets the same `403` as any other read off the list.
+- **Its own key.** Clawboo refuses to start when `proxyIdentityReaderPublicKey` holds a key that `proxyIdentityPublicKey` or `CLAWBOO_APP_LINK_PUBLIC_KEY` holds too, however each is written. With a `proxyIdentityJwksUrl`, whose keys Clawboo cannot see at startup, it compares the reader key with the key set that URL serves, whatever each set calls its keys, and refuses every reader token with `shared-key` while the set holds it, or with `keys-unavailable` while the set cannot be fetched. It reads the set again at most every 10 minutes. A key that signs reads must never be able to sign a person: when you see `shared-key`, give the program a key pair of its own, since a key your proxy publishes can sign a person through the proxy's own header.
+- **A key per server.** Every reader token carries the same `aud`, `clawboo-engine`, so give each Clawboo server a reader key pair of its own. With one key on several servers, a token signed for one would be accepted once by each of the others too.
+- **The lane on.** It works in `on` and `required`, with roles enforced or not. With `proxyIdentity` off, the server refuses to start.
+- **The access token too.** Like every request, these still need the access token while it is on (all but the liveness probe).
+
+`GET /api/access/identity` answers `"readerKey": true` when a reader key is set, and the capability flag `auth.readerKey` says the same.
+
+## The liveness probe
+
+Available in releases after 0.8.0. `GET /api/system/live` (or `HEAD`) answers whether Clawboo is up, with no access token and no identity token, in every mode: the access gate and the identity lane both let it through. It answers `200` `{ "ok": true }`, and `503` `{ "ok": false }` while the server cannot serve yet, such as during a work folder move at startup. It says nothing else: no version, no state, nothing about the install, and no rate-limit headers. A server that is not running does not answer. It has a rate limit of its own, 600 requests a minute per client address, so callers that have not signed in never use up the limit the dashboard shares.
+
+Only that exact request is open: another method, a query, a trailing slash or another letter case needs the access token and, in `required` mode, an identity token as ever. A token the probe does carry is checked like any other, and a bad one is refused. The capability flag `system.live` says the probe is there. See [`GET /api/system/live`](/reference/rest-api/system#get-%2Fapi%2Fsystem%2Flive).
+
 ## Refusals
 
 A refused request gets `401` with a JSON body. Its `reason` says why:
@@ -391,33 +453,34 @@ A refused request gets `401` with a JSON body. Its `reason` says why:
 }
 ```
 
-| `reason`           | Meaning                                                                                                     |
-| ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `missing`          | No token, in `required` mode (the error reads "Clawboo needs a signed identity token…")                     |
-| `two-tokens`       | Both a sign-in proxy's token and an [app's](#an-app-that-starts-clawboo) token on one request, with both on |
-| `route`            | An [app's](#an-app-that-starts-clawboo) token on a route the app does not sign for                          |
-| `malformed`        | Not a signed token, an empty header, or the header sent twice                                               |
-| `algorithm`        | Not signed with an allowed algorithm: unsigned (`alg: none`) and shared-secret (`HS256` and so on) tokens   |
-| `signature`        | The signature does not match any of the proxy's keys                                                        |
-| `issuer`           | Another `iss`                                                                                               |
-| `audience`         | Another `aud`                                                                                               |
-| `expired`          | Past its `exp`, or a request-bound token older than the maximum lifetime                                    |
-| `not-yet-valid`    | Issued, or valid only, in the future                                                                        |
-| `lifetime`         | A request-bound token whose `exp` is too far after its `iat`                                                |
-| `binding`          | For another method or path                                                                                  |
-| `replayed`         | A request-bound token Clawboo already accepted                                                              |
-| `claims`           | A required claim is missing or has the wrong type, such as no `sub`, or a `sub` of the other issuer's kind  |
-| `keys-unavailable` | The proxy's key set could not be fetched                                                                    |
+| `reason`           | Meaning                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `missing`          | No token, in `required` mode (the error reads "Clawboo needs a signed identity token…")                                                        |
+| `two-tokens`       | Two issuers' tokens on one request: a sign-in proxy's, an [app's](#an-app-that-starts-clawboo) or a [reader key's](#a-program-beside-clawboo)  |
+| `route`            | An [app's](#an-app-that-starts-clawboo) token on a route the app does not sign for                                                             |
+| `malformed`        | Not a signed token, an empty header, or the header sent twice                                                                                  |
+| `algorithm`        | Not signed with an allowed algorithm: unsigned (`alg: none`) and shared-secret (`HS256` and so on) tokens                                      |
+| `signature`        | The signature does not match any of the proxy's keys                                                                                           |
+| `issuer`           | Another `iss`                                                                                                                                  |
+| `audience`         | Another `aud`                                                                                                                                  |
+| `expired`          | Past its `exp`, or a request-bound token older than the maximum lifetime                                                                       |
+| `not-yet-valid`    | Issued, or valid only, in the future                                                                                                           |
+| `lifetime`         | A request-bound token whose `exp` is too far after its `iat`                                                                                   |
+| `binding`          | For another method or path                                                                                                                     |
+| `replayed`         | A request-bound token Clawboo already accepted                                                                                                 |
+| `claims`           | A required claim is missing or has the wrong type, such as no `sub`, or a `sub` of the other issuer's kind                                     |
+| `keys-unavailable` | The proxy's key set could not be fetched                                                                                                       |
+| `shared-key`       | In releases after 0.8.0: a [reader key's](#a-program-beside-clawboo) token while the key set your proxy's JWKS URL serves holds the reader key |
 
 A refused WebSocket upgrade gets `401 Unauthorized`. The server logs `Proxy identity: refused a request` with the reason, the method and the path, never the token.
 
-A token that verified can still be turned away by a route, with `403` and an `error`, in releases after 0.8.0: `person_only` from a person-only route under [`personCheck: verified`](#only-signed-requests-act-as-a-person) when no token named a person, and `control_claim` from a [take over](#taking-over-a-screen) without the claim for that agent. A Gateway WebSocket upgrade with no person under `verified` gets `403 Forbidden`.
+A refused reader key's token reads "Clawboo refused the identity token signed with its reader key." A token that verified can still be turned away by a route, with `403` and an `error`, in releases after 0.8.0: `person_only` from a person-only route under [`personCheck: verified`](#only-signed-requests-act-as-a-person) when no token named a person, and `control_claim` from a [take over](#taking-over-a-screen) without the claim for that agent. A Gateway WebSocket upgrade with no person under `verified` gets `403 Forbidden`.
 
 <Accordion title="Under the hood">
 
 - Allowed algorithms: `EdDSA` (Ed25519), `ES256`, `ES384`, `ES512`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384` and `PS512`. The algorithm is checked before any key is looked up, so an unsigned token or one "signed" with the public key as an HMAC secret never reaches a key.
 - Tokens are verified with the `jose` library. A key set from a URL is cached for 10 minutes. A token with a key id the cache does not have makes it fetch again, at most once every 30 seconds, and a fetch that takes over 5 seconds fails.
-- Clawboo remembers the `jti` of each request-bound token until it expires, up to 100,000 at a time, in the server's memory only. When that many are live, new tokens are refused rather than an old one forgotten.
+- Clawboo remembers the `jti` of each request-bound token until it expires, up to 100,000 at a time, in the server's memory. When that many are live, new tokens are refused rather than an old one forgotten. In releases after 0.8.0 it also records each one in its database (the `identity_token_uses` table), per issuer, until the token could no longer be accepted, so a restart does not forget it. The records are swept at startup and as tokens are checked. A token issued before the server started is not refused for that: only a second use is. When the database will not take a record, such as on a full disk, the token is checked against memory alone, as in 0.8.0, and the server logs `Proxy identity: could not record a used token`, so a database problem never locks every person out of the dashboard and its health page.
 - The lane runs after the access gate and before any route. It reads a request's path three ways: as sent, with `.` and `..` segments resolved, and as the router matches it. It guards the request when any of them is under `/api/`, in any letter case, so neither `/API/...`, a dot segment nor an absolute-form target such as `GET http://host/api/... HTTP/1.1` steps around it. A runtime's attach token stands in for an identity token only when all three are under `/api/mcp/`. Binding uses the path as sent.
 - Names and roles are stripped of control characters and cut to 200 characters. A `sub` longer than 256 characters, with a control character in it or with spaces around it, is refused.
 

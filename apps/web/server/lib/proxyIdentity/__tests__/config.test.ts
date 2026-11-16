@@ -27,6 +27,9 @@ import {
   parsePublicKeySetting,
   proxyIdentityFileWarning,
   proxyIdentityMode,
+  READER_HEADER,
+  loadReaderConfig,
+  readerKeyOn,
   replaceableBy,
   rolesModeOf,
   type PathProbe,
@@ -696,5 +699,151 @@ describe('the take-over claim (proxyIdentityControlClaim)', () => {
   it('refuses a setting it does not know', () => {
     stubLane({ CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'on' })
     expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+})
+
+describe('the reader key (proxyIdentityReaderPublicKey)', () => {
+  const reader = generateKeyPairSync('ed25519')
+  const readerPem = reader.publicKey.export({ format: 'pem', type: 'spki' }).toString()
+  const readerJwk = reader.publicKey.export({ format: 'jwk' })
+  const READER_ENV = 'CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY'
+
+  /** Every config the server builds, as index.ts builds them. */
+  function load(env: NodeJS.ProcessEnv = {}) {
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()
+    const appLink = loadAppLinkConfig(env)
+    const readerConfig = loadReaderConfig(proxy, appLink)
+    return { proxy, appLink, readerConfig, all: identityConfigs(proxy, appLink, readerConfig) }
+  }
+
+  function loadRefusal(env: NodeJS.ProcessEnv = {}): string {
+    try {
+      load(env)
+    } catch (err) {
+      expect(err).toBeInstanceOf(OperatorSettingsError)
+      return (err as Error).message
+    }
+    throw new Error('expected a refusal')
+  }
+
+  it('is off with nothing set', () => {
+    stubLane()
+    const { readerConfig, all } = load()
+    expect(readerConfig).toBeNull()
+    expect(readerKeyOn()).toBe(false)
+    expect(all.map((c) => c.refuseReaderSubjects)).toEqual([undefined])
+  })
+
+  it('trusts its own key for request-bound reader: tokens in its own header, in on and required', () => {
+    for (const mode of ['on', 'required']) {
+      resetOperatorSettings()
+      stubLane({
+        CLAWBOO_PROXY_IDENTITY: mode,
+        CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME: '120',
+        [READER_ENV]: readerPem,
+      })
+      const { readerConfig, all } = load()
+      expect(readerKeyOn()).toBe(true)
+      expect(readerConfig).toEqual({
+        mode: 'on',
+        header: 'clawboo-reader-identity',
+        issuer: 'clawboo-reader',
+        audience: 'clawboo-engine',
+        binding: 'request',
+        maxLifetimeSeconds: 120,
+        nameClaim: 'name',
+        roleClaim: 'role',
+        keys: {
+          source: 'public-key',
+          jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: readerJwk.x }] },
+        },
+        accountSubjects: 'never',
+        reader: true,
+      })
+      // Beside it, the sign-in proxy may name no reader: subject.
+      expect(all.map((c) => c.refuseReaderSubjects ?? null)).toEqual([true, null])
+      expect(all[1]).toBe(readerConfig)
+    }
+  })
+
+  it('takes a JWK, and is read from the operator file too', () => {
+    writeFileSync(
+      path.join(home, 'operator.json'),
+      JSON.stringify({
+        proxyIdentity: 'on',
+        proxyIdentityPublicKey: edPem,
+        proxyIdentityIssuer: 'https://proxy.example.com',
+        proxyIdentityAudience: 'clawboo',
+        proxyIdentityReaderPublicKey: JSON.stringify(readerJwk),
+      }),
+    )
+    const { readerConfig } = load()
+    expect(readerConfig?.keys).toEqual({
+      source: 'public-key',
+      jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: readerJwk.x }] },
+    })
+    // Set in a file, it is a key an agent could swap: the warning covers it.
+    writeFileSync(
+      path.join(home, 'operator.json'),
+      JSON.stringify({ proxyIdentityReaderPublicKey: readerPem }),
+    )
+    resetOperatorSettings()
+    stubLane()
+    initOperatorSettings()
+    expect(proxyIdentityFileWarning()).toMatch(/every agent it runs/)
+  })
+
+  it('stops the server with the lane off, as the take-over claim does', () => {
+    vi.stubEnv(READER_ENV, readerPem)
+    expect(refusal()).toMatch(/proxyIdentityReaderPublicKey is set but proxyIdentity is off/)
+    // And loadReaderConfig on its own refuses it too, so no caller can go around.
+    resetOperatorSettings()
+    initOperatorSettings()
+    expect(() => loadReaderConfig(null, null)).toThrow(/proxyIdentity is off/)
+  })
+
+  it("stops the server when it is one of the proxy's keys, however each is written", () => {
+    stubLane({ [READER_ENV]: JSON.stringify({ keys: [readerJwk, { ...edJwk, kid: 'other' }] }) })
+    expect(loadRefusal()).toMatch(/proxyIdentityPublicKey holds too/)
+    resetOperatorSettings()
+    stubLane({ CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY: JSON.stringify(edJwk), [READER_ENV]: edPem })
+    expect(loadRefusal()).toMatch(/must never be able to sign a person/)
+  })
+
+  it("stops the server when it is the app link's key", () => {
+    stubLane({ [READER_ENV]: readerPem })
+    expect(loadRefusal({ [APP_LINK_KEY_ENV]: readerPem })).toMatch(
+      /holds the key in CLAWBOO_APP_LINK_PUBLIC_KEY/,
+    )
+  })
+
+  it('refuses a private key without repeating it, and anything that is no key', () => {
+    const privatePem = reader.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
+    stubLane({ [READER_ENV]: privatePem })
+    const message = loadRefusal()
+    expect(message).toMatch(/proxyIdentityReaderPublicKey holds a private key/)
+    expect(message).not.toContain(privatePem.split('\n')[1]!)
+    resetOperatorSettings()
+    stubLane({ [READER_ENV]: 'not a key' })
+    expect(loadRefusal()).toMatch(/must be a PEM public key/)
+  })
+
+  it('keeps its header from a sign-in proxy that uses the same name', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_HEADER: READER_HEADER, [READER_ENV]: readerPem })
+    expect(loadRefusal()).toMatch(/proxyIdentityHeader is clawboo-reader-identity/)
+  })
+
+  it("is never given a role, a take-over claim or the app link's routes", () => {
+    stubLane({
+      CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce',
+      CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required',
+      [READER_ENV]: readerPem,
+    })
+    const { all } = load({ [APP_LINK_KEY_ENV]: edPem })
+    const readerEntry = all.find((c) => c.reader)!
+    expect(readerEntry.roles).toBeUndefined()
+    expect(readerEntry.controlClaim).toBeUndefined()
+    expect(readerEntry.routes).toBeUndefined()
   })
 })

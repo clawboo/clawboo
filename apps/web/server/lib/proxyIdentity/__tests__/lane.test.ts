@@ -17,11 +17,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAccessGate, isRuntimeControlRequest } from '@clawboo/gateway-proxy'
 
 import { accessIdentityGET } from '../../../api/access'
+import { systemLiveGET } from '../../../api/systemLive'
 import { actsAsPerson, attachIdentity } from '../../auth'
 import { createBasePathMiddleware } from '../../basePathMiddleware'
 import { resetOperatorSettings } from '../../operatorSettings'
 import { resetPersonCheckForTests, setPersonCheckMode } from '../../personCheck'
-import { APP_LINK_KEY_ENV, loadAppLinkConfig, type ProxyIdentityConfig } from '../config'
+import { withRouteRules } from '../../roles/guard'
+import {
+  APP_LINK_KEY_ENV,
+  identityConfigs,
+  loadAppLinkConfig,
+  loadReaderConfig,
+  type ProxyIdentityConfig,
+} from '../config'
 import {
   createIdentityLane,
   createProxyIdentityLane,
@@ -35,6 +43,9 @@ const other = generateKeyPairSync('ed25519')
 /** The app link's own key: one per purpose, never the proxy's. */
 const app = generateKeyPairSync('ed25519')
 const APP_PEM = app.publicKey.export({ format: 'pem', type: 'spki' }).toString()
+/** The reader key: a program beside the server making its own reads. */
+const readerKey = generateKeyPairSync('ed25519')
+const READER_PEM = readerKey.publicKey.export({ format: 'pem', type: 'spki' }).toString()
 const ACCESS_TOKEN = 'access-token-for-tests'
 
 function config(mode: 'on' | 'required', controlClaim?: 'required'): ProxyIdentityConfig {
@@ -92,6 +103,25 @@ async function appAssertion(
     .sign(key)
 }
 
+/** A token the reader key signs for one of its reads. `path` is the path alone. */
+async function readerAssertion(
+  method: string,
+  path: string,
+  { sub = 'reader:companion', key = readerKey.privateKey, iss = 'clawboo-reader' } = {},
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+  n += 1
+  return new SignJWT({ name: 'Not a person', role: 'owner', htm: method, htu: path })
+    .setProtectedHeader({ alg: 'EdDSA' })
+    .setIssuer(iss)
+    .setAudience('clawboo-engine')
+    .setSubject(sub)
+    .setIssuedAt(now)
+    .setExpirationTime(now + 30)
+    .setJti(`reader-${n}-${Math.random()}`)
+    .sign(key)
+}
+
 let server: http.Server | null = null
 let base = ''
 let port = 0
@@ -107,6 +137,10 @@ async function start(opts: {
   proxy?: boolean
   /** Read the take-over claim (proxyIdentityControlClaim: required). */
   controlClaim?: boolean
+  /** Also trust the reader key, as the server does when one is set. */
+  reader?: boolean
+  /** Enforce roles on the routes the reader may read, as the server's guard does. */
+  roles?: boolean
 }): Promise<void> {
   const claim = opts.controlClaim ? ('required' as const) : undefined
   if (opts.proxy !== false) vi.stubEnv('CLAWBOO_PROXY_IDENTITY', opts.mode)
@@ -119,7 +153,18 @@ async function start(opts: {
     isRuntimeRequest: (req: http.IncomingMessage) =>
       isRuntimeControlRequest(req, (r) => r.headers['x-test-attach'] === 'minted'),
   }
-  if (opts.appLink) {
+  if (opts.reader) {
+    // As index.ts builds them: the proxy, the app link when on, then the reader.
+    vi.stubEnv('CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY', READER_PEM)
+    if (opts.appLink) vi.stubEnv(APP_LINK_KEY_ENV, APP_PEM)
+    const proxyConfig = config(opts.mode, claim)
+    const appLink = opts.appLink ? loadAppLinkConfig(process.env) : null
+    const configs = identityConfigs(proxyConfig, appLink, loadReaderConfig(proxyConfig, appLink))
+    lane = createIdentityLane(
+      configs.map((c) => ({ config: c, verifier: createAssertionVerifier(c) })),
+      laneOpts,
+    )
+  } else if (opts.appLink) {
     vi.stubEnv(APP_LINK_KEY_ENV, APP_PEM)
     const sources: LaneSource[] = []
     if (opts.proxy !== false) {
@@ -146,7 +191,35 @@ async function start(opts: {
   })
   app.use(lane.http)
   app.use(attachIdentity)
+  if (opts.roles) app.locals['rolesMode'] = 'enforce'
   app.get('/api/access/identity', accessIdentityGET)
+  // The reads on the reader's list, behind the role guard as the server mounts
+  // them, and one route that is not on it.
+  const reads = withRouteRules(express.Router({ caseSensitive: true }), { onUnlisted: () => {} })
+  const echo = (req: express.Request, res: express.Response): void => {
+    res.json({
+      reader: req.reader ?? null,
+      person: req.person ?? null,
+      actsAsPerson: actsAsPerson(req),
+      access: req.access ?? null,
+    })
+  }
+  reads.get('/api/system/live', systemLiveGET)
+  for (const route of [
+    '/api/system/self-version',
+    '/api/runtimes',
+    '/api/teams',
+    '/api/agents',
+    '/api/tools/approvals',
+    '/api/obs/stream',
+    '/api/obs/events',
+    '/api/settings',
+    '/api/health',
+  ]) {
+    reads.get(route, echo)
+  }
+  reads.post('/api/teams', echo)
+  app.use(reads)
   app.post('/api/mcp/tasks', (req, res) => {
     res.json({ runtime: true, person: req.person ?? null })
   })
@@ -257,6 +330,7 @@ describe('on', () => {
         roles: 'off',
         personCheck: 'page',
         controlClaim: 'off',
+        readerKey: false,
         person: { id: 'user-42', name: 'Ada', role: 'admin' },
         you: { id: 'user-42', name: 'Ada', role: 'admin' },
       },
@@ -273,6 +347,7 @@ describe('on', () => {
         roles: 'off',
         personCheck: 'page',
         controlClaim: 'off',
+        readerKey: false,
         person: null,
         you: { id: 'local', name: 'You', role: null },
       },
@@ -526,6 +601,32 @@ describe('under a base path', () => {
     )
     expect(unmounted).toMatchObject({ status: 401, body: { reason: 'binding' } })
   })
+
+  // The reader key's list is matched on the path after the mount is stripped,
+  // and its token binds to the path as it arrived, mount included, as a person's.
+  it("matches the reader's list after the mount, and binds its token to the mount", async () => {
+    await start({ mode: 'required', reader: true, basePath: '/w/abc' })
+    const readerFor = async (path: string) => ({
+      'clawboo-reader-identity': await readerAssertion('GET', path),
+    })
+    const target = '/w/abc/api/tools/approvals?status=pending'
+    // A read on the list, signed for the path as it arrives.
+    const allowed = await get(target, await readerFor('/w/abc/api/tools/approvals'))
+    expect(allowed).toMatchObject({ status: 200, body: { reader: 'reader:companion' } })
+    // A read off the list, under the mount: the reader's 403.
+    const offList = await get('/w/abc/api/settings', await readerFor('/w/abc/api/settings'))
+    expect(offList).toMatchObject({ status: 403, body: { error: 'role', reason: 'reader' } })
+    const offShape = await get(
+      '/w/abc/api/tools/approvals',
+      await readerFor('/w/abc/api/tools/approvals'),
+    )
+    expect(offShape).toMatchObject({ status: 403, body: { reason: 'reader' } })
+    // A token that leaves the mount out of htu binds to another path.
+    const unmounted = await get(target, await readerFor('/api/tools/approvals'))
+    expect(unmounted).toMatchObject({ status: 401, body: { reason: 'binding' } })
+    // The liveness probe under the mount needs no token.
+    expect(await get('/w/abc/api/system/live')).toEqual({ status: 200, body: { ok: true } })
+  })
 })
 
 describe('the Gateway connection', () => {
@@ -589,6 +690,7 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
         roles: 'off',
         personCheck: 'page',
         controlClaim: 'off',
+        readerKey: false,
         person: { id: 'account:u-7', name: 'Grace', role: null },
         you: { id: 'account:u-7', name: 'Grace', role: null },
       },
@@ -860,5 +962,294 @@ describe('the verified person check, over the lane', () => {
       controlClaim: 'off',
       person: null,
     })
+  })
+})
+
+// The reader key: a program running beside the server making its own reads.
+// It reaches its list and nothing else, never acts as a person, and never opens
+// the Gateway connection.
+describe('the reader key', () => {
+  const STREAM = '/api/obs/stream?kinds=approval_requested,approval_resolved'
+  const EVENTS = '/api/obs/events?kinds=approval_requested,approval_resolved&limit=1'
+  const READS = [
+    '/api/system/live',
+    '/api/system/self-version?local=1',
+    '/api/runtimes',
+    '/api/teams',
+    '/api/agents',
+    '/api/tools/approvals?status=pending',
+    `${STREAM}&afterSeq=0`,
+    `${STREAM}&afterSeq=1234`,
+    '/api/obs/stream?afterSeq=7&kinds=approval_requested%2Capproval_resolved',
+    EVENTS,
+    `${EVENTS}&order=desc`,
+    `${EVENTS}&order=asc`,
+    '/api/obs/events?order=desc&limit=1&kinds=approval_requested%2Capproval_resolved',
+  ]
+  /** The page's fetch metadata, which in `page` mode makes a request the person's. */
+  const PAGE = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+  const byReader = async (method: string, target: string) => ({
+    'clawboo-reader-identity': await readerAssertion(method, target.split('?')[0]!),
+  })
+  const REFUSED = {
+    ok: false,
+    error: 'role',
+    reason: 'reader',
+    message: 'The reader key may make only the reads on its list.',
+  }
+
+  it('makes each read on its list, in on and required, roles or not, never as a person', async () => {
+    for (const [mode, roles] of [
+      ['on', false],
+      ['required', false],
+      ['required', true],
+    ] as const) {
+      await start({ mode, reader: true, roles })
+      for (const target of READS) {
+        for (const method of ['GET', 'HEAD']) {
+          const res = await get(target, { ...PAGE, ...(await byReader(method, target)) }, method)
+          expect(res.status, `${mode} roles=${roles} ${method} ${target}`).toBe(200)
+          if (method === 'GET' && target !== '/api/system/live') {
+            expect(res.body, target).toEqual({
+              reader: 'reader:companion',
+              person: null,
+              actsAsPerson: false,
+              access: null,
+            })
+          }
+        }
+      }
+      await new Promise<void>((r) => server!.close(() => r()))
+      server = null
+    }
+  })
+
+  it('refuses every other route, method and query shape with 403, before spending the token', async () => {
+    await start({ mode: 'required', reader: true })
+    const offList: Array<[string, string]> = [
+      ['GET', '/api/settings'],
+      ['GET', '/api/health'],
+      ['GET', '/api/access/identity'],
+      ['POST', '/api/teams'],
+      ['DELETE', '/api/agents'],
+      ['POST', '/api/system/live'],
+      ['POST', '/api/mcp/tasks'],
+      ['GET', '/api/mcp/tasks'],
+      ['GET', '/api/teams?x=1'],
+      ['GET', '/api/teams/'],
+      ['GET', '/API/teams'],
+      ['GET', '/api/runtimes?status=pending'],
+      ['GET', '/api/system/live?x=1'],
+      ['GET', '/api/system/self-version'],
+      ['GET', '/api/system/self-version?local=0'],
+      ['GET', '/api/system/self-version?local=1&local=1'],
+      ['GET', '/api/system/self-version?local=1&extra='],
+      ['GET', '/api/tools/approvals'],
+      ['GET', '/api/tools/approvals?status=resolved'],
+      ['GET', '/api/tools/approvals?status=pending&teamId=T'],
+      ['GET', STREAM],
+      ['GET', '/api/obs/stream?afterSeq=0'],
+      ['GET', '/api/obs/stream?kinds=approval_requested&afterSeq=0'],
+      ['GET', '/api/obs/stream?kinds=approval_resolved,approval_requested&afterSeq=0'],
+      ['GET', '/api/obs/stream?kinds=approval_requested,approval_resolved,error&afterSeq=0'],
+      ['GET', `${STREAM}&kinds=error&afterSeq=0`],
+      ['GET', `${STREAM}&afterSeq=0&activity=1`],
+      ['GET', `${STREAM}&afterSeq=0&teamId=T`],
+      ['GET', `${STREAM}&afterSeq=-1`],
+      ['GET', `${STREAM}&afterSeq=1e3`],
+      ['GET', `${STREAM}&since=0`],
+      ['GET', '/api/obs/events?kinds=approval_requested,approval_resolved'],
+      ['GET', '/api/obs/events?limit=1'],
+      ['GET', '/api/obs/events?kinds=error&limit=1'],
+      ['GET', `${EVENTS.replace('limit=1', 'limit=2')}`],
+      ['GET', `${EVENTS.replace('limit=1', 'limit=01')}`],
+      ['GET', `${EVENTS}&order=random`],
+      ['GET', `${EVENTS}&afterSeq=5`],
+      ['GET', `${EVENTS}&teamId=T`],
+      ['GET', `${EVENTS}&limit=1`],
+    ]
+    for (const [method, target] of offList) {
+      const res = await get(target, await byReader(method, target), method)
+      expect(res, `${method} ${target}`).toEqual({ status: 403, body: REFUSED })
+    }
+    // Spellings fetch would tidy up: every reading of the path must be the read's.
+    for (const target of [
+      '/api/x/../teams',
+      '/api/teams/./',
+      '/api/teams/%2e%2e/settings',
+      '/api\\teams',
+      `http://127.0.0.1:${port}/api/settings`,
+    ]) {
+      const res = await raw(target, await byReader('GET', target.split('?')[0]!))
+      expect(res.status, target).toBe(403)
+      expect(res.body, target).toEqual(REFUSED)
+    }
+    // A refused request did not spend its token: the same one makes its read.
+    const token = await byReader('GET', '/api/teams')
+    expect((await get('/api/teams?x=1', token)).status).toBe(403)
+    expect((await get('/api/teams', token)).status).toBe(200)
+  })
+
+  it("takes the stream's Last-Event-ID header in place of afterSeq, digits only", async () => {
+    await start({ mode: 'required', reader: true })
+    const withLast = async (target: string, last: string) =>
+      get(target, { ...(await byReader('GET', target.split('?')[0]!)), 'last-event-id': last })
+    expect((await withLast(STREAM, '42')).status).toBe(200)
+    expect((await withLast(`${STREAM}&afterSeq=40`, '42')).status).toBe(200)
+    for (const last of ['abc', '-1', '4 2', '']) {
+      expect((await withLast(STREAM, last)).status, JSON.stringify(last)).toBe(403)
+    }
+    expect((await withLast(`${STREAM}&afterSeq=40`, 'x')).status).toBe(403)
+  })
+
+  it('never opens the Gateway WebSocket, even with a good token', async () => {
+    const upgrade = (headers: Record<string, string>) =>
+      ({ method: 'GET', url: '/api/gateway/ws', headers }) as unknown as http.IncomingMessage
+    for (const mode of ['on', 'required'] as const) {
+      await start({ mode, reader: true })
+      const readerToken = await readerAssertion('GET', '/api/gateway/ws')
+      expect(await lane.checkUpgrade(upgrade({ 'clawboo-reader-identity': readerToken }))).toEqual({
+        ok: false,
+        reason: 'binding',
+      })
+      // Beside a good person token too: the reader's token alone shuts it.
+      const both = {
+        'clawboo-reader-identity': await readerAssertion('GET', '/api/gateway/ws'),
+        'clawboo-identity': await assertion('GET', '/api/gateway/ws'),
+      }
+      expect(await lane.checkUpgrade(upgrade(both))).toEqual({ ok: false, reason: 'binding' })
+      const person = await assertion('GET', '/api/gateway/ws')
+      expect(await lane.checkUpgrade(upgrade({ 'clawboo-identity': person }))).toMatchObject({
+        ok: true,
+        person: { id: 'user-42' },
+      })
+      await new Promise<void>((r) => server!.close(() => r()))
+      server = null
+    }
+  })
+
+  it('refuses a reader token beside a person or app token on one request', async () => {
+    await start({ mode: 'required', reader: true, appLink: true })
+    const withPerson = {
+      ...(await byReader('GET', '/api/teams')),
+      ...(await signed('GET', '/api/teams')),
+    }
+    expect(await get('/api/teams', withPerson)).toMatchObject({
+      status: 401,
+      body: { reason: 'two-tokens' },
+    })
+    const withApp = {
+      ...(await byReader('GET', '/api/teams')),
+      'clawboo-app-identity': await appAssertion('GET', '/api/teams'),
+    }
+    expect(await get('/api/teams', withApp)).toMatchObject({
+      status: 401,
+      body: { reason: 'two-tokens' },
+    })
+  })
+
+  it('refuses a reader token that does not verify, or is used twice, rather than skip it', async () => {
+    await start({ mode: 'on', reader: true })
+    const forged = await readerAssertion('GET', '/api/teams', { key: other.privateKey })
+    expect(await get('/api/teams', { 'clawboo-reader-identity': forged })).toMatchObject({
+      status: 401,
+      body: {
+        reason: 'signature',
+        error: 'Clawboo refused the identity token signed with its reader key.',
+      },
+    })
+    // The proxy's own key on the reader's header is no reader's token either.
+    const proxyKey = await readerAssertion('GET', '/api/teams', { key: ed.privateKey })
+    expect((await get('/api/teams', { 'clawboo-reader-identity': proxyKey })).status).toBe(401)
+    const notReader = await readerAssertion('GET', '/api/teams', { sub: 'user-42' })
+    expect(await get('/api/teams', { 'clawboo-reader-identity': notReader })).toMatchObject({
+      status: 401,
+      body: { reason: 'claims' },
+    })
+    const once = await byReader('GET', '/api/teams')
+    expect((await get('/api/teams', once)).status).toBe(200)
+    expect(await get('/api/teams', once)).toMatchObject({
+      status: 401,
+      body: { reason: 'replayed' },
+    })
+  })
+
+  it('leaves required as it was: a read with no token at all is refused', async () => {
+    await start({ mode: 'required', reader: true })
+    expect(await get('/api/teams')).toMatchObject({ status: 401, body: { reason: 'missing' } })
+  })
+
+  it('bars a sign-in proxy from naming a reader: subject while the key is on', async () => {
+    await start({ mode: 'required', reader: true })
+    const now = Math.floor(Date.now() / 1000)
+    const posing = await new SignJWT({ htm: 'GET', htu: '/api/teams' })
+      .setProtectedHeader({ alg: 'EdDSA' })
+      .setIssuer('https://proxy.example.com')
+      .setAudience('clawboo')
+      .setSubject('reader:companion')
+      .setIssuedAt(now)
+      .setExpirationTime(now + 30)
+      .setJti(`posing-${Math.random()}`)
+      .sign(ed.privateKey)
+    expect(await get('/api/teams', { 'clawboo-identity': posing })).toMatchObject({
+      status: 401,
+      body: { reason: 'claims' },
+    })
+  })
+
+  it('says on the identity route whether a reader key is set', async () => {
+    await start({ mode: 'on', reader: true })
+    const res = await get('/api/access/identity', await signed('GET', '/api/access/identity'))
+    expect(res.body).toMatchObject({ readerKey: true, person: { id: 'user-42' } })
+    await new Promise<void>((r) => server!.close(() => r()))
+    server = null
+    vi.unstubAllEnvs()
+    resetOperatorSettings()
+    await start({ mode: 'on' })
+    expect((await get('/api/access/identity')).body).toMatchObject({ readerKey: false })
+  })
+})
+
+// GET and HEAD /api/system/live: whether the server is up, with no sign-in.
+describe('the liveness probe', () => {
+  const cookie = { cookie: `clawboo_access=${ACCESS_TOKEN}` }
+
+  it('answers up with no access cookie and no identity token, in required mode', async () => {
+    await start({ mode: 'required', accessToken: ACCESS_TOKEN })
+    const res = await fetch(`${base}/api/system/live`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(await res.json()).toEqual({ ok: true })
+    const head = await fetch(`${base}/api/system/live`, { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(await head.text()).toBe('')
+  })
+
+  it('is only the probe: another method, spelling or query needs both as ever', async () => {
+    await start({ mode: 'required', accessToken: ACCESS_TOKEN })
+    expect(await get('/api/system/live', {}, 'POST')).toMatchObject({
+      status: 401,
+      body: { gate: 'clawboo-access' },
+    })
+    for (const target of ['/api/system/live?x=1', '/api/system/live/', '/API/system/live']) {
+      expect((await get(target)).body, target).toMatchObject({ gate: 'clawboo-access' })
+      expect((await get(target, cookie)).body, target).toMatchObject({ reason: 'missing' })
+    }
+    expect((await raw('/api/system/x/../live', cookie)).body).toMatchObject({ reason: 'missing' })
+  })
+
+  it('checks a token the probe carries, like any other request', async () => {
+    await start({ mode: 'on', reader: true })
+    const forged = await assertion('GET', '/api/system/live', other.privateKey)
+    expect(await get('/api/system/live', { 'clawboo-identity': forged })).toMatchObject({
+      status: 401,
+      body: { reason: 'signature' },
+    })
+    const person = await signed('GET', '/api/system/live')
+    expect(await get('/api/system/live', person)).toEqual({ status: 200, body: { ok: true } })
+    const readerToken = {
+      'clawboo-reader-identity': await readerAssertion('GET', '/api/system/live'),
+    }
+    expect(await get('/api/system/live', readerToken)).toEqual({ status: 200, body: { ok: true } })
   })
 })

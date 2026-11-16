@@ -20,6 +20,9 @@ export {
   targetPath,
 } from './request-path'
 
+// The liveness probe, which needs no sign-in.
+export { LIVENESS_PATH, isLivenessRequest } from './liveness'
+
 export type { GatewayProxyHandle, ProxyOptions, UpstreamSettings } from './proxy'
 export { createGatewayProxy } from './proxy'
 

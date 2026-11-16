@@ -1413,6 +1413,27 @@ export const teamOsGroups = sqliteTable(
 
 export type DbTeamOsGroup = typeof teamOsGroups.$inferSelect
 
+// ─── identity_token_uses ──────────────────────────────────────────────────────
+// Each request-bound identity token the server accepted, by issuer lane and id,
+// until it stops mattering. See src/identityTokenUses.ts.
+
+export const identityTokenUses = sqliteTable(
+  'identity_token_uses',
+  {
+    /** The lane that accepted it: `proxy`, `app` or `reader`. */
+    issuer: text('issuer').notNull(),
+    jti: text('jti').notNull(),
+    /** Epoch ms after which the token could not be accepted anyway. */
+    untilMs: integer('until_ms').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.issuer, t.jti] }),
+    index('idx_identity_token_uses_until').on(t.untilMs),
+  ],
+)
+
+export type DbIdentityTokenUse = typeof identityTokenUses.$inferSelect
+
 // ─── team_chat ────────────────────────────────────────────────────────────────
 // The durable group-chat room substrate (mixed-runtime peer chat): every team
 // member posts as a NAMED PEER into one room. Distinct from the leader-orchestrated

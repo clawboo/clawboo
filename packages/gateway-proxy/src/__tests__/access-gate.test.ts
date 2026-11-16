@@ -406,3 +406,38 @@ describe('access gate: /api/computer-link/* admits a capability link and nothing
     expect(cap.statusCode).toBe(401)
   })
 })
+
+describe('access gate: the liveness probe', () => {
+  const gate = createAccessGate({ token: TOKEN })
+  const withMethod = (url: string, method: string): IncomingMessage =>
+    ({ ...mockReq(url), method }) as unknown as IncomingMessage
+
+  it('lets GET and HEAD /api/system/live through with no cookie', () => {
+    for (const method of ['GET', 'HEAD']) {
+      const cap = mockRes()
+      expect(gate.handleHttp(withMethod('/api/system/live', method), cap.res), method).toBe(false)
+      expect(cap.statusCode, method).toBe(200)
+    }
+  })
+
+  it('needs the cookie for any other method, spelling or query', () => {
+    for (const [url, method] of [
+      ['/api/system/live', 'POST'],
+      ['/api/system/live', 'DELETE'],
+      ['/api/system/live/', 'GET'],
+      ['/API/system/live', 'GET'],
+      ['/api/system/Live', 'GET'],
+      ['/api/system/live?x=1', 'GET'],
+      ['/api/system/live/../status', 'GET'],
+      ['/api/system/x/../live', 'GET'],
+      ['/api/system/%6cive', 'GET'],
+      ['/api/system\\live', 'GET'],
+      ['/api/system/livex', 'GET'],
+      ['/api/system/status', 'GET'],
+    ] as const) {
+      const cap = mockRes()
+      expect(gate.handleHttp(withMethod(url, method), cap.res), `${method} ${url}`).toBe(true)
+      expect(cap.statusCode, `${method} ${url}`).toBe(401)
+    }
+  })
+})

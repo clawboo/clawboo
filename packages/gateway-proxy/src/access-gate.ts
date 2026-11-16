@@ -4,6 +4,7 @@ import { URL } from 'node:url'
 
 import { ACCESS_TOKEN_CHARSET, findUnsupportedTokenChar } from '@clawboo/config'
 
+import { isLivenessRequest } from './liveness'
 import { anyPathUnder, everyPathUnder } from './request-path'
 
 // The token charset lives with the token resolver in @clawboo/config, so the
@@ -80,7 +81,8 @@ export interface AccessGate {
    * - Trades a ?access_code=... launch code for the same cookie, once, on a
    *   non-API path, and redirects without it whether or not the code was good.
    * - Blocks /api/* requests that lack a valid cookie, except an /api/mcp/*
-   *   request that `authorizeRuntime` vouches for.
+   *   request that `authorizeRuntime` vouches for and the liveness probe
+   *   (see liveness.ts).
    */
   handleHttp: (req: IncomingMessage, res: ServerResponse) => boolean
   /**
@@ -488,6 +490,9 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       // elsewhere (see isRuntimeControlRequest).
       if (isRuntimeControlRequest(req, authorizeRuntime)) return false
       if (isCapabilityLinkRequest(req, authorizeLink)) return false
+      // The liveness probe says up or down and nothing else, so it needs no
+      // sign-in. Every reading of its path must be exactly the probe's.
+      if (isLivenessRequest(req)) return false
       if (!isAuthorized(req)) {
         res.statusCode = 401
         res.setHeader('Content-Type', 'application/json')

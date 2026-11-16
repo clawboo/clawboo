@@ -16,15 +16,15 @@ keywords:
   ]
 ---
 
-Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs and what it supports (`self-version`, `capabilities`), installing a newer one (`self-update`), holding new agent runs back before a stop (`hold`), what a host that stops an idle server needs to know (`idle`, `presence`), and the settings an administrator can pin (`operator-settings`).
+Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs and what it supports (`self-version`, `capabilities`), whether it is up at all (`live`, in releases after 0.8.0), installing a newer one (`self-update`), holding new agent runs back before a stop (`hold`), what a host that stops an idle server needs to know (`idle`, `presence`), and the settings an administrator can pin (`operator-settings`).
 
 <Note>
 
-Every route here except `self-version`, `capabilities`, `self-update`, `hold`, `idle`, `presence` and `operator-settings` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
+Every route here except `self-version`, `live`, `capabilities`, `self-update`, `hold`, `idle`, `presence` and `operator-settings` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
 
 </Note>
 
-Three routes stream **Server-Sent Events** instead of returning a JSON body: `POST /api/system/install-openclaw` and `POST /api/system/self-update` always, and `POST /api/system/gateway` for `start` and `restart`. Each is documented with an event catalog (event `type` and payload). Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address; routes marked **sensitive** also count against a limit of 60 a minute. Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
+Three routes stream **Server-Sent Events** instead of returning a JSON body: `POST /api/system/install-openclaw` and `POST /api/system/self-update` always, and `POST /api/system/gateway` for `start` and `restart`. Each is documented with an event catalog (event `type` and payload). Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address, except `GET /api/system/live`, which has a limit of its own (in releases after 0.8.0); routes marked **sensitive** also count against a limit of 60 a minute. Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
 
 ## Routes
 
@@ -40,6 +40,7 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 | POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request               | sensitive | No                        |
 | GET    | `/api/system/models`                  | Model catalog (from the OpenClaw CLI, else the built-in list)   | general   | No                        |
 | GET    | `/api/system/self-version`            | Which Clawboo this server runs, and whether a newer one exists  | general   | No                        |
+| GET    | `/api/system/live`                    | Whether the server is up, with no sign-in (after 0.8.0)         | general   | No                        |
 | GET    | `/api/system/capabilities`            | This server's version, API revision and feature flags           | general   | No                        |
 | POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it         | sensitive | SSE                       |
 | GET    | `/api/system/hold`                    | Whether the server is held, and whether agent runs are going    | general   | No                        |
@@ -724,6 +725,33 @@ curl 'http://localhost:18790/api/system/self-version?local=1'
 
 ---
 
+## `GET /api/system/live`
+
+Available in releases after 0.8.0. Whether this server is up, for a program running beside it, a process supervisor or a load balancer that polls. It needs no sign-in: the access gate lets it through without the access token, and the [identity lane](/guides/sso-proxy#the-liveness-probe) without an identity token, in every mode. That is why it answers up or down and nothing else: no version, no state, nothing about the install. Use [`self-version`](#get-%2Fapi%2Fsystem%2Fself-version) or [`capabilities`](#get-%2Fapi%2Fsystem%2Fcapabilities) for what the server is, with the access token.
+
+- **Methods**: `GET` and `HEAD`.
+- **Path/query params**: none. Only this exact request is open: a query, a trailing slash, another letter case or another method needs the access token and, with the identity lane `required`, an identity token, like any other route. A token the request does carry is checked as usual, and a bad one is refused.
+- **Request body**: none.
+
+### Responses
+
+Both with `Cache-Control: no-store`:
+
+| Status | Body              | When                                                                                                                 |
+| ------ | ----------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `200`  | `{ "ok": true }`  | The server is up.                                                                                                    |
+| `503`  | `{ "ok": false }` | The server is up but cannot serve yet, such as during a work folder move at startup. It also sends `Retry-After: 2`. |
+
+A server that is not running does not answer at all. `HEAD` answers the same status with no body. It has a [rate limit](/reference/rest-api/index#rate-limits) of its own, 600 requests a minute per client address, and does not count against the general one, so callers that have not signed in never use up the limit the dashboard shares. It sends no rate-limit headers and no `X-Powered-By`. The capability flag `system.live` says this server has the route.
+
+### Example
+
+```bash
+curl -fsS http://localhost:18790/api/system/live
+```
+
+---
+
 ## `GET /api/system/capabilities`
 
 What this server is and which features it has: its Clawboo version, the client API revision, the oldest release whose clients it still serves, and a flat map of feature flags. A client (the dashboard, a desktop shell that bundles the server, a proxy in front of it, or an app on another device) reads it before it uses a feature, instead of calling a route to see whether it answers. The dashboard reads it after an in-app update, to tell the new server from the one that is shutting down.
@@ -796,11 +824,13 @@ The answer is built from the running process alone: no database read, no network
     "system.selfUpdate": true,
     "system.hold": true,
     "system.idle": true,
+    "system.live": true,
     "board.pause": true,
     "auth.proxyIdentity": false,
     "auth.appLink": false,
     "auth.roles": false,
     "auth.personCheck": false,
+    "auth.readerKey": false,
     "computer.controlClaim": false,
     "ui.embedTitlebar": true
   }
@@ -853,11 +883,13 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `system.selfUpdate`                                                         | `POST /api/system/self-update` can succeed here: a global npm install this user can write, with in-app updates not turned off. The same answer as `self-version`'s `applyable`.                                                                                                                                                                                          |
 | `system.hold`                                                               | Always. The server can be held before a stop or an update (`/api/system/hold`), and the in-app update waits for agent runs before it restarts.                                                                                                                                                                                                                           |
 | `system.idle`                                                               | Always. A host that stops this server when nobody is using it reads `GET /api/system/idle`, and the dashboard reports a person with `POST /api/system/presence`.                                                                                                                                                                                                         |
+| `system.live`                                                               | Always, in releases after 0.8.0. `GET /api/system/live` answers whether the server is up, with no access token and no identity token. See [`GET /api/system/live`](#get-%2Fapi%2Fsystem%2Flive).                                                                                                                                                                         |
 | `board.pause`                                                               | Always. A person can pause an agent, a team or a task tree until they resume it: `GET /api/pauses`, `POST /api/pauses`, `DELETE /api/pauses/:kind/:id`, in the [Board API](/reference/rest-api/board).                                                                                                                                                                   |
 | `auth.proxyIdentity`                                                        | An administrator turned the [proxy identity lane](/guides/sso-proxy) `on` or `required`: a sign-in proxy's signed identity tokens are checked, and the person each names is recorded. `GET /api/access/identity` says which mode, and who the request is.                                                                                                                |
 | `auth.appLink`                                                              | The app that started this server, such as the desktop app, gave it a key (`CLAWBOO_APP_LINK_PUBLIC_KEY`): the tokens it signs for its own `account:` people are checked, and each person is recorded. See [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo).                                                                                    |
 | `auth.roles`                                                                | An administrator enforces [roles](/guides/sso-proxy#roles) (`proxyIdentityRoles: enforce`): the role in each token decides what its person may do. `GET /api/access/identity` says what this person may do.                                                                                                                                                              |
 | `auth.personCheck`                                                          | In releases after 0.8.0. Only a person a verified token names acts as a person (`personCheck: verified`, or the lane's `required` mode): the dashboard's page alone does not, and the Gateway WebSocket and every route of an agent's screen need such a person too. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). |
+| `auth.readerKey`                                                            | In releases after 0.8.0. An administrator set a reader key (`proxyIdentityReaderPublicKey`): a program running beside this server can make its own short list of reads with a key of its own, never as a person. See [A program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo).                                                                             |
 | `computer.controlClaim`                                                     | In releases after 0.8.0. Taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent (`proxyIdentityControlClaim: required`). See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen).                                                                                                  |
 | `ui.embedTitlebar`                                                          | Always, in releases after 0.8.0. An app that shows the dashboard in its own window can ask for the slim top bar by setting `data-clawboo-embed-titlebar` on the page. It has no route. See [Show the dashboard in an app's window](/guides/app-window).                                                                                                                  |
 
@@ -1216,7 +1248,7 @@ The settings an administrator can pin for everyone on this install, with the val
 
 ### Responses
 
-`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`, then the [proxy identity](/guides/sso-proxy#settings) keys from `proxyIdentity` to `proxyIdentityRoles`, then `proxyIdentityControlClaim` and `personCheck` (in releases after 0.8.0), then the provider base URLs from `anthropicBaseUrl` to `moonshotBaseUrl`.
+`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`, then the [proxy identity](/guides/sso-proxy#settings) keys from `proxyIdentity` to `proxyIdentityRoles`, then `proxyIdentityControlClaim` and `personCheck` (in releases after 0.8.0), with `proxyIdentityReaderPublicKey` between them in releases after 0.8.0, then the provider base URLs from `anthropicBaseUrl` to `moonshotBaseUrl`.
 
 | Field          | Type                                             | Notes                                                                                                               |
 | -------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |

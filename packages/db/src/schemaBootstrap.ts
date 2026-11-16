@@ -1116,7 +1116,21 @@ const SCHEMA_DDL = `
       updated_at  INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_team_os_groups_team
-      ON team_os_groups (team_id) WHERE state = 'assigned';`
+      ON team_os_groups (team_id) WHERE state = 'assigned';
+
+    -- The id (jti) of every request-bound identity token the server has accepted,
+    -- per issuer lane ('proxy', 'app' or 'reader'), until the token could no longer
+    -- be accepted anyway (until_ms, epoch ms). A second use of the same id within
+    -- that time is a replay and is refused, across restarts too. Swept at boot and
+    -- as tokens are checked.
+    CREATE TABLE IF NOT EXISTS identity_token_uses (
+      issuer   TEXT    NOT NULL,
+      jti      TEXT    NOT NULL,
+      until_ms INTEGER NOT NULL,
+      PRIMARY KEY (issuer, jti)
+    );
+    CREATE INDEX IF NOT EXISTS idx_identity_token_uses_until
+      ON identity_token_uses (until_ms);`
 
 /**
  * Bring the database up to the schema above, so the file is immediately usable

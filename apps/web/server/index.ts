@@ -116,6 +116,7 @@ import { loadProviderBaseUrls, providerBaseUrlWarnings } from './lib/providerBas
 import {
   controlClaimModeOf,
   identityConfigs,
+  loadReaderConfig,
   loadAppLinkConfig,
   loadPersonCheck,
   loadProxyIdentityConfig,
@@ -134,7 +135,8 @@ import {
 } from './lib/personCheck'
 import { upgradeAllowedForRoles } from './lib/roles/guard'
 import { createIdentityLane, type LaneSource } from './lib/proxyIdentity/lane'
-import { createAssertionVerifier } from './lib/proxyIdentity/verifier'
+import { sweepSeenTokensAtBoot } from './lib/proxyIdentity/seenTokens'
+import { identitySources } from './lib/proxyIdentity/sources'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
 import { restoreScreenshots } from './lib/screenshotBus'
@@ -241,9 +243,11 @@ async function main() {
   // The proxy identity lane is among them, and refuses the same way when it is
   // on but has no key, issuer or audience it can trust. So is the app link's key,
   // which only the environment can set: an app that starts the engine and believes
-  // its link is on must not get an engine that ignores it.
+  // its link is on must not get an engine that ignores it. So is the reader key,
+  // refused with the lane off or when it is also a person's key.
   let proxyIdentityConfig: ProxyIdentityConfig | null = null
   let appLinkConfig: ProxyIdentityConfig | null = null
+  let readerConfig: ProxyIdentityConfig | null = null
   let identityConfigList: ProxyIdentityConfig[] = []
   try {
     const operator = initOperatorSettings(process.env)
@@ -253,7 +257,8 @@ async function main() {
     }
     proxyIdentityConfig = loadProxyIdentityConfig()
     appLinkConfig = loadAppLinkConfig(process.env)
-    identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig)
+    readerConfig = loadReaderConfig(proxyIdentityConfig, appLinkConfig)
+    identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig, readerConfig)
     // Who may act as the person: the dashboard's page too, or only a verified
     // token. From the sign-in proxy lane alone: the app link does not count.
     setPersonCheckMode(loadPersonCheck(proxyIdentityConfig))
@@ -364,14 +369,24 @@ async function main() {
   // cookie. A link to an agent's computer is not exempted: with a token
   // required, the person opening one signs in through the proxy too.
   // The app link (an app that started this engine and signs for its own
-  // `account:` people) joins it as a second issuer, always in `on` mode.
-  const identitySources: LaneSource[] = identityConfigList.map((config) => ({
-    config,
-    verifier: createAssertionVerifier(config),
-  }))
+  // `account:` people) joins it as a second issuer, always in `on` mode, and the
+  // reader key (a program beside the server making its own reads) as a third.
+  // Each records the request-bound tokens it accepts in the database, so a token
+  // stays used across a restart.
+  // A proxy's JWKS URL cannot be compared with the reader key at startup, so the
+  // reader's verifier refuses a token the proxy's keys also verify (sources.ts).
+  const identitySourceList: LaneSource[] = identitySources(
+    identityConfigList,
+    proxyIdentityConfig,
+    {
+      // Never the token: which lane, what failed, and why.
+      onStoreError: ({ issuer, op, err }) =>
+        log.error({ issuer, op, err }, 'Proxy identity: could not record a used token'),
+    },
+  )
   const proxyIdentity =
-    identitySources.length > 0
-      ? createIdentityLane(identitySources, {
+    identitySourceList.length > 0
+      ? createIdentityLane(identitySourceList, {
           isRuntimeRequest: (req) => isRuntimeControlRequest(req, carriesAttachToken),
           // The reason only: the token never reaches a log.
           onRefuse: ({ reason, method, path }) =>
@@ -382,6 +397,13 @@ async function main() {
     log.info(
       'App link on: the app that started this engine can name its own people on a request ' +
         'it signs. A request it does not sign is treated as before.',
+    )
+  }
+  if (readerConfig) {
+    log.info(
+      { header: readerConfig.header },
+      'Reader key on: a program beside this server can make the reads on its list with its ' +
+        'own key. Those reads never act as a person.',
     )
   }
   if (proxyIdentityConfig) {
@@ -715,6 +737,15 @@ async function main() {
     getDb()
   } catch (err) {
     log.error({ err }, 'SQLite: could not open/bootstrap the database — see /api/health')
+  }
+  // Drop the records of used identity tokens that stopped mattering while the
+  // server was down, also when the lane is now off. The rest stay, so a token
+  // used before the restart is not accepted again. Each lane also sweeps as it
+  // checks tokens.
+  try {
+    sweepSeenTokensAtBoot(getDb())
+  } catch (err) {
+    log.warn({ err }, 'Proxy identity: could not sweep the records of used tokens')
   }
 
   // ── Runtimes on a Node that moved ───────────────────────────────────────────

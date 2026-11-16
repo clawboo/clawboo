@@ -6,7 +6,7 @@ import {
 } from './composio'
 import { Router, type Router as RouterType } from 'express'
 
-import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
+import { generalLimiter, livenessLimiter, sensitiveLimiter } from '../lib/rateLimit'
 import { withRouteRules } from '../lib/roles/guard'
 
 import { settingsGET, settingsPOST } from './settings'
@@ -52,6 +52,7 @@ import {
   systemModelsGET,
   approveDevicePOST,
 } from './system'
+import { systemLiveGET } from './systemLive'
 import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
 import { operatorSettingsGET, operatorSettingsPUT } from './operatorSettings'
 import { systemCapabilitiesGET } from './systemCapabilities'
@@ -272,6 +273,11 @@ const router: RouterType = withRouteRules(Router({ caseSensitive: true }))
 // the SPA. A cold page load is ~15 API calls but ~90 script chunks plus the
 // shell, logo and fonts, which have their own ceiling in mountSpa. Counting
 // them here as well would let a few dozen page loads lock the API out.
+// The liveness probe comes first, ahead of the general ceiling: anyone may ask
+// it without signing in (the access gate and the identity lane both leave it
+// open), so it counts against a bucket of its own and never against the one
+// the signed-in dashboard shares. Up or down, nothing more.
+router.get('/api/system/live', livenessLimiter, systemLiveGET)
 router.use('/api', generalLimiter)
 
 // Settings

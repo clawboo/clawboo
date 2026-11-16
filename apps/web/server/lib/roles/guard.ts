@@ -66,6 +66,8 @@ export type RoleRefusal =
   | 'ended'
   /** A guest asked for something outside their teams. */
   | 'outside-teams'
+  /** A reader key's token on a route that is not one of its reads. */
+  | 'reader'
 
 const MESSAGES: Readonly<Record<RoleRefusal, string>> = {
   person: 'This needs a signed-in person.',
@@ -73,6 +75,8 @@ const MESSAGES: Readonly<Record<RoleRefusal, string>> = {
   'not-allowed': 'Your role in this workspace does not allow this.',
   ended: 'Your access to this workspace has ended.',
   'outside-teams': 'This is outside the teams you work with in this workspace.',
+  // The same words the identity lane uses for its own refusal (READER_REFUSAL_MESSAGE).
+  reader: 'The reader key may make only the reads on its list.',
 }
 
 /** The 403 a refused request gets. `error` is `role` for every refusal, so a
@@ -228,6 +232,13 @@ export function decideRole(
   rule: RouteRule,
   opts: { now?: number; db?: () => ClawbooDb } = {},
 ): GuardDecision {
+  // The liveness probe: the access gate and the identity lane let anyone ask it.
+  if (rule.open === true) return { ok: true, scope: null }
+  // A reader key's program reaches its own reads, workspace-wide, and nothing
+  // else, whatever roles say. The identity lane already keeps it to that list
+  // (lib/proxyIdentity/readerRoutes.ts); this holds it to the same routes again.
+  if (req.reader)
+    return rule.reader === true ? { ok: true, scope: null } : { ok: false, reason: 'reader' }
   const caller = req.person ?? req.service ?? null
   if (!caller) {
     // Only a spawned runtime's own MCP call arrives with no person and no service:

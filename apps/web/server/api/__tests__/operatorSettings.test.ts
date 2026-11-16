@@ -94,6 +94,7 @@ describe('/api/system/operator-settings', () => {
           ['proxyIdentityRoleClaim', 'role', 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM'],
           ['proxyIdentityRoles', 'off', 'CLAWBOO_PROXY_IDENTITY_ROLES'],
           ['proxyIdentityControlClaim', 'off', 'CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM'],
+          ['proxyIdentityReaderPublicKey', null, 'CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY'],
           ['personCheck', 'page', 'CLAWBOO_PERSON_CHECK'],
           ['anthropicBaseUrl', null, 'ANTHROPIC_BASE_URL'],
           ['openaiBaseUrl', null, 'OPENAI_BASE_URL'],

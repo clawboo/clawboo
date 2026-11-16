@@ -121,11 +121,13 @@ const PINNED_FEATURES = [
   'system.selfUpdate',
   'system.hold',
   'system.idle',
+  'system.live',
   'board.pause',
   'auth.proxyIdentity',
   'auth.appLink',
   'auth.roles',
   'auth.personCheck',
+  'auth.readerKey',
   'computer.controlClaim',
   'ui.embedTitlebar',
 ]
@@ -144,6 +146,7 @@ const PINNED_IDLE_SOURCE_FIELDS = ['at', 'count', 'id', 'reason', 'state', 'time
 
 /** Every route the API router serves, as `METHOD /path`, in registration order. */
 const PINNED_ROUTES = [
+  'GET /api/system/live',
   'GET /api/settings',
   'POST /api/settings',
   'POST /api/access/launch-code',
@@ -872,6 +875,31 @@ describe('the route has no exemption in the origin guard or the access gate', ()
       expect((await fetch(url, { headers: cookie })).status).toBe(200)
       const foreign = { ...cookie, origin: 'https://elsewhere.example' }
       expect((await fetch(url, { headers: foreign })).status).toBe(403)
+    } finally {
+      await close(gated.server)
+    }
+  })
+})
+
+describe('GET /api/system/live', () => {
+  it('answers ok and nothing else, with no sign-in, in the server order', async () => {
+    const res = await fetch(`${base}/api/system/live`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(await res.json(), BUMP).toEqual({ ok: true })
+    expect((await fetch(`${base}/api/system/live`, { method: 'HEAD' })).status).toBe(200)
+
+    const gate = createAccessGate({ token: 'contract-test-token' })
+    const app = express()
+    app.use((req, res, next) => {
+      if (gate.handleHttp(req, res)) return
+      next()
+    })
+    app.use(apiRouter)
+    const gated = await listen(app)
+    try {
+      expect((await fetch(`${gated.base}/api/system/live`)).status).toBe(200)
+      expect((await fetch(`${gated.base}/api/system/live`, { method: 'POST' })).status).toBe(401)
     } finally {
       await close(gated.server)
     }

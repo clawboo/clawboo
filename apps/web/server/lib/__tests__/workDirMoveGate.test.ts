@@ -32,6 +32,9 @@ function ask(method: string, path: string): Answer {
     setHeader(name: string, value: string) {
       answer.headers[name.toLowerCase()] = value
     },
+    removeHeader(name: string) {
+      answer.headers[name.toLowerCase()] = '(removed)'
+    },
     json(body: unknown) {
       answer.body = body
       return res
@@ -40,7 +43,8 @@ function ask(method: string, path: string): Answer {
   const next: NextFunction = () => {
     answer.passed = true
   }
-  refuseWhileMoving({ method, path } as Request, res, next)
+  // The target as it arrives, and the path Express routes by.
+  refuseWhileMoving({ method, path: path.split('?')[0], url: path } as Request, res, next)
   return answer
 }
 
@@ -83,6 +87,20 @@ describe('the server while the work folder move runs', () => {
       expect(other.headers['retry-after']).toBe('2')
       expect(other.body).toMatchObject({ status: 'migrating' })
     }
+  })
+
+  it('answers the liveness probe 503 with ok false and nothing about why', () => {
+    holdForWorkDirMove()
+    for (const method of ['GET', 'HEAD']) {
+      const live = ask(method, '/api/system/live')
+      expect(live.passed).toBe(false)
+      expect(live.status).toBe(503)
+      expect(live.headers['retry-after']).toBe('2')
+      expect(live.body).toEqual({ ok: false })
+      expect(live.headers['x-powered-by']).toBe('(removed)')
+    }
+    // Only the probe itself: another spelling gets the ordinary answer.
+    expect(ask('GET', '/api/system/live?x=1').body).toMatchObject({ status: 'migrating' })
   })
 
   it('refuses a WebSocket upgrade while it runs, and lets one through after', async () => {
