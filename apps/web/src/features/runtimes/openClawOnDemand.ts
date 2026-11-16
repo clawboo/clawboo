@@ -130,6 +130,11 @@ function attachPageClient(): Promise<void> {
       }
       await enterGatewayMode(client, gatewayUrl)
     } catch {
+      // The page has a client after all: another path's, which landed while
+      // this dial ran, or this dial's own, set before entering it failed. The
+      // page is connected, and Connect this page is not offered, so a toast
+      // saying it could not connect, and pointing there, would be wrong.
+      if (useConnectionStore.getState().client !== null) return
       // A device to approve, say. The server's connection stands either way,
       // and the connected row offers Connect this page while the page has no
       // client, so the toast points there.

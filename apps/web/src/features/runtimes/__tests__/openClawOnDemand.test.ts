@@ -236,6 +236,32 @@ describe('connectThisPage', () => {
     expect(useToastStore.getState().toasts).toEqual([])
   })
 
+  it('a dial that fails after another path gave the page a client says nothing', async () => {
+    // The offline banner's Reconnect landed while this dial ran, then this one
+    // failed. The page is connected, and the row offers no Connect this page.
+    let fail: (err: Error) => void = () => {}
+    h.pageConnect.mockImplementation(() => new Promise((_, reject) => (fail = reject)))
+    const pending = connectThisPage()
+    useConnectionStore.setState({ client: live })
+    fail(new Error('NOT_PAIRED'))
+    await pending
+    expect(h.enter).not.toHaveBeenCalled()
+    expect(useConnectionStore.getState().client).toBe(live)
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
+
+  it('entering the client failing after it was set says nothing either', async () => {
+    // enterGatewayMode sets the client before it loads the fleet, so a throw
+    // from that load leaves the page connected.
+    h.enter.mockImplementation(async (client: GatewayClient) => {
+      useConnectionStore.setState({ client })
+      throw new Error('fleet load failed')
+    })
+    await connectThisPage()
+    expect(useConnectionStore.getState().client).toBe(live)
+    expect(useToastStore.getState().toasts).toEqual([])
+  })
+
   it('tells listeners when a page dial starts and ends, so the row can show it busy', async () => {
     let land: (v: { client: GatewayClient; gatewayUrl: string }) => void = () => {}
     h.pageConnect.mockImplementation(() => new Promise((resolve) => (land = resolve)))
