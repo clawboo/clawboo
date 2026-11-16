@@ -354,7 +354,11 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background" style={{ left: 268 }}>
+    <div
+      data-clawboo-overlay=""
+      className="fixed inset-y-0 right-0 z-40 flex flex-col bg-background"
+      style={{ left: 268 }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2.5">
         <div className="flex items-center gap-2.5">

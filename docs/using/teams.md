@@ -40,7 +40,7 @@ See [Providers and runtimes](/using/providers-and-runtimes). An empty team needs
 
 <Step title="Open the team templates">
 
-In the team rail, click the dashed **+** at the bottom (**Create a team**). The [Marketplace](/using/marketplace) opens on its **Teams** tab.
+In the team rail, click the dashed **+** at the end of the team icons (**Create a team**). The [Marketplace](/using/marketplace) opens on its **Teams** tab.
 
 </Step>
 

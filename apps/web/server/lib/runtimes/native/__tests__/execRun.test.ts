@@ -198,6 +198,31 @@ describePosix('runApprovedCommand', () => {
     }
   })
 
+  it('keeps Python’s bytecode settings as the operator made them, adding none', async () => {
+    // A connector launch turns Python's bytecode off; a command a person
+    // approved runs as they configured it, like npm's update check.
+    const names = ['PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX']
+    const saved = new Map(names.map((k) => [k, process.env[k]]))
+    const restore = () => {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+    try {
+      for (const k of names) delete process.env[k]
+      const bare = await run(['printenv'])
+      expect(bare.output).not.toMatch(/^PYTHONDONTWRITEBYTECODE=/m)
+
+      process.env['PYTHONPYCACHEPREFIX'] = '/tmp/clawboo-pycache-probe'
+      const own = await run(['printenv'])
+      expect(own.output).toContain('PYTHONPYCACHEPREFIX=/tmp/clawboo-pycache-probe')
+      expect(own.output).not.toMatch(/^PYTHONDONTWRITEBYTECODE=/m)
+    } finally {
+      restore()
+    }
+  })
+
   it('does not re-parse the argv through a shell', async () => {
     // `shell: true` would make these operators, which is the property this whole
     // tier exists to refuse. As argv items they are literal text.

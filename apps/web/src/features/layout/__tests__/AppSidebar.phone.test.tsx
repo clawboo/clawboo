@@ -19,7 +19,8 @@ import { closePhoneNav, usePhoneNav } from '../phoneLayout'
 import { CollapsedSidebarToggle } from '../SidebarToggle'
 
 // The columns' own contents are not under test here, only where they sit. Each
-// holds one button, so focus has somewhere to go inside the drawer.
+// holds one button, so focus has somewhere to go inside the drawer. The account
+// bar runs under both columns, so its button is the drawer's last stop.
 vi.mock('@/features/layout/TeamSidebar', () => ({
   TeamSidebar: () => (
     <div data-testid="team-rail">
@@ -30,7 +31,14 @@ vi.mock('@/features/layout/TeamSidebar', () => ({
 vi.mock('@/features/layout/AgentListColumn', () => ({
   AgentListColumn: () => (
     <div data-testid="agent-column">
-      <button type="button">Last in the column</button>
+      <button type="button">In the column</button>
+    </div>
+  ),
+}))
+vi.mock('@/features/layout/AccountBar', () => ({
+  AccountBar: () => (
+    <div data-testid="account-bar">
+      <button type="button">Last in the account bar</button>
     </div>
   ),
 }))
@@ -105,10 +113,14 @@ describe('AppSidebar at phone width', () => {
     const toggle = screen.getByTestId('sidebar-toggle')
     await userEvent.click(toggle)
     const first = screen.getByRole('button', { name: 'First in the rail' })
-    const last = screen.getByRole('button', { name: 'Last in the column' })
+    const column = screen.getByRole('button', { name: 'In the column' })
+    const last = screen.getByRole('button', { name: 'Last in the account bar' })
     // Moved in on the next frame, past the drawer's slide.
     await waitFor(() => expect(first).toHaveFocus())
 
+    // Rail, column, then the account bar under them.
+    await userEvent.tab()
+    expect(column).toHaveFocus()
     await userEvent.tab()
     expect(last).toHaveFocus()
     // Past the last control, Tab wraps to the first rather than leaving for the
@@ -166,6 +178,35 @@ describe('AppSidebar at phone width', () => {
     expect(localStorage.getItem('clawboo.sidebar.collapsed')).toBeNull()
   })
 
+  it('holds the account bar under the rail and the column', async () => {
+    renderShell()
+    const drawer = screen.getByTestId('sidebar-drawer')
+    expect(drawer).toContainElement(screen.getByTestId('account-bar'))
+    expect(screen.getByTestId('account-strip')).toContainElement(screen.getByTestId('account-bar'))
+  })
+
+  it('pads past the strip an embedder keeps free, and starts under the slim top bar when there is one', () => {
+    const { unmount } = renderShell()
+    let drawer = screen.getByTestId('sidebar-drawer')
+    // Without the attribute: exactly as before, padded from the top.
+    expect(drawer.style.paddingTop).toBe('var(--clawboo-titlebar-inset, 0px)')
+    expect(drawer.style.top).toBe('')
+    unmount()
+
+    document.documentElement.setAttribute('data-clawboo-embed-titlebar', '')
+    try {
+      renderShell()
+      drawer = screen.getByTestId('sidebar-drawer')
+      // Under the bar, so the bar stays the window's to drag.
+      expect(drawer.style.top).toBe('var(--clawboo-titlebar-inset, 0px)')
+      expect(drawer.style.paddingTop).toBe('')
+    } finally {
+      // Unmounted first, so taking the attribute away re-renders nothing.
+      cleanup()
+      document.documentElement.removeAttribute('data-clawboo-embed-titlebar')
+    }
+  })
+
   it('docks again, closed, once the window is wide', async () => {
     renderShell()
     await userEvent.click(screen.getByTestId('sidebar-toggle'))
@@ -188,6 +229,25 @@ describe('AppSidebar on a wide window', () => {
     expect(screen.getByTestId('app-sidebar')).toBeInTheDocument()
     expect(screen.getByTestId('sidebar-resize-handle')).toBeInTheDocument()
     expect(screen.queryByTestId('sidebar-drawer')).not.toBeInTheDocument()
+  })
+
+  it('lays the collapsed peek from the top, unless the slim top bar is there', () => {
+    useViewStore.setState({ columnCollapsed: true })
+    const { unmount } = renderShell()
+    expect(screen.getByTestId('sidebar-peek').style.top).toBe('')
+    unmount()
+
+    document.documentElement.setAttribute('data-clawboo-embed-titlebar', '')
+    try {
+      renderShell()
+      expect(screen.getByTestId('sidebar-peek').style.top).toBe(
+        'var(--clawboo-titlebar-inset, 0px)',
+      )
+    } finally {
+      // Unmounted first, so taking the attribute away re-renders nothing.
+      cleanup()
+      document.documentElement.removeAttribute('data-clawboo-embed-titlebar')
+    }
   })
 
   it('still collapses on Cmd+\\', () => {

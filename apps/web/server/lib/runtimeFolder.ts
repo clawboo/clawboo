@@ -16,6 +16,8 @@
 // A launcher runs a recorded command with recorded arguments, such as the Node
 // that installed OpenClaw with OpenClaw's own entry script, so a runtime keeps
 // running on the interpreter it was installed with whatever PATH says later.
+// When that Node is gone and the Node this server runs on can run the runtime
+// in its place, the record and launchers move to it (`repointRuntimeNode`).
 //
 // Agents must be able to run what is here and must not be able to change it or
 // read Clawboo's data folder. So the folder sits outside the data folder and the
@@ -23,8 +25,9 @@
 // anyone else. Nothing here is run when that does not hold
 // (`runtimesDirRefusal`): the lookups fall back to a runtime on PATH instead.
 //
-// This module is a leaf (node built-ins and @clawboo/config only), because
-// `platform.ts`, which nearly every runtime path imports, consults it.
+// This module is a leaf (node built-ins, @clawboo/config and @clawboo/logger
+// only), because `platform.ts`, which nearly every runtime path imports,
+// consults it.
 
 import { randomBytes } from 'node:crypto'
 import {
@@ -52,6 +55,9 @@ import { rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { resolveClawbooDir, resolveRuntimesDir, resolveWorkDir } from '@clawboo/config'
+import { createLogger } from '@clawboo/logger'
+
+const log = createLogger('runtimes')
 
 export const RUNTIMES_DIR_ENV = 'CLAWBOO_RUNTIMES_DIR'
 
@@ -394,9 +400,20 @@ export interface RuntimeInstallRecord {
   /** The current install's folder name under `runtimeInstallDir(id)`. */
   folder: string
   installedAt: string
-  /** The interpreter the runtime was installed with and runs on, if any. */
-  interpreter?: { path: string; version: string }
+  /**
+   * The interpreter the runtime was installed with and runs on, if any. `arch`
+   * is the CPU architecture a Node ran on (`process.arch`), which decides the
+   * native parts npm picked; records from 0.8.0 and before have none.
+   */
+  interpreter?: RuntimeInterpreter
   launchers: Record<string, RuntimeLauncher>
+}
+
+/** The interpreter a runtime was installed with. */
+export interface RuntimeInterpreter {
+  path: string
+  version: string
+  arch?: string
 }
 
 function stamp(now: Date): string {
@@ -546,7 +563,7 @@ export interface CommitRuntimeInstall {
   folder: string
   version: string | null
   source: string
-  interpreter?: { path: string; version: string }
+  interpreter?: RuntimeInterpreter
   launchers: Record<string, RuntimeLauncher>
 }
 
@@ -594,44 +611,19 @@ export function commitRuntimeInstall(
   // after it (a launcher rename) puts the previous pointer back.
   const binDir = runtimeBinDir(env)
   ensureFolder(binDir)
-  const note = `Written by Clawboo for ${id} ${install.version ?? ''}. Installing again replaces it.`
-  const staged: { tmp: string; file: string }[] = []
-  const recordFile = path.join(runtimeDir, INSTALL_RECORD_FILE)
-  let recordTmp: string | null = null
-  try {
-    for (const [name, launcher] of Object.entries(install.launchers)) {
-      const file = path.join(binDir, launcherFileName(name))
-      staged.push({ tmp: writeAside(file, launcherScript(launcher, note), 0o755), file })
-    }
-    recordTmp = writeAside(recordFile, JSON.stringify(record, null, 2) + '\n', 0o644)
-  } catch (err) {
-    for (const t of [...staged.map((x) => x.tmp), recordTmp]) if (t) unlinkQuietly(t)
-    throw err
-  }
-  const previousText = readTextOrNull(recordFile)
-  const previousLaunchers = staged.map(({ file }) => readTextOrNull(file))
-  renameSync(recordTmp, recordFile)
-  let placed = 0
-  try {
-    for (const { tmp, file } of staged) {
-      renameSync(tmp, file)
-      placed++
-    }
-  } catch (err) {
-    // Put back what was there: the pointer and every launcher already replaced.
-    for (const [i, { tmp, file }] of staged.entries()) {
-      if (i >= placed) {
-        unlinkQuietly(tmp)
-        continue
-      }
-      const text = previousLaunchers[i]
-      if (text === null || text === undefined) unlinkQuietly(file)
-      else writeAtomic(file, text, 0o755)
-    }
-    if (previousText === null) unlinkQuietly(recordFile)
-    else writeAtomic(recordFile, previousText, 0o644)
-    throw err
-  }
+  const note = launcherNote(id, install.version)
+  writeStaged([
+    {
+      file: path.join(runtimeDir, INSTALL_RECORD_FILE),
+      data: JSON.stringify(record, null, 2) + '\n',
+      mode: 0o644,
+    },
+    ...Object.entries(install.launchers).map(([name, launcher]) => ({
+      file: path.join(binDir, launcherFileName(name)),
+      data: launcherScript(launcher, note),
+      mode: 0o755,
+    })),
+  ])
   for (const name of Object.keys(previous?.launchers ?? {})) {
     if (name in install.launchers || !LAUNCHER_NAME_RE.test(name)) continue
     unlinkQuietly(path.join(binDir, launcherFileName(name)))
@@ -670,6 +662,63 @@ function writeAside(file: string, data: string, mode: number): string {
   writeFileSync(tmp, data, { mode, flag: 'wx' })
   if (!isWindows) chmodSync(tmp, mode)
   return tmp
+}
+
+/** What a launcher's comment line says. */
+function launcherNote(id: string, version: string | null): string {
+  return `Written by Clawboo for ${id} ${version ?? ''}. Installing again replaces it.`
+}
+
+/** One file of a {@link writeStaged} change. */
+interface StagedFile {
+  file: string
+  data: string
+  mode: number
+}
+
+/**
+ * Put several files in place as one change. Each is written aside first, so a
+ * failure there leaves every file as it was. Then each is renamed over its
+ * file, in the order given. When a rename fails, or `beforeRename` throws
+ * before one, every file already replaced is put back as it was, unless
+ * something else has replaced it since, and the rest are removed; then the
+ * first error is thrown on. A process that dies part way keeps the files
+ * renamed so far, so the order decides what a crash can leave.
+ */
+function writeStaged(files: StagedFile[], beforeRename?: (index: number) => void): void {
+  const tmps: string[] = []
+  try {
+    for (const f of files) tmps.push(writeAside(f.file, f.data, f.mode))
+  } catch (err) {
+    for (const t of tmps) unlinkQuietly(t)
+    throw err
+  }
+  const previous = files.map((f) => readTextOrNull(f.file))
+  let placed = 0
+  try {
+    for (const [i, f] of files.entries()) {
+      beforeRename?.(i)
+      renameSync(tmps[i] as string, f.file)
+      placed++
+    }
+  } catch (err) {
+    for (const [i, f] of files.entries()) {
+      if (i >= placed) {
+        unlinkQuietly(tmps[i] as string)
+        continue
+      }
+      // Another writer's file is theirs to keep: put back only what is ours.
+      if (readTextOrNull(f.file) !== f.data) continue
+      const text = previous[i]
+      try {
+        if (text === null || text === undefined) unlinkQuietly(f.file)
+        else writeAtomic(f.file, text, f.mode)
+      } catch {
+        // Best effort: the first error is the one to report.
+      }
+    }
+    throw err
+  }
 }
 
 // ── In use ──────────────────────────────────────────────────────────────────
@@ -754,6 +803,245 @@ async function pruneInstallFolders(runtimeDir: string, keep: Set<string>): Promi
   }
 }
 
+// ── A moved Node ────────────────────────────────────────────────────────────
+
+/** A Homebrew keg's Node (`<prefix>/Cellar/<formula>/<version>/bin/node`). */
+export const HOMEBREW_KEG_NODE =
+  /^(.*)[/\\]Cellar[/\\]([^/\\]+)[/\\][^/\\]+[/\\]bin[/\\]node(\.exe)?$/
+
+/** A Homebrew formula held to one major version of Node, such as `node@24`. */
+const PINNED_NODE_FORMULA = /^node@\d+$/
+
+/**
+ * The path to record for the Node a runtime runs on: `execPath`, except for a
+ * keg of a formula held to one major (`node@24`), whose versioned folder an
+ * upgrade deletes. There it is the formula's `opt` link
+ * (`<prefix>/opt/node@24/bin/node`) when that link leads to the same Node today,
+ * so the runtime keeps working after `brew upgrade`, which keeps it on Node 24.
+ *
+ * The `node` formula's link moves to each new major on `brew upgrade`, and a
+ * link is never gone, so a runtime recorded by it would run on that major with
+ * no `nodeVersionCovers` check. Its keg path is kept instead: an upgrade within
+ * the major deletes it, and the next start moves the runtime to the new keg
+ * (`repointRuntimeNode`); a new major leaves it refused.
+ */
+export function stableNodePath(
+  execPath: string = process.execPath,
+  lookup: { realpath?: (p: string) => string | null } = {},
+): string {
+  const realpath = lookup.realpath ?? realPathOf
+  const keg = HOMEBREW_KEG_NODE.exec(execPath)
+  if (!keg || !PINNED_NODE_FORMULA.test(keg[2] ?? '')) return execPath
+  const sep = execPath.includes('\\') && !execPath.includes('/') ? '\\' : '/'
+  const opt = [keg[1], 'opt', keg[2], 'bin', `node${keg[3] ?? ''}`].join(sep)
+  const a = realpath(opt)
+  const b = realpath(execPath)
+  return a !== null && a === b ? opt : execPath
+}
+
+/** `process.version`'s shape, such as `v24.15.0`. */
+const NODE_VERSION_RE = /^v(\d+)\.(\d+)\.(\d+)$/
+
+/**
+ * Whether a runtime installed on Node `recorded` can run on Node `candidate`:
+ * the same version, or a release of the same major that is not older. The
+ * runtime's `engines` admitted the recorded version, and a later release of the
+ * same major keeps its native modules working and its engines range satisfied
+ * (OpenClaw asks for >=24.15 <25). Another major, an older release, and a
+ * version that is not a Node's (a Python's `3.12`) are no match.
+ */
+export function nodeVersionCovers(recorded: string, candidate: string): boolean {
+  if (recorded === candidate) return /^v\d+\.\d+\.\d+/.test(recorded)
+  const a = NODE_VERSION_RE.exec(recorded)
+  const b = NODE_VERSION_RE.exec(candidate)
+  if (!a || !b || Number(a[1]) !== Number(b[1])) return false
+  const [aMinor, aPatch] = [Number(a[2]), Number(a[3])]
+  const [bMinor, bPatch] = [Number(b[2]), Number(b[3])]
+  return bMinor > aMinor || (bMinor === aMinor && bPatch >= aPatch)
+}
+
+/** Whether nothing is at `p` any more (a link to nothing included), as opposed
+ *  to something there that cannot be read. */
+function isGone(p: string): boolean {
+  try {
+    statSync(p)
+    return false
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    return code === 'ENOENT' || code === 'ENOTDIR'
+  }
+}
+
+/** Repoints that failed, by record and Node, and when: tried again only after
+ *  {@link REPOINT_RETRY_MS}, so a lookup that keeps failing logs once a minute. */
+const failedRepoints = new Map<string, number>()
+const REPOINT_RETRY_MS = 60_000
+
+/** Who may override the Node a repoint moves to: tests. */
+export interface RepointNodeOptions {
+  /** The Node to move to. Defaults to the one this server runs on. */
+  execPath?: string
+  /** Its version. Defaults to this server's. */
+  version?: string
+  /** Its CPU architecture. Defaults to this server's. */
+  arch?: string
+}
+
+/**
+ * Move `id`'s install to the Node this server runs on when the Node it was
+ * installed with is gone, such as when an app that runs Clawboo on a Node of
+ * its own is moved or renamed. All of these must hold, or nothing changes and
+ * a lookup refuses the runtime as before:
+ * - the record names a Node interpreter (`interpreter.version` in
+ *   `process.version`'s shape), and nothing is at its path any more (one that
+ *   is there but can be changed by another user stays refused);
+ * - this server's Node is that version, or a later release of the same major
+ *   (`nodeVersionCovers`), on the same CPU architecture when the record names
+ *   one (npm picked native parts for it), and may be run (`isTrustedRunTarget`);
+ * - at least one launcher ran the old Node (a library such as the Agent SDK is
+ *   loaded by the server, not started on its recorded Node, and is left as it
+ *   is), and each such launcher's script passes the same checks a lookup makes;
+ * - the runtimes folder passes `runtimesDirRefusal`, and the runtime's folder,
+ *   its pointer file and its install folder are trusted, as a lookup checks.
+ *
+ * Every launcher that ran the old Node is rewritten to run this one, by the
+ * path `stableNodePath` gives, and the record follows: it keeps its install,
+ * version and time, with the new interpreter. Nothing resolves Node when a
+ * launcher runs: a person in a terminal and an agent user's host start
+ * launchers with no server to ask, and PATH would bring back a Node that nvm
+ * switched away from.
+ *
+ * Through {@link writeStaged}, launchers first and the pointer last: a failure
+ * puts every launcher back, and a process that dies part way leaves the old
+ * pointer, so the next lookup or boot does the move again. The pointer is read
+ * again before every rename, and a change since (an install committed by
+ * another process) calls the move off, leaving that install's files alone.
+ * Two processes sharing one runtimes folder are not supported, so this narrows
+ * that race rather than closing it. Logs what moved. Returns the new record,
+ * or null when nothing changed.
+ */
+export function repointRuntimeNode(
+  id: string,
+  env: NodeJS.ProcessEnv = process.env,
+  opts: RepointNodeOptions = {},
+): RuntimeInstallRecord | null {
+  let runtimeDir: string
+  try {
+    runtimeDir = runtimeInstallDir(id, env)
+  } catch {
+    return null
+  }
+  const recordFile = path.join(runtimeDir, INSTALL_RECORD_FILE)
+  const text = readTextOrNull(recordFile)
+  if (text === null) return null
+  let record: RuntimeInstallRecord
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (!isRecord(parsed) || parsed.id !== id) return null
+    record = parsed
+  } catch {
+    return null
+  }
+  const was = record.interpreter
+  if (!was || typeof was.path !== 'string' || typeof was.version !== 'string') return null
+  if (!path.isAbsolute(was.path) || !isGone(was.path)) return null
+  const version = opts.version ?? process.version
+  if (!nodeVersionCovers(was.version, version)) return null
+  const arch = opts.arch ?? process.arch
+  if (was.arch !== undefined && was.arch !== arch) return null
+  const to = stableNodePath(opts.execPath ?? process.execPath)
+  if (to === was.path) return null
+  const key = `${recordFile}\0${was.path}\0${to}`
+  const failedAt = failedRepoints.get(key)
+  if (failedAt !== undefined && Date.now() - failedAt < REPOINT_RETRY_MS) return null
+
+  const root = runtimeInstallRoot(env)
+  if (runtimesDirRefusal(env)) return null
+  if (!isTrustedRunTarget(to, root, true)) return null
+  const trusted =
+    isTrustedEntry(runtimeDir, 'dir') &&
+    isTrustedEntry(recordFile, 'file') &&
+    isTrustedEntry(path.join(runtimeDir, record.folder), 'dir')
+  if (!trusted) return null
+
+  const launchers: Record<string, RuntimeLauncher> = {}
+  const moved: string[] = []
+  for (const [name, launcher] of Object.entries(record.launchers)) {
+    if (launcher.command === was.path) {
+      const script = launcher.args[0]
+      if (script && path.isAbsolute(script) && !isTrustedRunTarget(script, root, false)) {
+        return null
+      }
+      launchers[name] = { command: to, args: launcher.args }
+      moved.push(name)
+    } else {
+      launchers[name] = launcher
+    }
+  }
+  if (moved.length === 0) return null
+  const next: RuntimeInstallRecord = {
+    ...record,
+    interpreter: { path: to, version, arch },
+    launchers,
+  }
+  try {
+    validateLaunchers(launchers)
+    const binDir = runtimeBinDir(env)
+    const note = launcherNote(id, record.version)
+    const files: StagedFile[] = [
+      ...moved.map((name) => ({
+        file: path.join(binDir, launcherFileName(name)),
+        data: launcherScript(launchers[name] as RuntimeLauncher, note),
+        mode: 0o755,
+      })),
+      { file: recordFile, data: JSON.stringify(next, null, 2) + '\n', mode: 0o644 },
+    ]
+    writeStaged(files, () => {
+      if (readTextOrNull(recordFile) !== text) {
+        throw new Error(`${recordFile} changed while its Node.js was being moved`)
+      }
+    })
+  } catch (err) {
+    failedRepoints.set(key, Date.now())
+    log.warn(
+      { id, from: was.path, to, error: err instanceof Error ? err.message : String(err) },
+      `Runtimes: could not move ${id} to the Node.js this server runs on`,
+    )
+    return null
+  }
+  failedRepoints.delete(key)
+  log.info(
+    {
+      id,
+      from: was.path,
+      fromVersion: was.version,
+      to,
+      toVersion: version,
+      arch,
+      launchers: moved,
+    },
+    `Runtimes: ${id} now runs on ${to}, because the Node.js it was installed with is gone`,
+  )
+  return next
+}
+
+/**
+ * {@link repointRuntimeNode} for every runtime on record. Run at boot, so a
+ * launcher started from a terminal works again as soon as the server has
+ * started on a Node that can run it. Returns the ids that moved.
+ */
+export function repointRuntimesToServerNode(env: NodeJS.ProcessEnv = process.env): string[] {
+  let ids: string[]
+  try {
+    ids = readdirSync(runtimeInstallRoot(env))
+  } catch {
+    return []
+  }
+  return ids.filter(
+    (id) => RUNTIME_ID_RE.test(id) && id !== 'bin' && repointRuntimeNode(id, env) !== null,
+  )
+}
+
 // ── Lookups ─────────────────────────────────────────────────────────────────
 
 function isExecutableFile(file: string): boolean {
@@ -783,7 +1071,8 @@ export interface OwnedRuntimeLaunch {
  * is a real file owned by this user that nobody else can write, and the command
  * it runs (and a script it hands that command) still exist. A launcher whose
  * interpreter has gone, such as a Node removed by nvm, is not offered, so the
- * caller falls back to PATH and an install replaces it.
+ * caller falls back to PATH and an install replaces it, unless the Node this
+ * server runs on can take that interpreter's place (`repointRuntimeNode`).
  */
 export function ownedRuntimeLaunch(
   name: string,
@@ -821,8 +1110,8 @@ function inspectRuntimeLaunch(
   }
   for (const id of ids) {
     if (!RUNTIME_ID_RE.test(id) || id === 'bin') continue
-    const record = readRuntimeInstall(id, env)
-    const spec = record?.launchers[name]
+    let record = readRuntimeInstall(id, env)
+    let spec = record?.launchers[name]
     if (!record || !spec) continue
     const again = `Install ${name} again from Clawboo.`
     const refusal = runtimesDirRefusal(env)
@@ -837,6 +1126,16 @@ function inspectRuntimeLaunch(
     if (opened) {
       return {
         problem: `Clawboo's copy of ${name} is missing a file, or another user can change it. ${again}`,
+      }
+    }
+    if (!isTrustedRunTarget(spec.command, root, true)) {
+      // The Node it was installed with may have moved, with an app that runs
+      // Clawboo on a Node of its own: this server's Node takes over when it can.
+      const moved = repointRuntimeNode(id, env)
+      const now = moved?.launchers[name]
+      if (moved && now) {
+        record = moved
+        spec = now
       }
     }
     if (!isTrustedRunTarget(spec.command, root, true)) {

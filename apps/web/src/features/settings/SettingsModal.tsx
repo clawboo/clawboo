@@ -210,7 +210,7 @@ export function SettingsModal() {
             aria-label="Settings"
           >
             {/* Left rail — grouped nav + search */}
-            <div className="flex w-[236px] shrink-0 flex-col border-r border-border bg-foreground/[0.02]">
+            <div className="flex w-[236px] shrink-0 flex-col border-r border-border bg-modal-nav">
               <div className="px-4 pb-2 pt-4">
                 <h2 className="mb-3 px-1 text-[15px] font-bold tracking-[-0.01em] text-foreground">
                   Settings
@@ -227,7 +227,7 @@ export function SettingsModal() {
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search settings"
                     aria-label="Search settings"
-                    className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-2.5 text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+                    className="w-full rounded-lg border border-border bg-field py-1.5 pl-8 pr-2.5 text-[13px] text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
                   />
                 </div>
               </div>
@@ -280,9 +280,9 @@ export function SettingsModal() {
             {/* Right pane — a slim close bar over the selected panel (which
                 renders its own PanelHeader title below). The close lives in its
                 own row so it never collides with a panel's top-right Refresh
-                action, and the pane shares the panels' `bg-background` token so
-                there's no surface seam. */}
-            <div className="flex min-w-0 flex-1 flex-col bg-background">
+                action, and the pane takes `bg-modal-pane`, the panels' own
+                `bg-background` in light mode, so there's no surface seam. */}
+            <div className="flex min-w-0 flex-1 flex-col bg-modal-pane">
               <div className="flex h-11 shrink-0 items-center justify-end border-b border-border px-3">
                 <button
                   type="button"

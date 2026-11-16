@@ -82,14 +82,14 @@ The dashboard has a sidebar on the left and a main area beside it. Everything op
 
 ### The sidebar
 
-The sidebar has two columns.
+The sidebar has two columns, with the account bar along the bottom of both.
 
 The **team rail** is the narrow column on the far left:
 
 - Boo Zero's red mascot sits at the top. Click it to open [Boo Zero](/using/boo-zero)'s page. Right-click it and choose **Show all agents** to list every agent.
 - Each team has an icon. Click one to open that team. Right-click it to archive the team, refresh its protocol, or delete it (see [Teams](/using/teams)).
 - When a team is archived, **Archived** and the number of archived teams appear after the team icons. Click it to show those teams; click one to unarchive it (see [Archive a team](/using/teams#archive-a-team)).
-- The dashed **+** at the bottom (**Create a team**) opens the [Marketplace](/using/marketplace) on its **Teams** tab.
+- The dashed **+** at the end of the team icons (**Create a team**) opens the [Marketplace](/using/marketplace) on its **Teams** tab.
 
 The **agent column** sits next to it. From top to bottom:
 
@@ -97,7 +97,9 @@ The **agent column** sits next to it. From top to bottom:
 - The team's agents, one Boo tile each, with Boo Zero last. Click a tile to open that [agent's page](/using/agents).
 - **New room**, then **General (Main Room)** and your rooms: the team's chats.
 - **Create Boo**, which adds an agent to this team.
-- The nav rows (below), then the theme switch.
+- The nav rows (below), then **Open on another device**.
+
+The **account bar** runs along the bottom of both columns: who you are (the person a sign-in proxy verified, or **You** on a local install), the [theme switch](/using/theming), and the gear that opens **Settings**.
 
 **Home** and the team's chats appear once the team has at least one agent. Press `Cmd/Ctrl+\` to hide or show the sidebar, and drag its edge to resize it.
 

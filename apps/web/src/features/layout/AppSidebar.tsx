@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { TeamSidebar } from '@/features/layout/TeamSidebar'
 import { AgentListColumn } from '@/features/layout/AgentListColumn'
+import { AccountBar } from '@/features/layout/AccountBar'
+import { useEmbedTitlebar } from '@/features/embedder/embedTitlebar'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { useFocusTrap } from '@/features/shared/useFocusTrap'
@@ -12,6 +14,7 @@ import {
   usePhoneLayout,
   usePhoneNav,
 } from '@/features/layout/phoneLayout'
+import { RAIL_COLLAPSE_DRAG, RAIL_WIDTH, SHEET_RADIUS } from '@/features/layout/railMetrics'
 import {
   clearPeekHide,
   closePeek,
@@ -30,33 +33,56 @@ import {
 
 /** Dragging the column narrower than this (raw, before clamping) collapses it. */
 const COLLAPSE_BELOW = 120
-/** With no agent column (Boo Zero view), a drag this far left collapses the rail. */
-const RAIL_COLLAPSE_DRAG = -40
 const KEY_STEP = 16
+
+/** The slim top bar's height in px, for a layer that starts under it. Zero
+ *  without the bar. */
+function embedTitlebarHeight(): number {
+  return document.querySelector('[data-embed-titlebar]')?.getBoundingClientRect().height ?? 0
+}
 
 // ─── Column body ─────────────────────────────────────────────────────────────
 
 /** The agent column at `width`. Narrower than its natural width the content
  *  keeps its natural layout and is clipped, with a fade at the right edge that
  *  deepens the narrower it gets. The fade is an overlay, not a CSS mask: a mask
- *  would also clip the column's (unportalled) modals to the column's box. */
-function ColumnBody({ width, bordered }: { width: number; bordered: boolean }) {
+ *  would also clip the column's (unportalled) modals to the column's box.
+ *
+ *  `sheet`: under the slim top bar, the column opens the sheet everything right
+ *  of the rail sits on. Its top and left edges carry the divider line and meet
+ *  in a rounded corner, and the page beside it carries the top line on (see
+ *  App.tsx), so the bar and the rail read as a frame around one sheet. */
+function ColumnBody({
+  width,
+  bordered,
+  sheet = false,
+}: {
+  width: number
+  bordered: boolean
+  sheet?: boolean
+}) {
   const narrow = width < SIDEBAR_NATURAL_WIDTH
   const fade = Math.min(48, Math.max(0, (SIDEBAR_NATURAL_WIDTH - width) * 1.4))
   return (
     <div
+      data-testid="agent-column-body"
       className={[
-        'relative h-full shrink-0 bg-surface',
+        'relative h-full shrink-0 bg-frame-column',
         bordered ? 'border-r border-border' : '',
+        sheet ? 'border-l border-t' : '',
       ].join(' ')}
-      style={{ width }}
+      style={{ width, ...(sheet ? { borderTopLeftRadius: SHEET_RADIUS } : {}) }}
     >
-      <div className="h-full overflow-hidden">
+      {/* Clips the column's own fill to the corner, inside the 1px line. */}
+      <div
+        className="h-full overflow-hidden"
+        style={sheet ? { borderTopLeftRadius: SHEET_RADIUS - 1 } : undefined}
+      >
         <div className="h-full" style={{ width: narrow ? SIDEBAR_NATURAL_WIDTH : '100%' }}>
           <ErrorBoundary
             variant="compact"
             label="the agent sidebar"
-            fallbackClassName="h-full w-full bg-surface"
+            fallbackClassName="h-full w-full bg-frame-column"
           >
             <AgentListColumn />
           </ErrorBoundary>
@@ -68,7 +94,8 @@ function ColumnBody({ width, bordered }: { width: number; bordered: boolean }) {
           className="pointer-events-none absolute inset-y-0 right-0 z-[1]"
           style={{
             width: fade,
-            background: 'linear-gradient(to right, rgb(var(--surface-rgb) / 0), var(--surface))',
+            background:
+              'linear-gradient(to right, rgb(var(--frame-column-rgb) / 0), var(--frame-column))',
           }}
         />
       )}
@@ -80,19 +107,74 @@ function Rail({
   peek,
   showToggle,
   toggleAnchor,
+  edge,
 }: {
   peek: boolean
   showToggle: boolean
   toggleAnchor?: PeekAnchor | null
+  edge: boolean
 }) {
   return (
     <ErrorBoundary
       variant="compact"
       label="the team sidebar"
-      fallbackClassName="h-full w-[60px] shrink-0 border-r border-border bg-background"
+      fallbackClassName={['h-full shrink-0 bg-frame', edge ? 'border-r border-border' : ''].join(
+        ' ',
+      )}
+      fallbackStyle={{ width: RAIL_WIDTH }}
     >
-      <TeamSidebar peek={peek} showToggle={showToggle} toggleAnchor={toggleAnchor} />
+      <TeamSidebar peek={peek} showToggle={showToggle} toggleAnchor={toggleAnchor} edge={edge} />
     </ErrorBoundary>
+  )
+}
+
+/** The whole sidebar: the team rail and the agent column side by side, and the
+ *  account bar across the bottom of both, on the frame colour. The same frame
+ *  docks beside the content, lays over it in the collapsed sidebar's peek, and
+ *  slides in as the phone drawer. Without the agent column (Boo Zero's view) the
+ *  account bar stacks to fit the rail. */
+function SidebarFrame({
+  showColumn,
+  columnWidth,
+  peek,
+  showToggle,
+  toggleAnchor,
+  sheet = false,
+  docked = false,
+}: {
+  showColumn: boolean
+  columnWidth: number
+  peek: boolean
+  showToggle: boolean
+  toggleAnchor?: PeekAnchor | null
+  /** Under the slim top bar: the column (or, docked without one, the page)
+   *  draws the line beside the rail, with the rounded corner. */
+  sheet?: boolean
+  docked?: boolean
+}) {
+  const railEdge = !(sheet && (showColumn || docked))
+  return (
+    // An explicit width: without it the account bar's text would widen the
+    // sidebar past the rail and the column instead of truncating.
+    <div
+      className="flex h-full min-h-0 flex-col bg-frame"
+      data-testid="sidebar-frame"
+      style={{ width: RAIL_WIDTH + (showColumn ? columnWidth : 0) }}
+    >
+      <div className="flex min-h-0 flex-1">
+        <Rail peek={peek} showToggle={showToggle} toggleAnchor={toggleAnchor} edge={railEdge} />
+        {showColumn && <ColumnBody width={columnWidth} bordered sheet={sheet} />}
+      </div>
+      <div className="shrink-0 border-r border-border p-2" data-testid="account-strip">
+        <ErrorBoundary
+          variant="compact"
+          label="the account bar"
+          fallbackClassName="h-12 w-full rounded-xl bg-surface"
+        >
+          <AccountBar compact={!showColumn} />
+        </ErrorBoundary>
+      </div>
+    </div>
   )
 }
 
@@ -112,7 +194,7 @@ function DrawerFocusTrap({ panelRef }: { panelRef: React.RefObject<HTMLDivElemen
  *  to another view or opening Settings (see AppSidebar). Kept mounted while
  *  closed, inert and out of sight, so the column keeps its search and scroll
  *  between openings. */
-function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
+function PhoneDrawer({ showColumn, embedBar }: { showColumn: boolean; embedBar: boolean }) {
   // Settings opens over the whole app, so the drawer steps aside in the same
   // render: its trap lets go of focus before the modal's takes it, and the modal
   // then hands focus back to the header toggle rather than into a closed drawer.
@@ -148,8 +230,12 @@ function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
         data-testid="sidebar-drawer"
         className="fixed inset-y-0 left-0 z-[58] flex outline-none"
         style={{
-          paddingTop: 'var(--clawboo-titlebar-inset, 0px)',
-          background: 'var(--background)',
+          // Under the slim top bar it starts below the bar, so the bar stays the
+          // window's to drag. Otherwise it pads past the embedder's strip.
+          ...(embedBar
+            ? { top: 'var(--clawboo-titlebar-inset, 0px)' }
+            : { paddingTop: 'var(--clawboo-titlebar-inset, 0px)' }),
+          background: 'var(--frame)',
           boxShadow: open ? 'var(--shadow-overlay)' : 'none',
           transform: open ? 'translateX(0)' : 'translateX(-100%)',
           // Closed, it is off screen and `inert`, which keeps it out of the tab
@@ -162,10 +248,15 @@ function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
             : 'transform 160ms ease',
         }}
       >
-        <Rail peek={false} showToggle={!showColumn} />
         {/* The column's natural width: a width dragged on a wide window would
             leave no room beside the drawer to tap it closed. */}
-        {showColumn && <ColumnBody width={SIDEBAR_NATURAL_WIDTH} bordered />}
+        <SidebarFrame
+          showColumn={showColumn}
+          columnWidth={SIDEBAR_NATURAL_WIDTH}
+          peek={false}
+          showToggle={!showColumn}
+          sheet={embedBar}
+        />
       </div>
       {open && <DrawerFocusTrap panelRef={panelRef} />}
     </>
@@ -188,6 +279,8 @@ export function AppSidebar() {
   // At phone width the sidebar is a drawer over the content instead.
   const phone = usePhoneLayout()
   const viewMode = useViewStore((s) => s.viewMode)
+  // An app that shows the dashboard in its own window asked for the slim top bar.
+  const embedBar = useEmbedTitlebar()
 
   const [drag, setDrag] = useState<{ width: number; collapsed: boolean } | null>(null)
   const width = drag?.width ?? storedWidth
@@ -305,11 +398,15 @@ export function AppSidebar() {
   }, [phone])
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  if (phone) return <PhoneDrawer showColumn={showColumn} />
+  if (phone) return <PhoneDrawer showColumn={showColumn} embedBar={embedBar} />
 
   if (isCollapsed) {
     // Not mounted mid-drag: the drag preview collapses and expands live.
     if (dragging) return null
+    // Under the slim top bar the peek starts below it, and the bar's own toggle
+    // (above the peek) docks the sidebar, so the peek shows none of its own.
+    const barHeight = embedBar ? embedTitlebarHeight() : 0
+    const peekAnchor = anchor ? { left: anchor.left, top: anchor.top - barHeight } : null
     return (
       <div
         ref={setPeekPanel}
@@ -319,6 +416,7 @@ export function AppSidebar() {
         onMouseLeave={schedulePeekHide}
         className="fixed inset-y-0 z-[58] flex"
         style={{
+          ...(embedBar ? { top: 'var(--clawboo-titlebar-inset, 0px)' } : {}),
           // Exactly where the docked sidebar sits, laid over the content.
           // Its toggle lands on the header toggle that opened it, so a
           // click there docks the sidebar and pushes the content over.
@@ -332,16 +430,28 @@ export function AppSidebar() {
             : 'opacity 120ms ease, left 140ms ease, visibility 0s linear 140ms',
         }}
       >
-        <Rail peek showToggle toggleAnchor={anchor} />
-        {showColumn && <ColumnBody width={width} bordered />}
+        <SidebarFrame
+          showColumn={showColumn}
+          columnWidth={width}
+          peek
+          showToggle={!embedBar}
+          toggleAnchor={peekAnchor}
+          sheet={embedBar}
+        />
       </div>
     )
   }
 
   return (
     <div className="relative flex h-full shrink-0" data-testid="app-sidebar">
-      <Rail peek={false} showToggle={!showColumn} />
-      {showColumn && <ColumnBody width={width} bordered />}
+      <SidebarFrame
+        showColumn={showColumn}
+        columnWidth={width}
+        peek={false}
+        showToggle={!showColumn && !embedBar}
+        sheet={embedBar}
+        docked
+      />
       <div
         role="separator"
         aria-orientation="vertical"

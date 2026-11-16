@@ -105,9 +105,10 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
         command: program ?? '',
         args,
         cwd: opts.cwd,
-        // npm's own settings arrive as the operator made them; only a connector
-        // launch turns npm's update check off.
-        env: opts.env ?? connectorChildEnv({ npmUpdateCheck: 'inherit' }),
+        // npm's and Python's own settings arrive as the operator made them; only
+        // a connector launch turns npm's update check and Python's bytecode off.
+        env:
+          opts.env ?? connectorChildEnv({ npmUpdateCheck: 'inherit', pythonBytecode: 'inherit' }),
         stdio: ['ignore', 'pipe', 'pipe'],
         // Detached so the kill can take the whole process group: a child that
         // spawns its own children would otherwise leave them behind.

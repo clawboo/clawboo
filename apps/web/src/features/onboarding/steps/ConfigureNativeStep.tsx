@@ -801,7 +801,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               autoComplete="off"
               disabled={submitting}
               aria-label="Native provider API key"
-              className="w-full rounded-xl border border-border bg-surface px-4 py-3.5 pr-11 font-mono text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50 placeholder:text-foreground/30"
+              className="w-full rounded-xl border border-border bg-field px-4 py-3.5 pr-11 font-mono text-[14px] text-foreground outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50 placeholder:text-foreground/30"
             />
             <button
               type="button"

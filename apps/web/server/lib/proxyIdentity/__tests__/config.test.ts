@@ -19,8 +19,10 @@ import {
   APP_LINK_ROUTES,
   APP_LINK_KEY_ENV,
   appLinkOn,
+  controlClaimModeOf,
   identityConfigs,
   loadAppLinkConfig,
+  loadPersonCheck,
   loadProxyIdentityConfig,
   parsePublicKeySetting,
   proxyIdentityFileWarning,
@@ -595,5 +597,104 @@ describe('roles', () => {
     const proxy = loadProxyIdentityConfig()!
     const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
     expect(identityConfigs(proxy, appLink).map((c) => c.roles)).toEqual(['enforce', 'enforce'])
+  })
+})
+
+describe('the person check (personCheck)', () => {
+  it('is page when nothing is set, with the lane off or on', () => {
+    initOperatorSettings()
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('page')
+    stubLane({ CLAWBOO_PROXY_IDENTITY: 'on' })
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('page')
+  })
+
+  it('reads CLAWBOO_PERSON_CHECK behind a lane that is on', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY: 'on', CLAWBOO_PERSON_CHECK: 'verified' })
+    initOperatorSettings()
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('verified')
+  })
+
+  it('is verified behind a required lane, whatever it says', () => {
+    stubLane({ CLAWBOO_PERSON_CHECK: 'page' })
+    initOperatorSettings()
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('verified')
+  })
+
+  it('stops the server on verified with the sign-in proxy lane off', () => {
+    vi.stubEnv('CLAWBOO_PERSON_CHECK', 'verified')
+    initOperatorSettings()
+    // Only the sign-in proxy's config is passed: an app link on its own signs a
+    // handful of routes, so the dashboard could do no person act (index.ts).
+    let message = ''
+    try {
+      loadPersonCheck(loadProxyIdentityConfig())
+    } catch (err) {
+      expect(err).toBeInstanceOf(OperatorSettingsError)
+      message = (err as Error).message
+    }
+    expect(message).toMatch(/personCheck is verified but the sign-in proxy lane/)
+  })
+
+  it('refuses a value it does not know', () => {
+    vi.stubEnv('CLAWBOO_PERSON_CHECK', 'strict')
+    expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+
+  it('makes the operator file warning cover it, as an agent could set it back', () => {
+    writeFileSync(path.join(home, 'operator.json'), JSON.stringify({ personCheck: 'verified' }))
+    initOperatorSettings()
+    expect(proxyIdentityFileWarning()).toMatch(/every agent it runs/)
+  })
+})
+
+describe('the take-over claim (proxyIdentityControlClaim)', () => {
+  it('is off by default', () => {
+    stubLane()
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.controlClaim).toBe('off')
+    expect(controlClaimModeOf(proxy)).toBe('off')
+    expect(controlClaimModeOf(null)).toBe('off')
+  })
+
+  it('is read behind a lane that is on or required, with request binding', () => {
+    for (const mode of ['on', 'required']) {
+      resetOperatorSettings()
+      stubLane({ CLAWBOO_PROXY_IDENTITY: mode, CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required' })
+      initOperatorSettings()
+      const proxy = loadProxyIdentityConfig()!
+      expect(controlClaimModeOf(proxy)).toBe('required')
+    }
+  })
+
+  it('stops the server with the lane off', () => {
+    vi.stubEnv('CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM', 'required')
+    expect(refusal()).toMatch(/proxyIdentityControlClaim is required but proxyIdentity is off/)
+  })
+
+  it('stops the server with session binding, where a claim would last the whole sign-in', () => {
+    stubLane({
+      CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required',
+      CLAWBOO_PROXY_IDENTITY_BINDING: 'session',
+    })
+    expect(refusal()).toMatch(
+      /proxyIdentityControlClaim is required but proxyIdentityBinding is session/,
+    )
+  })
+
+  it('is never handed to the app link', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required' })
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
+    expect(identityConfigs(proxy, appLink).map((c) => c.controlClaim)).toEqual([
+      'required',
+      undefined,
+    ])
+  })
+
+  it('refuses a setting it does not know', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'on' })
+    expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
   })
 })

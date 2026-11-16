@@ -496,7 +496,7 @@ async function performConnect(
             // than the ambient environment. The plan adds only a known server's
             // usage-statistics and update-check opt-outs.
             env: {
-              ...connectorChildEnv({ declared: declared ?? {} }),
+              ...connectorChildEnv({ declared: declared ?? {}, command: plan.command }),
               ...plan.env,
               ...sharedDriverEnv,
             },

@@ -298,7 +298,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
       {/* Chat header: agent identity left; card toggles + GitHub Star
                 right. It belongs to the chat, so with the cards closed it spans
                 the full width and the toggles ride along to the right edge. */}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface px-3">
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-page-header px-3">
         <div className="flex min-w-0 items-center gap-2.5 overflow-hidden max-sm:gap-1.5">
           <CollapsedSidebarToggle className="-mr-0.5" />
           {/* A phone keeps the name and leaves the face out. */}

@@ -44,8 +44,8 @@ test.describe('Teams', () => {
       timeout: 5_000,
     })
 
-    // Tokens Used moved into the Settings modal (opened from the sidebar gear).
-    await agentList.locator('[data-testid="nav-settings"]').click()
+    // Tokens Used moved into the Settings modal (opened from the account bar's gear).
+    await page.locator('[data-testid="account-bar"] [data-testid="nav-settings"]').click()
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
     await page.locator('[data-testid="settings-nav-cost"]').click()
     await expect(page.getByText('Token usage by team and agent')).toBeVisible({ timeout: 5_000 })
@@ -65,14 +65,13 @@ test.describe('Teams', () => {
     gateway,
   }) => {
     await connectToMockGateway(page, request, gateway.url)
-    const agentList = page.locator('[data-testid="agent-list-column"]')
 
     // Settings modal defaults to the Runtimes pane, which renders every runtime as a
     // row (RuntimeConnectList). A CONNECTED row shows a "Manage" footer that expands
     // to the inline management body, where a "Details" link opens the diagnostics
     // drawer (the ⓘ header button was folded into Manage). OpenClaw is connected via
     // the mock gateway here, so its Manage → Details is the stable target.
-    await agentList.locator('[data-testid="nav-settings"]').click()
+    await page.locator('[data-testid="account-bar"] [data-testid="nav-settings"]').click()
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
     await expect(page.locator('[data-testid="runtime-list-row-openclaw"]')).toBeVisible({
       timeout: 5_000,
@@ -94,12 +93,10 @@ test.describe('Teams', () => {
   test('system settings opens maintenance panel', async ({ page, request, gateway }) => {
     await connectToMockGateway(page, request, gateway.url)
 
-    const agentList = page.locator('[data-testid="agent-list-column"]')
-
-    // System moved into the Settings modal. Open the modal from the sidebar
-    // gear (testid — `button:has-text("Settings")` would also match the modal's
+    // System moved into the Settings modal. Open the modal from the account
+    // bar's gear (by testid: `button:has-text("Settings")` would also match the modal's
     // own "Settings" heading + the "System" theme-toggle title), then pick it.
-    await agentList.locator('[data-testid="nav-settings"]').click()
+    await page.locator('[data-testid="account-bar"] [data-testid="nav-settings"]').click()
     await expect(page.locator('[data-testid="settings-modal"]')).toBeVisible({ timeout: 5_000 })
     await page.locator('[data-testid="settings-nav-system"]').click()
 

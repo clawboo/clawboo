@@ -7,7 +7,9 @@
 //
 // Used by the dashboard (signed in as usual) and by a link's page (the link's
 // token in a header). Reconnects by itself after a dropped connection, naming
-// its previous viewer id so a take over survives a network blip.
+// its previous viewer id so a take over survives a network blip, and at once
+// when the server asks it to (`renew`, which a server that wants a fresh signed
+// request every few minutes sends).
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { apiFetch } from '@clawboo/control-client'
@@ -44,6 +46,21 @@ const INPUT_FLUSH_MS = 40
 const MAX_EVENTS_PER_POST = 200
 const INPUT_TIMEOUT_MS = 10_000
 const RECONNECT_STEPS_MS = [1_000, 2_000, 5_000, 10_000]
+
+/** What a refusal's code means, for the person reading it. */
+export const REFUSAL_WORDS: Record<string, string> = {
+  person_only:
+    'This needs a person your sign-in proxy signed in. Open Clawboo through the address your sign-in proxy serves.',
+  control_claim:
+    'Your sign-in proxy has not allowed you to take over this agent. Ask whoever runs it to allow it, then try again.',
+}
+
+/** A refusal's words: its code's meaning, its own sentence, or the status. */
+function refusalText(body: { error?: string } | null, status: number): string {
+  const code = body?.error
+  if (code && REFUSAL_WORDS[code]) return REFUSAL_WORDS[code]
+  return code ?? `HTTP ${status}`
+}
 /** The server writes at least every 15 s; this long with nothing means the
  *  connection died quietly (a laptop slept, the network changed). */
 const SILENT_STREAM_MS = 40_000
@@ -60,6 +77,12 @@ const INITIAL: LiveScreenState = {
   error: null,
 }
 
+/** The view ended for good. It holds nothing now: a take over it had is not
+ *  shown, and no key or click is captured for a screen it can no longer reach. */
+function endedFor(s: LiveScreenState, reason: string): LiveScreenState {
+  return { ...s, status: 'ended', endedReason: reason, control: 'agent', canControl: false }
+}
+
 function request(
   target: LiveScreenTarget,
   path: string,
@@ -68,12 +91,14 @@ function request(
   if (target.kind === 'dashboard') {
     return apiFetch(`/api/agents/${encodeURIComponent(target.agentId)}/computer${path}`, init)
   }
-  // A link's page is not signed in, and sends no cookie. It mounts no access
-  // lock, so a 401 here shows no sign-in screen.
+  // A link's page is not signed in to Clawboo: the link is its credential. It
+  // mounts no access lock, so a 401 here shows no sign-in screen. Cookies for
+  // this address still go, so a sign-in proxy in front can tell who it is
+  // (a server that asks for a verified person on links needs that).
   return apiFetch(`/api/computer-link${path}`, {
     ...init,
     headers: { ...(init.headers as Record<string, string>), [LINK_HEADER]: target.token },
-    credentials: 'omit',
+    credentials: 'same-origin',
   })
 }
 
@@ -120,6 +145,8 @@ export function useLiveScreen(
     let iHold = false
     let controller: AbortController | null = null
     let retry: ReturnType<typeof setTimeout> | null = null
+    /** The server asked for a fresh request now (`renew`), not after a back-off. */
+    let renewNow = false
     // Pictures are decoded asynchronously; drawing them in arrival order keeps a
     // later region from being painted over by an earlier one.
     let drawChain: Promise<void> = Promise.resolve()
@@ -225,15 +252,17 @@ export function useLiveScreen(
             error: typeof data['reason'] === 'string' ? data['reason'] : null,
           }))
           break
-        case 'end':
-          stopped = true
-          setState((s) => ({
-            ...s,
-            status: 'ended',
-            endedReason:
-              typeof data['reason'] === 'string' ? data['reason'] : 'The live view ended.',
-          }))
+        case 'renew':
+          renewNow = true
           break
+        case 'end': {
+          stopped = true
+          viewerId.current = null
+          const reason =
+            typeof data['reason'] === 'string' ? data['reason'] : 'The live view ended.'
+          setState((s) => endedFor(s, reason))
+          break
+        }
       }
     }
 
@@ -244,14 +273,16 @@ export function useLiveScreen(
       if (viewerId.current) headers[VIEWER_HEADER] = viewerId.current
       try {
         const res = await request(t, '/live', { headers, signal: ac.signal })
-        if (res.status === 401 || res.status === 404) {
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null
           stopped = true
-          setState((s) => ({
-            ...s,
-            status: 'ended',
-            endedReason: body?.error ?? 'This live view is not available.',
-          }))
+          // A renewal refused while this view held control (the proxy stopped
+          // vouching for the person): no more input goes with this view's id.
+          viewerId.current = null
+          const reason = body?.error
+            ? refusalText(body, res.status)
+            : 'This live view is not available.'
+          setState((s) => endedFor(s, reason))
           return
         }
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
@@ -276,8 +307,11 @@ export function useLiveScreen(
       }
       if (stopped) return
       setState((s) => (s.status === 'ended' ? s : { ...s, status: 'connecting' }))
-      const wait = RECONNECT_STEPS_MS[Math.min(attempt, RECONNECT_STEPS_MS.length - 1)]!
-      attempt += 1
+      const wait = renewNow
+        ? 0
+        : RECONNECT_STEPS_MS[Math.min(attempt, RECONNECT_STEPS_MS.length - 1)]!
+      if (!renewNow) attempt += 1
+      renewNow = false
       retry = setTimeout(() => void connect(), wait)
     }
     void connect()
@@ -314,7 +348,7 @@ export function useLiveScreen(
         body: JSON.stringify({ viewerId: id, action }),
       })
       const body = (await res.json().catch(() => null)) as { error?: string } | null
-      setState((s) => ({ ...s, error: res.ok ? null : (body?.error ?? `HTTP ${res.status}`) }))
+      setState((s) => ({ ...s, error: res.ok ? null : refusalText(body, res.status) }))
     } catch (err) {
       setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }))
     }
@@ -341,7 +375,7 @@ export function useLiveScreen(
       .then(async (res) => {
         if (res.ok) return
         const body = (await res.json().catch(() => null)) as { error?: string } | null
-        setState((s) => ({ ...s, error: body?.error ?? `HTTP ${res.status}` }))
+        setState((s) => ({ ...s, error: refusalText(body, res.status) }))
       })
       .catch(() => {})
       .finally(() => {

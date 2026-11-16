@@ -57,6 +57,7 @@ vi.mock('../../lib/worktrees', async (importOriginal) => ({
 }))
 
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
+const { resetPersonCheckForTests, setPersonCheckMode } = await import('../../lib/personCheck')
 const {
   boardAssignPOST,
   boardCommentPOST,
@@ -76,12 +77,19 @@ const TEAM = 'T'
 const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const ADA = { id: 'user-42', name: 'Ada', role: 'admin' }
 
-/** Every caller that must not get the person's authority. */
-const NOT_THE_PERSON: Array<[string, Record<string, string>]> = [
+/** Plain http to a network address: no fetch metadata, and Origin names the host. */
+const LAN_PAGE = { origin: 'http://192.168.1.10:18790', host: '192.168.1.10:18790' }
+
+/** Every caller that must not get the person's authority, and the mode of the
+ *  person check it is tried under (`page` unless named). */
+const NOT_THE_PERSON: Array<[string, Record<string, string>, 'verified'?]> = [
   ['a CLI or curl', {}],
   ["Node's fetch", { 'sec-fetch-mode': 'cors' }],
   ['another site', { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'cors' }],
   ['a link', { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate' }],
+  // With `personCheck: verified` the page's own marks count for nothing.
+  ['the dashboard, with the verified check', DASHBOARD, 'verified'],
+  ['the dashboard over plain http, with the verified check', LAN_PAGE, 'verified'],
 ]
 
 function mockRes() {
@@ -163,6 +171,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   resetDb()
+  resetPersonCheckForTests()
   for (const name of ['HOME', 'CLAWBOO_HOME']) {
     if (prev[name] === undefined) delete process.env[name]
     else process.env[name] = prev[name]
@@ -170,7 +179,11 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true })
 })
 
-describe.each(NOT_THE_PERSON)('from %s', (_name, headers) => {
+describe.each(NOT_THE_PERSON)('from %s', (_name, headers, mode) => {
+  beforeEach(() => {
+    if (mode) setPersonCheckMode(mode)
+  })
+
   it('Retry is refused, and writes nothing', () => {
     const t = boundTask()
     const r = mockRes()
@@ -436,16 +449,22 @@ function setFailingVerdict(taskId: string): void {
 
 /** Every caller that does get it: the dashboard's page, the dashboard on a plain
  *  http network address, and a person a sign-in proxy vouched for. */
-const THE_PERSON: Array<[string, Partial<Parameters<typeof req>[0]>]> = [
+const THE_PERSON: Array<[string, Partial<Parameters<typeof req>[0]>, 'verified'?]> = [
   ['the dashboard', { headers: DASHBOARD }],
-  [
-    'the dashboard over plain http on a network address',
-    { headers: { origin: 'http://192.168.1.10:18790', host: '192.168.1.10:18790' } },
-  ],
+  ['the dashboard over plain http on a network address', { headers: LAN_PAGE }],
   ['a person a sign-in proxy vouched for', { person: ADA }],
+  [
+    'a person a sign-in proxy vouched for, on the page, with the verified check',
+    { person: ADA, headers: DASHBOARD },
+    'verified',
+  ],
 ]
 
-describe.each(THE_PERSON)('from %s', (_name, who) => {
+describe.each(THE_PERSON)('from %s', (_name, who, mode) => {
+  beforeEach(() => {
+    if (mode) setPersonCheckMode(mode)
+  })
+
   it('a sourceDelegationId naming an agent is kept', () => {
     const r = mockRes()
     boardCreatePOST(

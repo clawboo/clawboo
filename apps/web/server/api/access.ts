@@ -16,6 +16,7 @@ import type { Request, Response } from 'express'
 import type { AccessGate } from '@clawboo/gateway-proxy'
 
 import { actingPerson, personOf } from '../lib/auth'
+import { controlClaimRequired, personCheckMode } from '../lib/personCheck'
 import { appLinkOn, proxyIdentityMode } from '../lib/proxyIdentity/config'
 import { accessEnded, isGuestOnly, permissionsOf, sortedPermissions } from '../lib/roles/policy'
 
@@ -50,6 +51,11 @@ export function accessLaunchCodePOST(req: Request, res: Response): void {
  * and an app its link; the dashboard can say who is signed in, and whose tasks
  * are its own.
  *
+ * `personCheck` says who may act as the person: `page` (the dashboard's own page
+ * too) or `verified` (only a verified token), so a page reached around the
+ * sign-in proxy can say why it may not act. `controlClaim` says whether taking
+ * over an agent's screen needs the proxy's `control` claim.
+ *
  * With roles enforced (`roles: "enforce"`) it also says what this person may do,
  * so the dashboard shows only that: their roles, their permissions (an empty
  * list for a token with no role this engine knows, or a guest whose access has
@@ -66,6 +72,8 @@ export function accessIdentityGET(req: Request, res: Response): void {
     proxyIdentity: proxyIdentityMode(),
     appLink: appLinkOn(),
     roles: enforced ? 'enforce' : 'off',
+    personCheck: personCheckMode(),
+    controlClaim: controlClaimRequired() ? 'required' : 'off',
     person: personOf(req),
     you: actingPerson(req),
     ...(enforced

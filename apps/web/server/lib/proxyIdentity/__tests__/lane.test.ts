@@ -20,6 +20,7 @@ import { accessIdentityGET } from '../../../api/access'
 import { actsAsPerson, attachIdentity } from '../../auth'
 import { createBasePathMiddleware } from '../../basePathMiddleware'
 import { resetOperatorSettings } from '../../operatorSettings'
+import { resetPersonCheckForTests, setPersonCheckMode } from '../../personCheck'
 import { APP_LINK_KEY_ENV, loadAppLinkConfig, type ProxyIdentityConfig } from '../config'
 import {
   createIdentityLane,
@@ -36,8 +37,9 @@ const app = generateKeyPairSync('ed25519')
 const APP_PEM = app.publicKey.export({ format: 'pem', type: 'spki' }).toString()
 const ACCESS_TOKEN = 'access-token-for-tests'
 
-function config(mode: 'on' | 'required'): ProxyIdentityConfig {
+function config(mode: 'on' | 'required', controlClaim?: 'required'): ProxyIdentityConfig {
   return {
+    ...(controlClaim ? { controlClaim } : {}),
     mode,
     header: 'clawboo-identity',
     issuer: 'https://proxy.example.com',
@@ -52,10 +54,15 @@ function config(mode: 'on' | 'required'): ProxyIdentityConfig {
 }
 
 let n = 0
-async function assertion(method: string, path: string, key = ed.privateKey): Promise<string> {
+async function assertion(
+  method: string,
+  path: string,
+  key = ed.privateKey,
+  extra: Record<string, unknown> = {},
+): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   n += 1
-  return new SignJWT({ name: 'Ada', role: 'admin', htm: method, htu: path })
+  return new SignJWT({ name: 'Ada', role: 'admin', htm: method, htu: path, ...extra })
     .setProtectedHeader({ alg: 'EdDSA' })
     .setIssuer('https://proxy.example.com')
     .setAudience('clawboo')
@@ -70,11 +77,11 @@ async function assertion(method: string, path: string, key = ed.privateKey): Pro
 async function appAssertion(
   method: string,
   path: string,
-  { sub = 'account:u-7', key = app.privateKey } = {},
+  { sub = 'account:u-7', key = app.privateKey, extra = {} as Record<string, unknown> } = {},
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   n += 1
-  return new SignJWT({ name: 'Grace', htm: method, htu: path })
+  return new SignJWT({ name: 'Grace', htm: method, htu: path, ...extra })
     .setProtectedHeader({ alg: 'EdDSA' })
     .setIssuer('clawboo-app-link')
     .setAudience('clawboo-engine')
@@ -98,7 +105,10 @@ async function start(opts: {
   appLink?: boolean
   /** Leave the sign-in proxy out, for an app link on its own. */
   proxy?: boolean
+  /** Read the take-over claim (proxyIdentityControlClaim: required). */
+  controlClaim?: boolean
 }): Promise<void> {
+  const claim = opts.controlClaim ? ('required' as const) : undefined
   if (opts.proxy !== false) vi.stubEnv('CLAWBOO_PROXY_IDENTITY', opts.mode)
   const gate = createAccessGate({
     token: opts.accessToken ?? '',
@@ -114,8 +124,8 @@ async function start(opts: {
     const sources: LaneSource[] = []
     if (opts.proxy !== false) {
       sources.push({
-        config: config(opts.mode),
-        verifier: createAssertionVerifier(config(opts.mode)),
+        config: config(opts.mode, claim),
+        verifier: createAssertionVerifier(config(opts.mode, claim)),
       })
     }
     const appLink = loadAppLinkConfig(process.env)!
@@ -123,8 +133,8 @@ async function start(opts: {
     lane = createIdentityLane(sources, laneOpts)
   } else {
     lane = createProxyIdentityLane(
-      config(opts.mode),
-      createAssertionVerifier(config(opts.mode)),
+      config(opts.mode, claim),
+      createAssertionVerifier(config(opts.mode, claim)),
       laneOpts,
     )
   }
@@ -152,7 +162,11 @@ async function start(opts: {
       actsAsPerson: actsAsPerson(req),
       person: req.person ?? null,
       via: req.personVia ?? null,
+      claim: req.controlClaim ?? null,
     })
+  })
+  app.post('/api/agents/:agentId/computer/control', (req, res) => {
+    res.json({ claim: req.controlClaim ?? null, actsAsPerson: actsAsPerson(req) })
   })
   // A wildcard route, which absorbs dot segments the way the board's preview
   // route does: the raw path stays under /api/ while a resolved one leaves it.
@@ -173,6 +187,7 @@ afterEach(async () => {
   if (server) await new Promise<void>((r) => server!.close(() => r()))
   server = null
   resetOperatorSettings()
+  resetPersonCheckForTests()
   vi.unstubAllEnvs()
 })
 
@@ -240,6 +255,8 @@ describe('on', () => {
         proxyIdentity: 'on',
         appLink: false,
         roles: 'off',
+        personCheck: 'page',
+        controlClaim: 'off',
         person: { id: 'user-42', name: 'Ada', role: 'admin' },
         you: { id: 'user-42', name: 'Ada', role: 'admin' },
       },
@@ -254,6 +271,8 @@ describe('on', () => {
         proxyIdentity: 'on',
         appLink: false,
         roles: 'off',
+        personCheck: 'page',
+        controlClaim: 'off',
         person: null,
         you: { id: 'local', name: 'You', role: null },
       },
@@ -568,6 +587,8 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
         proxyIdentity: 'on',
         appLink: true,
         roles: 'off',
+        personCheck: 'page',
+        controlClaim: 'off',
         person: { id: 'account:u-7', name: 'Grace', role: null },
         you: { id: 'account:u-7', name: 'Grace', role: null },
       },
@@ -589,6 +610,7 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
         actsAsPerson: true,
         person: { id: 'account:u-7', name: 'Grace', role: null },
         via: 'app',
+        claim: null,
       },
     })
   })
@@ -751,5 +773,92 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
       ...(await signedByApp('POST', '/api/mcp/tasks', { key: other.privateKey })),
     }
     expect((await get('/api/mcp/tasks', withForgedAppToken, 'POST')).status).toBe(401)
+  })
+})
+
+describe('the take-over claim', () => {
+  const CONTROL = '/api/agents/a1/computer/control'
+  const withClaim = async (control: unknown, method = 'POST', path = CONTROL) => ({
+    'clawboo-identity': await assertion(method, path, ed.privateKey, { control }),
+  })
+
+  it("puts the agent a proxy token's control claim names on the request", async () => {
+    await start({ mode: 'on', controlClaim: true })
+    expect(await get(CONTROL, await withClaim('a1'), 'POST')).toEqual({
+      status: 200,
+      body: { claim: 'a1', actsAsPerson: true },
+    })
+  })
+
+  it('refuses a token whose claim is malformed, never treating it as no claim', async () => {
+    await start({ mode: 'on', controlClaim: true })
+    const res = await get(CONTROL, await withClaim(7), 'POST')
+    expect(res.status).toBe(401)
+    expect(res.body['reason']).toBe('claims')
+  })
+
+  it('carries no claim for a request without a token, or with the switch off', async () => {
+    await start({ mode: 'on', controlClaim: true })
+    expect((await get(CONTROL, {}, 'POST')).body['claim']).toBeNull()
+    await new Promise<void>((r) => server!.close(() => r()))
+    await start({ mode: 'on' })
+    expect((await get(CONTROL, await withClaim('a1'), 'POST')).body['claim']).toBeNull()
+  })
+
+  it("never takes one from the app link's token", async () => {
+    await start({ mode: 'on', appLink: true, controlClaim: true })
+    const path = '/api/agents/a1/chat'
+    const res = await get(
+      path,
+      { 'clawboo-app-identity': await appAssertion('POST', path, { extra: { control: 'a1' } }) },
+      'POST',
+    )
+    expect(res.status).toBe(200)
+    expect(res.body['via']).toBe('app')
+    expect(res.body['claim']).toBeNull()
+  })
+})
+
+describe('the verified person check, over the lane', () => {
+  const ROUTE = '/api/team-verify-command/T'
+  const PAGE = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+
+  it('page: the dashboard page acts as the person without a token', async () => {
+    await start({ mode: 'on' })
+    expect((await get(ROUTE, PAGE, 'PUT')).body['actsAsPerson']).toBe(true)
+  })
+
+  it('verified: the page alone does not; a signed person does', async () => {
+    setPersonCheckMode('verified')
+    await start({ mode: 'on' })
+    expect((await get(ROUTE, PAGE, 'PUT')).body['actsAsPerson']).toBe(false)
+    expect((await get(ROUTE, { Origin: base }, 'PUT')).body['actsAsPerson']).toBe(false)
+    const signedPage = { ...PAGE, ...(await signed('PUT', ROUTE)) }
+    expect((await get(ROUTE, signedPage, 'PUT')).body).toEqual({
+      actsAsPerson: true,
+      person: { id: 'user-42', name: 'Ada', role: 'admin' },
+    })
+  })
+
+  it("verified: the app link's person still acts on its own routes", async () => {
+    setPersonCheckMode('verified')
+    await start({ mode: 'on', appLink: true })
+    const path = '/api/agents/a1/chat'
+    const res = await get(
+      path,
+      { 'clawboo-app-identity': await appAssertion('POST', path) },
+      'POST',
+    )
+    expect(res.body['actsAsPerson']).toBe(true)
+  })
+
+  it('says how the person check runs on the identity route', async () => {
+    setPersonCheckMode('verified')
+    await start({ mode: 'on' })
+    expect((await get('/api/access/identity')).body).toMatchObject({
+      personCheck: 'verified',
+      controlClaim: 'off',
+      person: null,
+    })
   })
 })

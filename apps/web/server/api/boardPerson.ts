@@ -3,9 +3,9 @@
 // /api/ (so the access gate and the origin guard apply) and never under /api/mcp/,
 // where a runtime's attach token gets in without the cookie. Each answers to the one
 // person check (`refuseUnlessPerson`), and records the verified person, or the
-// install's built-in one, as who did it. Behind a sign-in proxy in `required` mode
-// every request here needs a verified person anyway. Locally it stays the speed bump
-// that check is: see lib/dashboardRequest.
+// install's built-in one, as who did it. With `personCheck: verified`, or behind a
+// sign-in proxy in `required` mode, every request here needs a verified person.
+// Otherwise it stays the speed bump that check is: see lib/dashboardRequest.
 
 import type { Request, Response } from 'express'
 

@@ -58,6 +58,7 @@ vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
 }))
 
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
+const { resetPersonCheckForTests, setPersonCheckMode } = await import('../../lib/personCheck')
 const { onChatReportUp } = await import('../../lib/agentChat/chatReportUpOutbox')
 const { boardCommentPOST, boardCreatePOST, boardTaskLabelsPUT, boardUpdatePATCH } =
   await import('../board')
@@ -116,6 +117,10 @@ function mockRes() {
   return { res, code: () => status, body: () => payload as Record<string, unknown> }
 }
 
+/** Headers every request below carries too, for a case that sends the page's
+ *  marks on routes whose calls name no headers (the verified cases). */
+let pageMarks: Record<string, string> = {}
+
 const req = (over: {
   params?: Record<string, string>
   body?: unknown
@@ -126,12 +131,12 @@ const req = (over: {
     params: {},
     query: {},
     body: {},
-    headers: {},
     person: null,
     app: { locals: {} },
     get: () => undefined,
     socket: {},
     ...over,
+    headers: { ...pageMarks, ...(over.headers ?? {}) },
   }) as unknown as Request
 
 function eventsOf(kind: string, taskId: string): Array<Record<string, unknown>> {
@@ -217,6 +222,8 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   resetDb()
+  resetPersonCheckForTests()
+  pageMarks = {}
   for (const name of ['HOME', 'CLAWBOO_HOME']) {
     if (prev[name] === undefined) delete process.env[name]
     else process.env[name] = prev[name]
@@ -235,7 +242,8 @@ const ROUTINE = {
 /** A routine the person made, to act on: its id. */
 async function routine(): Promise<string> {
   const r = mockRes()
-  await schedulesCreatePOST(req({ body: ROUTINE, headers: DASHBOARD }), r.res)
+  // Made by a person a proxy vouched for, so it is made in every mode of the check.
+  await schedulesCreatePOST(req({ body: ROUTINE, person: ADA }), r.res)
   return (r.body()['schedule'] as { id: string }).id
 }
 
@@ -470,6 +478,23 @@ describe.each(ROUTES)('%s', (_name, call) => {
     await call({ headers: DASHBOARD }, r.res)
     expect(r.code()).toBeLessThan(300)
   })
+
+  // personCheck: verified (or a required sign-in proxy lane): the page's marks
+  // count for nothing, and only a person a verified token names acts.
+  it('verified: refuses the dashboard’s own page with no verified person', async () => {
+    setPersonCheckMode('verified')
+    const r = mockRes()
+    await call({ headers: DASHBOARD }, r.res)
+    expect(r.code()).toBe(403)
+    expect(r.body()['error']).toBe('person_only')
+  })
+
+  it('verified: still takes a person a sign-in proxy vouched for, on the page or not', async () => {
+    setPersonCheckMode('verified')
+    const r = mockRes()
+    await call({ person: ADA, headers: DASHBOARD }, r.res)
+    expect(r.code()).toBeLessThan(300)
+  })
 })
 
 /** The other team, for what crosses from one to another. */
@@ -607,6 +632,15 @@ const REFUSED: Array<[string, (res: Response) => unknown]> = [
 
 describe('a caller nothing vouches for', () => {
   it.each(REFUSED)('gets no say over %s', async (_name, call) => {
+    const r = mockRes()
+    await call(r.res)
+    expect(r.code()).toBe(403)
+    expect(r.body()['error']).toBe('person_only')
+  })
+
+  it.each(REFUSED)('verified: nor does the dashboard’s own page, over %s', async (_name, call) => {
+    setPersonCheckMode('verified')
+    pageMarks = DASHBOARD
     const r = mockRes()
     await call(r.res)
     expect(r.code()).toBe(403)

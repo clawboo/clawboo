@@ -142,10 +142,15 @@ When you connect a connector, Clawboo is the MCP client. The server's connector 
   generous one, because a cold `npx` install happens inside it. Discovery stops at `MAX_CONNECTOR_TOOLS` tools.
 - **Results.** `flattenContent` turns an MCP result into text for the model, and images ride along separately.
 - **Environment.** `connectorChildEnv` builds a stdio connector's environment from an empty set, the few variables
-  a process needs to start, the proxy settings and npm's prefix, cache and update check in either spelling
-  (`CONNECTOR_ENV_ALLOWLIST`), and the credentials you gave that connector, so it never inherits your provider keys
-  or npm credentials. It sets `npm_config_update_notifier=false` unless that is already set; pass
-  `npmUpdateCheck: 'inherit'` to leave it as the operator configured it, as approved shell commands do.
+  a process needs to start, the proxy settings, npm's prefix, cache and update check in either spelling and Python's
+  `PYTHONDONTWRITEBYTECODE` and `PYTHONPYCACHEPREFIX` (`CONNECTOR_ENV_ALLOWLIST`), and the credentials you gave that
+  connector, so it never inherits your provider keys or npm credentials. It sets `npm_config_update_notifier=false`
+  unless that is already set; pass `npmUpdateCheck: 'inherit'` to leave it as the operator configured it, as approved
+  shell commands do. In releases after 0.8.0, given the connector's `command`, it also sets `PYTHONDONTWRITEBYTECODE=1` unless either
+  Python setting is already set, for a connector started through npm only (`launchesThroughNpm`: the command's file
+  name is `npx`, `npm` or `node`, plus `npx.cmd`, `npm.cmd` and `node.exe` on Windows), so a native build that `npx`
+  runs writes no `__pycache__` into npm's own folder. Any other command, such as `uvx`, gets no Python setting added.
+  With no `command` it sets it too. Pass `pythonBytecode: 'inherit'` to add nothing, as approved shell commands do.
   This closes the environment only. It is not a sandbox: the connector still runs as your user and can read your
   files.
 
