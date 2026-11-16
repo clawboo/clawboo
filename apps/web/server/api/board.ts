@@ -66,6 +66,7 @@ import {
   taskLabelsBody,
   personMovedSinceLastRun,
   type ClawbooDb,
+  parseWaitingOn,
   pendingQuestionsForTasks,
   waitingOnDetailOf,
   wakeCommentIds,
@@ -154,6 +155,7 @@ export function boardListGET(req: Request, res: Response): void {
         db,
         withOpenQuestion(
           db,
+          req,
           withReadState(
             states,
             withLabels(
@@ -197,7 +199,7 @@ export function boardGetGET(req: Request, res: Response): void {
       res.status(404).json({ error: 'task not found' })
       return
     }
-    const [withWaiting] = withOpenQuestion(db, [task])
+    const [withWaiting] = withOpenQuestion(db, req, [task])
     res.json({
       task: {
         ...withReadState(states, [withWaiting!])[0]!,
@@ -286,9 +288,12 @@ function withJobStopped<T extends DbTask>(
 
 /** Each task with the question it has open (`openQuestion`, null when none), so a
  *  card can show the answer controls without a request per card, and what a task
- *  waiting on other work waits on (`waitingOnDetail`), so its card can name it. */
+ *  waiting on other work waits on (`waitingOnDetail`), so its card can name it. A
+ *  guest is not told the title of a waited-on task on another team (lib/roles): a
+ *  wait can cross teams, and the card then reads as it does for a task that is gone. */
 function withOpenQuestion<T extends DbTask>(
   db: ClawbooDb,
+  req: Request,
   rows: T[],
 ): Array<
   T & {
@@ -305,8 +310,15 @@ function withOpenQuestion<T extends DbTask>(
     db,
     rows.filter((t) => t.waitingOn != null).map((t) => t.id),
   )
+  const scoped = roleScopeOf(req) !== null
   return rows.map((t) => {
-    const waitingOnDetail = waitingOnDetailOf(db, t)
+    let waitingOnDetail = waitingOnDetailOf(db, t)
+    if (scoped && waitingOnDetail?.taskTitle) {
+      const w = parseWaitingOn(t.waitingOn)
+      if (w?.kind === 'task' && !inRoleScope(req, teamOfTask(db, w.taskId))) {
+        waitingOnDetail = { taskTitle: '' }
+      }
+    }
     return {
       ...t,
       openQuestion: byId.get(t.id) ?? null,

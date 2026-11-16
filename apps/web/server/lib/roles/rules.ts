@@ -20,8 +20,10 @@ import {
   getGrant,
   getTask,
   grantKey,
+  isTerminal,
   mainTaskState,
   type ClawbooDb,
+  type TaskStatus,
 } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request } from 'express'
@@ -199,9 +201,35 @@ function cascadeStaysInTeams(
     }
   }
   for (const id of mainTaskState(db, taskId)?.subtaskIds ?? []) {
-    reached.push(getTask(db, id)?.teamId ?? null)
+    // The close cancels only the open ones (closeOpenSubtasksOfMain): one already
+    // done or cancelled is left as it is, whatever team it is on.
+    const row = getTask(db, id)
+    if (row && !isTerminal(row.status as TaskStatus)) reached.push(row.teamId ?? null)
   }
   return reached.every(inTeams)
+}
+
+/** A task made under another reopens the first main task above it when that one
+ *  is closed (reopenClosedMainAboveTx), and the chain can climb to another team,
+ *  as a hand-off files work there. A guest's create may do that only for a main
+ *  task on their own teams. */
+function createReopensOnlyOwnTeams(
+  req: Request,
+  db: ClawbooDb,
+  inTeams: (teamId: string | null) => boolean,
+): boolean {
+  const parentTaskId = bodyOf(req)['parentTaskId']
+  if (typeof parentTaskId !== 'string' || parentTaskId === '') return true
+  const seen = new Set<string>()
+  let id: string | null = parentTaskId
+  while (id && !seen.has(id)) {
+    seen.add(id)
+    const row = getTask(db, id)
+    if (!row) return true
+    if (row.isMainTask === 1) return !isTerminal(row.status as TaskStatus) || inTeams(row.teamId)
+    id = row.parentTaskId ?? null
+  }
+  return true
 }
 
 /** POST /api/capabilities/:action is four routes in one. */
@@ -417,6 +445,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
       { by: 'body-agent', key: 'assigneeAgentId' },
     ],
     guestMayNotSend: ['sourceDelegationId'],
+    guestCheck: createReopensOnlyOwnTeams,
   },
   'GET /api/board/inbox': see(),
   'POST /api/board/inbox/read': see({ by: 'any' }),

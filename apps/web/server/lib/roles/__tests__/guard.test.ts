@@ -14,11 +14,13 @@ import {
   linkDep,
   revokeGrant,
   taskQuestions,
+  tasks,
   teams,
   upsertGrant,
   type ClawbooDb,
 } from '@clawboo/db'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
+import { eq } from 'drizzle-orm'
 import type { NextFunction, Request, Response } from 'express'
 
 import { getDb, resetDb } from '../../db'
@@ -533,6 +535,50 @@ describe('decideRole', () => {
         }).ok
       expect(close('done')).toBe(false)
       expect(close('cancelled')).toBe(false)
+    })
+
+    it('lets a guest close a request when its work on another team is already finished', () => {
+      // The close cancels only the open work under a request: finished work on another
+      // team stays as it is, so it does not stand in the guest's way.
+      const request = createTask(db, { title: 'Menu photos', teamId: 'T', mainTaskLead: 'a1' }).id
+      const copy = createTask(db, { title: 'Ad copy', teamId: 'OTHER', parentTaskId: request }).id
+      db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, copy)).run()
+      for (const status of ['done', 'cancelled']) {
+        expect(
+          decide('PATCH /api/board/:taskId', {
+            access: guest,
+            params: { taskId: request },
+            body: { status },
+          }).ok,
+          status,
+        ).toBe(true)
+      }
+    })
+
+    it("never reopens another team's closed request with a task made under it", () => {
+      // A request on OTHER, closed, with work a hand-off filed on T under it.
+      const request = createTask(db, { title: 'Campaign', teamId: 'OTHER', mainTaskLead: 'x1' }).id
+      const handedOver = createTask(db, { title: 'Photos', teamId: 'T', parentTaskId: request }).id
+      const make = () =>
+        decide('POST /api/board', {
+          access: guest,
+          body: { title: 'Crop the photos', teamId: 'T', parentTaskId: handedOver },
+        }).ok
+      // While the request is open, nothing reopens: the guest may split their task.
+      expect(make()).toBe(true)
+      db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, request)).run()
+      expect(make()).toBe(false)
+
+      // Their own team's closed request they may reopen this way.
+      const own = createTask(db, { title: 'Menu', teamId: 'T', mainTaskLead: 'a1' }).id
+      const step = createTask(db, { title: 'Shoot', teamId: 'T', parentTaskId: own }).id
+      db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, own)).run()
+      expect(
+        decide('POST /api/board', {
+          access: guest,
+          body: { title: 'Reshoot', teamId: 'T', parentTaskId: step },
+        }).ok,
+      ).toBe(true)
     })
 
     it('lets a guest cancel work whose dependents are all on their team', () => {

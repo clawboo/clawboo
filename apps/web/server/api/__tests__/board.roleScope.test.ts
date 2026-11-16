@@ -12,7 +12,7 @@ import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { boardGetGET } from '../board'
+import { boardGetGET, boardListGET } from '../board'
 
 function fakeRes(): { res: Response; body: () => unknown } {
   let body: unknown
@@ -39,6 +39,7 @@ function req(taskId: string, guestTeams?: string[]): Request {
 }
 
 interface Detail {
+  task: { waitingOnDetail?: { taskTitle?: string } }
   ancestors: Array<{ id: string }>
   subtasks?: Array<{ id: string }>
 }
@@ -108,5 +109,32 @@ describe('board REST: a guest sees only their teams in a task tree', () => {
     const everyone = detail(main).subtasks?.map((t) => t.id) ?? []
     expect(everyone).toEqual(expect.arrayContaining([here, there]))
     expect(detail(main, ['T']).subtasks?.map((t) => t.id)).toEqual([here])
+  })
+
+  it('never tells a guest the title of a waited-on task on another team', () => {
+    const db = getDb()
+    // A wait can cross teams: a session bound to no team can set one.
+    const secret = createTask(db, { title: 'Unannounced launch', teamId: 'OTHER' }).id
+    const mine = createTask(db, {
+      title: 'Photos',
+      teamId: 'T',
+      status: 'blocked',
+      waitingOn: { kind: 'task', taskId: secret },
+    }).id
+
+    expect(detail(mine).task.waitingOnDetail?.taskTitle).toBe('Unannounced launch')
+    expect(detail(mine, ['T']).task.waitingOnDetail?.taskTitle).toBe('')
+    expect(detail(mine, ['T', 'OTHER']).task.waitingOnDetail?.taskTitle).toBe('Unannounced launch')
+
+    const listed = (guestTeams?: string[]) => {
+      const r = fakeRes()
+      boardListGET({ ...req(mine, guestTeams), params: {} } as unknown as Request, r.res)
+      const rows = (
+        r.body() as { tasks: Array<{ id: string; waitingOnDetail?: { taskTitle?: string } }> }
+      ).tasks
+      return rows.find((t) => t.id === mine)?.waitingOnDetail?.taskTitle
+    }
+    expect(listed()).toBe('Unannounced launch')
+    expect(listed(['T'])).toBe('')
   })
 })
