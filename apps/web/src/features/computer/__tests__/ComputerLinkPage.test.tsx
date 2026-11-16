@@ -47,10 +47,20 @@ describe('ComputerLinkPage', () => {
     expect(url).toBe('/api/computer-link/info')
     expect(url).not.toContain(TOKEN)
     expect((init.headers as Record<string, string>)['x-clawboo-computer-link']).toBe(TOKEN)
-    expect(init.credentials).toBe('omit')
+    // This address's cookies go, so a sign-in proxy in front can tell who it is.
+    expect(init.credentials).toBe('same-origin')
     expect(await screen.findByText("Research Boo's screen")).toBeTruthy()
     // A view link watches only.
     expect(screen.getByTestId('screen').textContent).toBe('watch only')
+  })
+
+  it('says in words when the server wants a person its sign-in proxy signed in', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response(JSON.stringify({ ok: false, error: 'person_only' }), { status: 403 }),
+    )
+    render(<ComputerLinkPage />)
+    expect(await screen.findByText(/needs a person your sign-in proxy signed in/)).toBeTruthy()
   })
 
   it('says a link without a token is incomplete, and asks for nothing', () => {

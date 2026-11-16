@@ -7,20 +7,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const calls = vi.hoisted(() => ({
   list: [] as { path: string; init?: RequestInit }[],
   push: null as ((text: string) => void) | null,
+  close: null as (() => void) | null,
+  /** The next answer to a control or input POST, when a test sets one. */
+  answer: null as { status: number; body: unknown } | null,
+  /** The next answer to the live view, when a test sets one. */
+  live: null as { status: number; body: unknown } | null,
 }))
 
 vi.mock('@clawboo/control-client', () => ({
   apiUrl: (p: string) => p,
   apiFetch: async (path: string, init?: RequestInit) => {
     calls.list.push({ path, init })
-    if (path.endsWith('/computer/live')) {
+    if (path.endsWith('/live')) {
+      if (calls.live) {
+        const { status, body } = calls.live
+        calls.live = null
+        return new Response(JSON.stringify(body), { status })
+      }
       const enc = new TextEncoder()
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           calls.push = (text) => controller.enqueue(enc.encode(text))
+          calls.close = () => controller.close()
         },
       })
       return new Response(body, { status: 200 })
+    }
+    if (calls.answer) {
+      const { status, body } = calls.answer
+      calls.answer = null
+      return new Response(JSON.stringify(body), { status })
     }
     return new Response(JSON.stringify({ ok: true }), { status: 200 })
   },
@@ -35,6 +51,9 @@ function send(event: string, data: unknown): void {
 beforeEach(() => {
   calls.list = []
   calls.push = null
+  calls.close = null
+  calls.answer = null
+  calls.live = null
   ;(globalThis as { createImageBitmap?: unknown }).createImageBitmap = vi.fn(async () => ({
     width: 4,
     height: 2,
@@ -219,5 +238,41 @@ describe('ComputerScreen', () => {
     send('control', { state: 'other', canControl: true })
     expect(await screen.findByTestId('computer-screen-hidden')).toBeTruthy()
     expect(screen.queryByText('Connecting to the agent’s screen…')).toBeNull()
+  })
+})
+
+describe('ComputerScreen behind a sign-in proxy', () => {
+  it('says in words when the proxy has not allowed a take over', async () => {
+    await openOnDisplay()
+    calls.answer = { status: 403, body: { ok: false, error: 'control_claim' } }
+    fireEvent.click(await screen.findByRole('button', { name: 'Take over' }))
+    expect(
+      await screen.findByText(/Your sign-in proxy has not allowed you to take over this agent/),
+    ).toBeTruthy()
+  })
+
+  it('says in words when watching needs a person the proxy signed in', async () => {
+    calls.live = { status: 403, body: { ok: false, error: 'person_only' } }
+    render(<ComputerScreen target={{ kind: 'dashboard', agentId: 'a1' }} />)
+    expect(await screen.findByText(/needs a person your sign-in proxy signed in/)).toBeTruthy()
+  })
+
+  it('comes back at once when the server asks for a fresh request, naming its view', async () => {
+    await openOnDisplay()
+    const lives = () => calls.list.filter((c) => c.path === '/api/agents/a1/computer/live')
+    expect(lives()).toHaveLength(1)
+    send('renew', { afterMs: 0 })
+    act(() => calls.close!())
+    // Well inside the first reconnect step (a second), so this is the renewal.
+    await waitFor(() => expect(lives()).toHaveLength(2), { timeout: 500 })
+    const headers = lives()[1]!.init?.headers as Record<string, string>
+    expect(headers['x-clawboo-viewer']).toBe('v-1')
+  })
+
+  it("a link sends this address's cookies, so a sign-in proxy can tell who it is", async () => {
+    render(<ComputerScreen target={{ kind: 'link', token: 'cbcl_x' }} />)
+    await waitFor(() => expect(calls.push).not.toBeNull())
+    const live = calls.list.find((c) => c.path === '/api/computer-link/live')!
+    expect(live.init?.credentials).toBe('same-origin')
   })
 })

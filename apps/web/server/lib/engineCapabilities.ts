@@ -16,6 +16,7 @@ import {
 } from '@clawboo/control-client'
 import { embeddingsDisabled } from '@clawboo/db'
 
+import { controlClaimRequired, personCheckMode } from './personCheck'
 import { appLinkOn, proxyIdentityMode, proxyIdentityRolesEnforced } from './proxyIdentity/config'
 import { NON_OPENCLAW_RUNTIME_IDS } from './runtimes/descriptor'
 import { getCurrentVersion, selfUpdateRefusal } from './updateCheck'
@@ -138,6 +139,11 @@ export const FEATURE_ROUTES = {
   'auth.proxyIdentity': ['GET /api/access/identity'],
   'auth.appLink': ['GET /api/access/identity'],
   'auth.roles': ['GET /api/access/identity'],
+  'auth.personCheck': ['GET /api/access/identity'],
+  'computer.controlClaim': [
+    'POST /api/agents/:agentId/computer/control',
+    'POST /api/agents/:agentId/computer/input',
+  ],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
 export function buildEngineCapabilities(): EngineCapabilities {
@@ -221,6 +227,10 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'auth.appLink': appLinkOn(),
     // The administrator's switch: the role in each token decides what its person may do.
     'auth.roles': proxyIdentityRolesEnforced(),
+    // As startup resolved it: a required lane is always verified.
+    'auth.personCheck': personCheckMode() === 'verified',
+    // The administrator's switch: a take over needs the proxy's control claim.
+    'computer.controlClaim': controlClaimRequired(),
   }
   return {
     version,

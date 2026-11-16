@@ -477,32 +477,34 @@ The file is a JSON object of the keys below. Clawboo reads it once at startup an
 - it has a key Clawboo does not know, or a key whose value has the wrong type;
 - a key's name looks like a credential (containing `token`, `secret`, `password`, `apiKey`, `credential`, `privateKey` or `auth`), or a URL carries a user name, a password or a credential parameter. Keep keys in the vault or in the environment.
 
-| Key                        | Type                      | Variable                              |
-| -------------------------- | ------------------------- | ------------------------------------- |
-| `disableSelfUpdate`        | boolean                   | `CLAWBOO_DISABLE_SELF_UPDATE`         |
-| `disableBrowserAutostart`  | boolean                   | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`   |
-| `catalogIndexUrl`          | URL                       | `CLAWBOO_CATALOG_INDEX_URL`           |
-| `proxyIdentity`            | `off`, `on` or `required` | `CLAWBOO_PROXY_IDENTITY`              |
-| `proxyIdentityHeader`      | header name               | `CLAWBOO_PROXY_IDENTITY_HEADER`       |
-| `proxyIdentityJwksUrl`     | URL                       | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`     |
-| `proxyIdentityPublicKey`   | public key                | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`   |
-| `proxyIdentityIssuer`      | string                    | `CLAWBOO_PROXY_IDENTITY_ISSUER`       |
-| `proxyIdentityAudience`    | string                    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`     |
-| `proxyIdentityBinding`     | `request` or `session`    | `CLAWBOO_PROXY_IDENTITY_BINDING`      |
-| `proxyIdentityMaxLifetime` | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` |
-| `proxyIdentityNameClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   |
-| `proxyIdentityRoleClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   |
-| `proxyIdentityRoles`       | `off` or `enforce`        | `CLAWBOO_PROXY_IDENTITY_ROLES`        |
-| `anthropicBaseUrl`         | URL                       | `ANTHROPIC_BASE_URL`                  |
-| `openaiBaseUrl`            | URL                       | `OPENAI_BASE_URL`                     |
-| `openrouterBaseUrl`        | URL                       | `OPENROUTER_BASE_URL`                 |
-| `googleBaseUrl`            | URL                       | `GEMINI_BASE_URL`                     |
-| `xaiBaseUrl`               | URL                       | `XAI_BASE_URL`                        |
-| `groqBaseUrl`              | URL                       | `GROQ_BASE_URL`                       |
-| `mistralBaseUrl`           | URL                       | `MISTRAL_BASE_URL`                    |
-| `togetherBaseUrl`          | URL                       | `TOGETHER_BASE_URL`                   |
-| `cerebrasBaseUrl`          | URL                       | `CEREBRAS_BASE_URL`                   |
-| `moonshotBaseUrl`          | URL                       | `MOONSHOT_BASE_URL`                   |
+| Key                         | Type                      | Variable                               |
+| --------------------------- | ------------------------- | -------------------------------------- |
+| `disableSelfUpdate`         | boolean                   | `CLAWBOO_DISABLE_SELF_UPDATE`          |
+| `disableBrowserAutostart`   | boolean                   | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    |
+| `catalogIndexUrl`           | URL                       | `CLAWBOO_CATALOG_INDEX_URL`            |
+| `proxyIdentity`             | `off`, `on` or `required` | `CLAWBOO_PROXY_IDENTITY`               |
+| `proxyIdentityHeader`       | header name               | `CLAWBOO_PROXY_IDENTITY_HEADER`        |
+| `proxyIdentityJwksUrl`      | URL                       | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`      |
+| `proxyIdentityPublicKey`    | public key                | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`    |
+| `proxyIdentityIssuer`       | string                    | `CLAWBOO_PROXY_IDENTITY_ISSUER`        |
+| `proxyIdentityAudience`     | string                    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`      |
+| `proxyIdentityBinding`      | `request` or `session`    | `CLAWBOO_PROXY_IDENTITY_BINDING`       |
+| `proxyIdentityMaxLifetime`  | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME`  |
+| `proxyIdentityNameClaim`    | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`    |
+| `proxyIdentityRoleClaim`    | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`    |
+| `proxyIdentityRoles`        | `off` or `enforce`        | `CLAWBOO_PROXY_IDENTITY_ROLES`         |
+| `proxyIdentityControlClaim` | `off` or `required`       | `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM` |
+| `personCheck`               | `page` or `verified`      | `CLAWBOO_PERSON_CHECK`                 |
+| `anthropicBaseUrl`          | URL                       | `ANTHROPIC_BASE_URL`                   |
+| `openaiBaseUrl`             | URL                       | `OPENAI_BASE_URL`                      |
+| `openrouterBaseUrl`         | URL                       | `OPENROUTER_BASE_URL`                  |
+| `googleBaseUrl`             | URL                       | `GEMINI_BASE_URL`                      |
+| `xaiBaseUrl`                | URL                       | `XAI_BASE_URL`                         |
+| `groqBaseUrl`               | URL                       | `GROQ_BASE_URL`                        |
+| `mistralBaseUrl`            | URL                       | `MISTRAL_BASE_URL`                     |
+| `togetherBaseUrl`           | URL                       | `TOGETHER_BASE_URL`                    |
+| `cerebrasBaseUrl`           | URL                       | `CEREBRAS_BASE_URL`                    |
+| `moonshotBaseUrl`           | URL                       | `MOONSHOT_BASE_URL`                    |
 
 Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
 
@@ -619,6 +621,22 @@ The claim with the person's role. A list is joined with commas. The role is reco
 - Example: `CLAWBOO_PROXY_IDENTITY_ROLES=enforce`
 
 In releases after 0.8.0. With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
+
+### CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM
+
+- Type: `off` or `required`
+- Default: `off`
+- Example: `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM=required`
+
+In releases after 0.8.0. With `required`, taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent; a batch without it hands the screen back to the agent. See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen). It needs `CLAWBOO_PROXY_IDENTITY` on or required, and request binding; otherwise the server refuses to start. Operator file key: `proxyIdentityControlClaim`.
+
+### CLAWBOO_PERSON_CHECK
+
+- Type: `page` or `verified`
+- Default: `page`
+- Example: `CLAWBOO_PERSON_CHECK=verified`
+
+In releases after 0.8.0. Who may act as a person on the routes that take [the person check](/operating/security#the-person-check). `page`: a person a verified token names, or the dashboard's own page. `verified`: only a person a verified token names, and the same for the Gateway WebSocket and every route of an agent's screen. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off the server refuses to start. `CLAWBOO_PROXY_IDENTITY=required` always works as `verified`. Operator file key: `personCheck`.
 
 ## Provider keys
 

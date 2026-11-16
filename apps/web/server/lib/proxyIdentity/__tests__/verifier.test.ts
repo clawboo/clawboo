@@ -375,6 +375,73 @@ describe('session binding (a proxy that sends its own sign-in token)', () => {
   })
 })
 
+describe('the take-over claim (proxyIdentityControlClaim: required)', () => {
+  const claimOn = { controlClaim: 'required' as const }
+
+  it('returns the agent a request-bound token names in `control`', async () => {
+    const result = await verifier(claimOn).verify(at(await sign(claims({ control: 'agent-7' }))))
+    expect(result).toEqual({
+      ok: true,
+      person: { id: 'user-42', name: 'Ada Lovelace', role: 'admin' },
+      control: 'agent-7',
+    })
+  })
+
+  it('is no claim when the token has none', async () => {
+    const result = await verifier(claimOn).verify(at(await sign(claims())))
+    expect(result).toMatchObject({ ok: true })
+    expect(result).not.toHaveProperty('control')
+  })
+
+  it('refuses a token whose `control` is not exactly an agent id', async () => {
+    for (const control of [
+      42,
+      '',
+      '   ',
+      ' agent-7',
+      'agent-7\n',
+      ['agent-7'],
+      { id: 'agent-7' },
+      null,
+      true,
+    ]) {
+      const token = await sign(claims({ control }))
+      expect(await verifier(claimOn).verify(at(token))).toEqual({ ok: false, reason: 'claims' })
+    }
+    const long = await sign(claims({ control: 'a'.repeat(257) }))
+    expect(await verifier(claimOn).verify(at(long))).toEqual({ ok: false, reason: 'claims' })
+  })
+
+  it('never reads it with the claim off, nor holds a malformed one against the token', async () => {
+    const named = await verifier().verify(at(await sign(claims({ control: 'agent-7' }))))
+    expect(named).toMatchObject({ ok: true })
+    expect(named).not.toHaveProperty('control')
+    expect(await verifier().verify(at(await sign(claims({ control: 42 }))))).toMatchObject({
+      ok: true,
+    })
+  })
+
+  it('never reads it from a session-bound token', async () => {
+    const session = claims({
+      htm: undefined,
+      htu: undefined,
+      jti: undefined,
+      exp: NOW + 3600,
+      control: 'agent-7',
+    })
+    const result = await verifier({ ...claimOn, binding: 'session' }).verify(
+      at(await sign(session)),
+    )
+    expect(result).toMatchObject({ ok: true })
+    expect(result).not.toHaveProperty('control')
+  })
+
+  it('still refuses a forged token that names an agent', async () => {
+    const token = await sign(claims({ control: 'agent-7' }), otherEd.privateKey)
+    expect(await verifier(claimOn).verify(at(token))).toEqual({ ok: false, reason: 'signature' })
+  })
+})
+
 describe('keys from a JWKS URL', () => {
   let server: http.Server | null = null
   afterEach(async () => {

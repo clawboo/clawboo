@@ -13,16 +13,32 @@
 //
 // The live view is a Server-Sent Events stream. Input comes back as POSTed
 // batches from the one watcher in control.
+//
+// With the verified person check (lib/personCheck.ts), every route here, both
+// ways in, needs a person a verified token names, as well as a link where one is
+// used: the link narrows what, the token proves who. Each view is bound to the
+// person who opened it, and a view stream ends after VERIFIED_STREAM_MS so the
+// page comes back with a fresh signed request (the reconnect keeps control).
+//
+// With the take-over claim required (`proxyIdentityControlClaim`), taking over
+// and every batch of input need a sign-in proxy token whose `control` claim
+// names the agent. A batch without one hands the screen back to the agent.
 
 import type { IncomingMessage } from 'node:http'
 
 import { connectorsByCategory } from '@clawboo/connector-catalog'
 import { agents } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { isAgentUserMode } from '../lib/agentUser/config'
-import { refuseUnlessPerson } from '../lib/auth'
+import {
+  controlClaimFor,
+  personOf,
+  refuseUnlessPerson,
+  refuseUnlessVerifiedPerson,
+} from '../lib/auth'
 import { connectorInstanceIdForSlug } from '../lib/capabilitySource/connectorIdentity'
 import { hasAgentBrowser } from '../lib/connectors/agentBrowsers'
 import { getRegistry } from '../lib/agentSource'
@@ -66,12 +82,20 @@ import {
   type ViewerSink,
   type ViewerVia,
 } from '../lib/desktop/liveView'
+import { controlClaimRequired, personCheckMode } from '../lib/personCheck'
+
+const log = createLogger('computer')
 
 /** A comment line on the stream this often, so a proxy does not close it. */
 const HEARTBEAT_MS = 15_000
 
 /** The header a reconnecting live view names its previous id in. */
 const VIEWER_HEADER = 'x-clawboo-viewer'
+
+/** Under the verified person check, how long one view stream lasts before the
+ *  page asks again with a fresh signed request. A person the sign-in proxy stops
+ *  vouching for loses the view within this, not when they close the tab. */
+export const VERIFIED_STREAM_MS = 5 * 60_000
 
 interface AgentRow {
   id: string
@@ -154,6 +178,32 @@ function headerString(req: Request, name: string): string | null {
   return typeof v === 'string' && v.length > 0 && v.length <= 100 ? v : null
 }
 
+// ─── Who may watch and take over ─────────────────────────────────────────────
+
+/** The way a request watches, bound under the verified check to its person, so
+ *  nobody else resumes, takes over or types into that view. */
+function boundVia(req: Request, via: ViewerVia): ViewerVia {
+  const person = personOf(req)
+  return personCheckMode() === 'verified' && person ? { ...via, person: person.id } : via
+}
+
+/** The person control is bound to, when it is (the verified check, or the
+ *  take-over claim required): the request's verified person, or null for none.
+ *  Undefined when control is bound to no one, as in `page` mode. */
+function controlHolder(req: Request): string | null | undefined {
+  if (personCheckMode() !== 'verified' && !controlClaimRequired()) return undefined
+  return personOf(req)?.id ?? null
+}
+
+/** With the take-over claim required, refuse a take over or a batch of input
+ *  whose token does not name `agentId` in its `control` claim: 403 `control_claim`. */
+function refuseWithoutControlClaim(req: Request, res: Response, agentId: string): boolean {
+  if (!controlClaimRequired() || controlClaimFor(req, agentId)) return false
+  log.warn({ method: req.method, path: req.path }, 'refused a take over without a control claim')
+  res.status(403).json({ ok: false, error: 'control_claim' })
+  return true
+}
+
 // ─── Status ──────────────────────────────────────────────────────────────────
 
 /**
@@ -189,6 +239,7 @@ export function displaysStatus(
 
 /** GET /api/agents/:agentId/computer */
 export function computerStatusGET(req: Request, res: Response): void {
+  if (refuseUnlessVerifiedPerson(req, res)) return
   const agentId = String(req.params['agentId'] ?? '')
   if (!agentRow(agentId)) {
     res.status(404).json({ ok: false, error: 'no such agent' })
@@ -221,6 +272,11 @@ export function computerStatusGET(req: Request, res: Response): void {
     watchers: viewerCount(agentId),
     links: listLinks(agentId),
     controlLinks: { allowed: controlLinkRefusal() === null, reason: controlLinkRefusal() },
+    // Whether a take over needs the sign-in proxy's say-so for this agent, and
+    // whether this request's token has it.
+    controlClaim: controlClaimRequired()
+      ? { required: true, granted: controlClaimFor(req, agentId) }
+      : { required: false, granted: false },
   })
 }
 
@@ -233,6 +289,11 @@ function streamTo(
   via: ViewerVia,
   stillValid: () => boolean,
 ): void {
+  // The connection went while the request waited (the identity lane checks a
+  // token asynchronously first): its 'close' has already fired, so a view opened
+  // now would never be closed and would hold a watcher's place for good.
+  if (res.destroyed || res.writableEnded) return
+  const holder = controlHolder(req)
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store, no-transform',
@@ -257,7 +318,7 @@ function streamTo(
   }
   let viewer: { viewerId: string; close: () => void }
   try {
-    viewer = openViewer(agentId, via, sink, headerString(req, VIEWER_HEADER))
+    viewer = openViewer(agentId, via, sink, headerString(req, VIEWER_HEADER), holder)
   } catch (err) {
     // Full is for now, not for good: the page tries again a little later.
     if (err instanceof LiveViewLimitError) sink.send('busy', { reason: err.message })
@@ -265,32 +326,57 @@ function streamTo(
     sink.end()
     return
   }
+  // Ending the response is not enough to close the view: a connection that is
+  // already gone emits no 'close'. So each ending here closes it too.
+  let closed = false
+  const close = () => {
+    if (closed) return
+    closed = true
+    clearInterval(heartbeat)
+    if (renewal) clearTimeout(renewal)
+    viewer.close()
+  }
   const heartbeat = setInterval(() => {
     // A link can be revoked or expire while its view is open.
     if (!stillValid()) {
       sink.send('end', { reason: 'This link was revoked or has expired.' })
       sink.end()
+      close()
       return
     }
     if (!ended) res.write(': ping\n\n')
   }, HEARTBEAT_MS)
   heartbeat.unref()
-  const close = () => {
-    clearInterval(heartbeat)
-    viewer.close()
-  }
+  // Under the verified check a stream lasts a few minutes: `renew` tells the page
+  // to come back at once, naming this view, with a fresh signed request.
+  const renewal =
+    personCheckMode() === 'verified'
+      ? setTimeout(() => {
+          sink.send('renew', { afterMs: 0 })
+          sink.end()
+          close()
+        }, VERIFIED_STREAM_MS)
+      : null
+  renewal?.unref()
   req.on('close', close)
   res.on('close', close)
 }
 
 /** GET /api/agents/:agentId/computer/live */
 export function computerLiveGET(req: Request, res: Response): void {
+  if (refuseUnlessVerifiedPerson(req, res)) return
   const agentId = String(req.params['agentId'] ?? '')
   if (!agentRow(agentId)) {
     res.status(404).json({ ok: false, error: 'no such agent' })
     return
   }
-  streamTo(req, res, agentId, { kind: 'dashboard' }, () => agentRow(agentId) !== null)
+  streamTo(
+    req,
+    res,
+    agentId,
+    boundVia(req, { kind: 'dashboard' }),
+    () => agentRow(agentId) !== null,
+  )
 }
 
 /** GET /api/computer-link/live */
@@ -301,7 +387,8 @@ export function computerLinkLiveGET(req: Request, res: Response): void {
     res.status(401).json({ ok: false, error: 'This link does not work any more.' })
     return
   }
-  const via: ViewerVia = { kind: 'link', linkId: link.id, linkKind: link.kind }
+  if (refuseUnlessVerifiedPerson(req, res)) return
+  const via = boundVia(req, { kind: 'link', linkId: link.id, linkKind: link.kind })
   streamTo(req, res, link.agentId, via, () => {
     const now = workingLink(req.get(LINK_HEADER) ?? null)
     return now !== null && now.id === link.id
@@ -336,9 +423,16 @@ export function computerControlPOST(req: Request, res: Response): void {
     res.status(400).json({ ok: false, error: 'viewerId and action (take or release) are required' })
     return
   }
-  // Taking over stops an agent's work: a person's act. Handing back is not.
-  if (action === 'take' && refuseUnlessPerson(req, res)) return
-  answer(res, setControl(agentId, viewerId, { kind: 'dashboard' }, action))
+  // Taking over stops an agent's work: a person's act. Handing back is not,
+  // except that under the verified check nobody else reaches the screen at all.
+  if (action === 'take' ? refuseUnlessPerson(req, res) : refuseUnlessVerifiedPerson(req, res)) {
+    return
+  }
+  if (action === 'take' && refuseWithoutControlClaim(req, res, agentId)) return
+  answer(
+    res,
+    setControl(agentId, viewerId, boundVia(req, { kind: 'dashboard' }), action, controlHolder(req)),
+  )
 }
 
 /** POST /api/computer-link/control { viewerId, action } */
@@ -355,6 +449,7 @@ export function computerLinkControlPOST(req: Request, res: Response): void {
     res.status(400).json({ ok: false, error: 'viewerId and action (take or release) are required' })
     return
   }
+  if (refuseUnlessVerifiedPerson(req, res)) return
   // A control link is made only where it may be (see controlLinkRefusal);
   // checked again here, before anyone takes over through one.
   const refusal = action === 'take' ? controlLinkRefusal() : null
@@ -362,13 +457,15 @@ export function computerLinkControlPOST(req: Request, res: Response): void {
     res.status(403).json({ ok: false, error: refusal })
     return
   }
+  if (action === 'take' && refuseWithoutControlClaim(req, res, link.agentId)) return
   answer(
     res,
     setControl(
       link.agentId,
       viewerId,
-      { kind: 'link', linkId: link.id, linkKind: link.kind },
+      boundVia(req, { kind: 'link', linkId: link.id, linkKind: link.kind }),
       action,
+      controlHolder(req),
     ),
   )
 }
@@ -382,7 +479,28 @@ export function computerInputPOST(req: Request, res: Response): void {
     res.status(400).json({ ok: false, error: 'viewerId and a list of input events are required' })
     return
   }
-  answer(res, sendInput(agentId, viewerId, { kind: 'dashboard' }, events))
+  if (refuseUnlessVerifiedPerson(req, res)) return
+  const via = boundVia(req, { kind: 'dashboard' })
+  if (refuseInputWithoutClaim(req, res, agentId, viewerId, via)) return
+  answer(res, sendInput(agentId, viewerId, via, events, controlHolder(req)))
+}
+
+/**
+ * With the take-over claim required, a batch of input without it is refused
+ * (403 `control_claim`), and the screen goes back to the agent from this view,
+ * if it held it: the proxy no longer allows this person to drive it. Control
+ * held by anyone else is left alone.
+ */
+function refuseInputWithoutClaim(
+  req: Request,
+  res: Response,
+  agentId: string,
+  viewerId: string,
+  via: ViewerVia,
+): boolean {
+  if (!refuseWithoutControlClaim(req, res, agentId)) return false
+  setControl(agentId, viewerId, via, 'release', controlHolder(req))
+  return true
 }
 
 /** POST /api/computer-link/input { viewerId, events } */
@@ -399,15 +517,10 @@ export function computerLinkInputPOST(req: Request, res: Response): void {
     res.status(400).json({ ok: false, error: 'viewerId and a list of input events are required' })
     return
   }
-  answer(
-    res,
-    sendInput(
-      link.agentId,
-      viewerId,
-      { kind: 'link', linkId: link.id, linkKind: link.kind },
-      events,
-    ),
-  )
+  if (refuseUnlessVerifiedPerson(req, res)) return
+  const via = boundVia(req, { kind: 'link', linkId: link.id, linkKind: link.kind })
+  if (refuseInputWithoutClaim(req, res, link.agentId, viewerId, via)) return
+  answer(res, sendInput(link.agentId, viewerId, via, events, controlHolder(req)))
 }
 
 // ─── Links ───────────────────────────────────────────────────────────────────
@@ -421,6 +534,7 @@ export function computerLinkInfoGET(req: Request, res: Response): void {
     res.status(401).json({ ok: false, error: 'This link does not work any more.' })
     return
   }
+  if (refuseUnlessVerifiedPerson(req, res)) return
   const name = agentRow(link.agentId)?.name ?? ''
   res.json({ ok: true, kind: link.kind, expiresAt: link.expiresAt, agent: { name } })
 }

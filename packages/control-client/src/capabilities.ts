@@ -117,6 +117,14 @@ export const ENGINE_FEATURES = [
   // (proxyIdentityRoles: enforce). What this person may do: the `access` of
   // GET /api/access/identity.
   'auth.roles',
+  // Only a person a verified token names acts as the person (personCheck:
+  // verified, or a required sign-in proxy lane): the dashboard's page alone does
+  // not, and the Gateway WebSocket and an agent's screen need such a person too.
+  'auth.personCheck',
+  // Taking over an agent's screen, and every batch of input after, needs a
+  // sign-in proxy token whose `control` claim names that agent
+  // (proxyIdentityControlClaim: required).
+  'computer.controlClaim',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 
