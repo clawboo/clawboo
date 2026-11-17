@@ -22,6 +22,7 @@ import { useViewStore } from '@/stores/view'
 import { useEditorStore } from '@/stores/editor'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useFleetStore } from '@/stores/fleet'
+import { effectiveGoalIdOf, useGoalsStore } from '@/stores/goals'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
 import { labelsOfTask } from '@/lib/teamLabels'
 import {
@@ -67,6 +68,7 @@ import {
   DisplayButton,
   FilterMenuButton,
   NO_FILTER,
+  NO_GOAL_KEY,
   ViewMenuButton,
   filterCount,
   toolbarButton,
@@ -340,6 +342,12 @@ function isRunning(task: BoardTask): boolean {
 /** Whether the board's filter lets a task through. */
 function matchesFilter(task: BoardTask, filter: BoardFilter, me: { id: string }): boolean {
   if (filter.running && !isRunning(task)) return false
+  if (filter.goals.size > 0) {
+    // The goal it counts toward: inherited work is under its request's goal, and "No
+    // goal" means no goal at all.
+    const goal = effectiveGoalIdOf(task)
+    if (!(goal ? filter.goals.has(goal) : filter.goals.has(NO_GOAL_KEY))) return false
+  }
   if (filter.mine && !isMyTask(task, me)) return false
   if (
     filter.labels.size > 0 &&
@@ -1036,6 +1044,33 @@ export function BoardPanel() {
     }
     return [...byKey.values()].sort((a, b) => a.localeCompare(b))
   }, [effectiveTasks])
+
+  // The goals on the tasks in view, by title, for the Filter menu. Each team's
+  // goals are read once (the card chips read the same list).
+  const goalTeams = useMemo(() => {
+    const ids = new Set<string>()
+    for (const task of effectiveTasks)
+      if (effectiveGoalIdOf(task) && task.teamId) ids.add(task.teamId)
+    return [...ids].sort()
+  }, [effectiveTasks])
+  const goalsByTeam = useGoalsStore((s) => s.byTeam)
+  useEffect(() => {
+    for (const id of goalTeams) {
+      if (goalsByTeam[id] === undefined) void useGoalsStore.getState().load(id)
+    }
+  }, [goalTeams, goalsByTeam])
+  const filterGoals = useMemo(() => {
+    const used = new Set<string>()
+    for (const task of effectiveTasks) {
+      const goal = effectiveGoalIdOf(task)
+      if (goal) used.add(goal)
+    }
+    return goalTeams
+      .flatMap((id) => goalsByTeam[id] ?? [])
+      .filter((g) => used.has(g.id))
+      .map((g) => ({ id: g.id, title: g.title }))
+      .sort((a, b) => a.title.localeCompare(b.title))
+  }, [effectiveTasks, goalTeams, goalsByTeam])
 
   // The filter, applied once: the columns, Needs you and the calendar all draw
   // from what it lets through. Find still searches every task.
@@ -2146,6 +2181,7 @@ export function BoardPanel() {
       <FilterMenuButton
         agents={filterAgents}
         labels={filterLabels}
+        goals={filterGoals}
         filter={boardFilter}
         onChange={setBoardFilter}
       />

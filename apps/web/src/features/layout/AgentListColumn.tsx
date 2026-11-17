@@ -26,7 +26,7 @@ import { SidebarToggle } from '@/features/layout/SidebarToggle'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
-import { useTeamStore, type Team } from '@/stores/team'
+import { useTeamStore } from '@/stores/team'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useViewStore, type NavView } from '@/stores/view'
 import { CreateBooModal } from '@/features/fleet/CreateBooModal'
@@ -251,13 +251,15 @@ interface NavItem {
   subtitle?: string
 }
 
-// The sidebar's nav, in order (the team's Home sits above it when a team is open).
+// The sidebar's nav, in order. Home is first and always shown: it opens on the
+// team selected in the rail, or All teams with none.
 // Settings, in the account bar at the bottom of the sidebar, opens the modal that
 // houses the management / config / insights surfaces (Providers, Runtimes, Fleet,
 // Capabilities, Routines, Tokens Used, Observability, Governance, System, System
 // Health). Memory is DELIBERATELY in both places: here as the graph + list, in
 // the modal as a list (see stores/settingsModal.ts).
 const NAV: NavItem[] = [
+  { id: 'home', icon: Home },
   // `'graph'` is the Org chart: every team, with Boo Zero at the top.
   { id: 'graph', icon: Network },
   { id: 'board', icon: KanbanSquare },
@@ -314,47 +316,12 @@ function NavButton({
   )
 }
 
-// ─── Home row + the team's mascots ───────────────────────────────────────────
+// ─── The team's mascots ──────────────────────────────────────────────────────
 //
-// The Home row opens the team's dashboards and artifacts. The mascot grid shows
-// every agent, named, wrapping onto more rows as the team grows (Boo Zero last).
+// The mascot grid shows every agent, named, wrapping onto more rows as the team
+// grows (Boo Zero last).
 
-const TEAMSPACE_MASCOT = 42
-
-/** The team's Home (its dashboards and artifacts), styled like the nav rows. */
-function TeamspaceButton({
-  team,
-  isActive,
-  onClick,
-}: {
-  team: Team
-  isActive: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      data-testid="teamspace-row"
-      aria-current={isActive ? 'page' : undefined}
-      onClick={onClick}
-      title={`${team.name} Home: dashboards and artifacts`}
-      className={[
-        'flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors duration-150',
-        isActive
-          ? 'bg-foreground/[0.06] font-semibold text-foreground'
-          : 'font-medium text-foreground/60 hover:bg-foreground/[0.035] hover:text-foreground/90',
-      ].join(' ')}
-    >
-      <Home
-        size={17}
-        strokeWidth={2}
-        aria-hidden
-        style={{ color: isActive ? 'var(--primary)' : 'rgb(var(--foreground-rgb) / 0.45)' }}
-      />
-      <span className="truncate">Home</span>
-    </button>
-  )
-}
+const TEAM_MASCOT = 42
 
 function MascotTile({
   agent,
@@ -383,7 +350,7 @@ function MascotTile({
         className="relative inline-flex transition-transform duration-150 group-hover/mascot:-translate-y-0.5"
         aria-hidden
       >
-        <AgentBooAvatar agentId={agent.id} size={TEAMSPACE_MASCOT} />
+        <AgentBooAvatar agentId={agent.id} size={TEAM_MASCOT} />
         {(working || failed) && (
           <span
             className={[
@@ -975,23 +942,21 @@ export function AgentListColumn() {
       {/* Divider between Create Boo and nav */}
       <div className="mx-3 my-2 border-t border-border" />
 
-      {/* Nav: Home (when a team is open), then the work surfaces. Settings and
-          the theme switch sit in the account bar under the whole sidebar. */}
+      {/* Nav: Home, then the work surfaces. Settings and the theme switch sit
+          in the account bar under the whole sidebar. */}
       <div className="flex flex-col gap-0.5 px-2">
-        {hasTeam && selectedTeam && (
-          <TeamspaceButton
-            team={selectedTeam}
-            isActive={viewMode.type === 'teamspace' && viewMode.teamId === selectedTeam.id}
-            onClick={() => useViewStore.getState().openTeamspace(selectedTeam.id)}
-          />
-        )}
         {NAV.map((item) => (
           <NavButton
             key={item.id}
             item={item}
             active={viewMode.type === 'nav' && viewMode.view === item.id}
             {...(item.id === 'inbox' ? { badge: inboxCount } : {})}
-            onClick={() => useViewStore.getState().navigateTo(item.id)}
+            onClick={() =>
+              item.id === 'home'
+                ? // Home opens on the team the sidebar shows, or All teams.
+                  useViewStore.getState().openHome(selectedTeamId ?? 'all')
+                : useViewStore.getState().navigateTo(item.id)
+            }
           />
         ))}
       </div>

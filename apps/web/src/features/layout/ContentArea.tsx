@@ -4,7 +4,6 @@ import { NavPanel } from './navPanels'
 import { AgentFileEditorOverlay } from '@/features/editor/AgentFileEditorOverlay'
 import { AgentDetailView } from '@/features/agent-detail'
 import { GroupChatView } from '@/features/group-chat/GroupChatView'
-import { TeamspaceView } from '@/features/group-chat/TeamspaceView'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { hasOpenLayer } from '@/features/shared/useDismissableLayer'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
@@ -86,9 +85,9 @@ export function ContentArea() {
     }
   }, [viewMode, booZeroAgentId, agents])
 
-  // Edge case: team deleted while viewing its group chat or teamspace → welcome
+  // Edge case: team deleted while viewing its group chat → welcome
   useEffect(() => {
-    if (viewMode.type === 'groupChat' || viewMode.type === 'teamspace') {
+    if (viewMode.type === 'groupChat') {
       if (!teams.some((t) => t.id === viewMode.teamId)) {
         useViewStore.getState().replaceViewMode({ type: 'welcome' })
       }
@@ -151,8 +150,7 @@ export function ContentArea() {
         if (
           viewMode.type === 'agent' ||
           viewMode.type === 'booZero' ||
-          viewMode.type === 'groupChat' ||
-          viewMode.type === 'teamspace'
+          viewMode.type === 'groupChat'
         ) {
           e.preventDefault()
           useFleetStore.getState().selectAgent(null)
@@ -230,11 +228,6 @@ export function ContentArea() {
       viewKey = `group-chat-${viewMode.teamId}${viewMode.roomId ? `-room-${viewMode.roomId}` : ''}`
       viewLabel = viewMode.roomId ? 'the chat room' : 'the team space'
       viewContent = <GroupChatView teamId={viewMode.teamId} roomId={viewMode.roomId ?? null} />
-      break
-    case 'teamspace':
-      viewKey = `teamspace-${viewMode.teamId}`
-      viewLabel = 'the team home'
-      viewContent = <TeamspaceView teamId={viewMode.teamId} />
       break
     case 'nav':
       viewKey = `nav-${viewMode.view}`

@@ -101,7 +101,7 @@ The **agent column** sits next to it. From top to bottom:
 
 The **account bar** runs along the bottom of both columns: who you are (the person a sign-in proxy verified, or **You** on a local install), the [theme switch](/using/theming), and the gear that opens **Settings**.
 
-**Home** and the team's chats appear once the team has at least one agent. Press `Cmd/Ctrl+\` to hide or show the sidebar, and drag its edge to resize it.
+The team's chats appear once the team has at least one agent. Press `Cmd/Ctrl+\` to hide or show the sidebar, and drag its edge to resize it.
 
 ### On a phone
 
@@ -115,16 +115,16 @@ Other pages, such as Settings, the Org chart, Memory, the Marketplace and Routin
 
 ### The nav
 
-| Row             | What it opens                                                                      | Shortcut     |
-| --------------- | ---------------------------------------------------------------------------------- | ------------ |
-| **Home**        | The team's home page, which holds only a placeholder                               |              |
-| **Org chart**   | Every team and agent in one chart, led by Boo Zero                                 | `Cmd/Ctrl+1` |
-| **Board**       | Every task, by status and by day, with a **Needs you** column                      | `Cmd/Ctrl+2` |
-| **Inbox**       | What needs you, what changed since you last opened it, and what is assigned to you |              |
-| **Connectors**  | Apps and tools you connect for your agents                                         | `Cmd/Ctrl+3` |
-| **Memory**      | What your agents have saved, as a graph or a list                                  | `Cmd/Ctrl+4` |
-| **Marketplace** | Ready-made teams, agents and skills                                                |              |
-| **Settings**    | Setup, insights and system panels, in three groups (below)                         | `Cmd/Ctrl+,` |
+| Row             | What it opens                                                                                   | Shortcut     |
+| --------------- | ----------------------------------------------------------------------------------------------- | ------------ |
+| **Home**        | How a team, or all teams, is doing: goals, KPIs, what needs you and pages ([Home](/using/home)) |              |
+| **Org chart**   | Every team and agent in one chart, led by Boo Zero                                              | `Cmd/Ctrl+1` |
+| **Board**       | Every task, by status and by day, with a **Needs you** column                                   | `Cmd/Ctrl+2` |
+| **Inbox**       | What needs you, what changed since you last opened it, and what is assigned to you              |              |
+| **Connectors**  | Apps and tools you connect for your agents                                                      | `Cmd/Ctrl+3` |
+| **Memory**      | What your agents have saved, as a graph or a list                                               | `Cmd/Ctrl+4` |
+| **Marketplace** | Ready-made teams, agents and skills                                                             |              |
+| **Settings**    | Setup, insights and system panels, in three groups (below)                                      | `Cmd/Ctrl+,` |
 
 ### A team's chats
 

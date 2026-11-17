@@ -14,6 +14,7 @@ import type { NavView } from '@/stores/view'
 // a TYPE ERROR here rather than a silently missing label — the same guarantee
 // `lib/topBar.ts` gives, enforced by `__tests__/navLabels.test.ts`.
 export const NAV_VIEW_LABELS: Record<NavView, string> = {
+  home: 'Home',
   graph: 'Org chart',
   fleet: 'Fleet',
   cost: 'Tokens Used',

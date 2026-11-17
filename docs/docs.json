@@ -109,7 +109,7 @@
           },
           {
             "group": "Work with your team",
-            "pages": ["using/team-chat", "using/board", "using/org-chart"]
+            "pages": ["using/home", "using/team-chat", "using/board", "using/org-chart"]
           },
           {
             "group": "Connect AI and tools",

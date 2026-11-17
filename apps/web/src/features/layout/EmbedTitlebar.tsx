@@ -47,7 +47,6 @@ export function titlebarTitle(
     id ? (teams.find((t) => t.id === id && !t.isArchived) ?? null) : null
   const asTeam = (team: Team): TitlebarTitle => ({ label: team.name, team })
   switch (viewMode.type) {
-    case 'teamspace':
     case 'groupChat': {
       const team = liveTeam(viewMode.teamId)
       return team ? asTeam(team) : { label: 'Clawboo', team: null }

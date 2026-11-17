@@ -127,7 +127,7 @@ describe('back and forward', () => {
     expect(forward).toBeDisabled()
 
     act(() => {
-      useViewStore.getState().openTeamspace('t1')
+      useViewStore.getState().openGroupChat('t1')
       useTeamStore.getState().selectTeam('t1')
       useViewStore.getState().navigateTo('board')
     })
@@ -135,7 +135,7 @@ describe('back and forward', () => {
     expect(forward).toBeDisabled()
 
     await userEvent.click(back)
-    expect(useViewStore.getState().viewMode).toEqual({ type: 'teamspace', teamId: 't1' })
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 't1' })
     expect(forward).toBeEnabled()
 
     await userEvent.click(back)
@@ -143,7 +143,7 @@ describe('back and forward', () => {
     expect(back).toBeDisabled()
 
     await userEvent.click(forward)
-    expect(useViewStore.getState().viewMode).toEqual({ type: 'teamspace', teamId: 't1' })
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 't1' })
   })
 
   it('stays disabled when the only page back is one that was deleted', () => {

@@ -83,7 +83,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Hermes**: an open-source agent from Nous Research, and one of the runtimes Clawboo can run agents on. Clawboo installs its GitHub release and runs every Hermes agent as a Hermes profile in one Hermes gateway that Clawboo starts and watches. It keeps its own memory, skills and scheduled jobs between runs. See [Hermes](/runtimes/hermes).
 
-**Home**: a team's own page, opened from the team's icon on the team rail. It is a placeholder for the team's dashboards and its agents' work; to work with the team, open **General**. See [Tour the dashboard](/getting-started/dashboard-tour).
+**Home**: the first row of the sidebar's nav, one page per team with a team picker like the Board's (and **All teams**). It shows what needs you, the team's goals and their progress, its KPIs, work in flight, spend, routines and its pinned pages. Clicking a team's icon on the team rail opens it on that team. See [Home](/using/home).
 
 ### L
 

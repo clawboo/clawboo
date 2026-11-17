@@ -32,6 +32,9 @@ export interface Team {
 interface TeamStore {
   teams: Team[]
   selectedTeamId: string | null
+  /** True once the server's team list has been read: an empty `teams` then means
+   *  there are no teams, not that they have not loaded yet. */
+  hydrated: boolean
 
   /** Replace the full team list (called on initial load). */
   hydrateTeams: (teams: Team[]) => void
@@ -61,8 +64,9 @@ interface TeamStore {
 export const useTeamStore = create<TeamStore>((set) => ({
   teams: [],
   selectedTeamId: null,
+  hydrated: false,
 
-  hydrateTeams: (teams) => set({ teams }),
+  hydrateTeams: (teams) => set({ teams, hydrated: true }),
 
   selectTeam: (id) => set({ selectedTeamId: id }),
 

@@ -34,6 +34,7 @@ import { useFocusTrap } from '@/features/shared/useFocusTrap'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
 import { recentAssignees, rememberAssignee } from './newTaskMemory'
+import { useTeamGoals } from './TaskGoal'
 import { suggestAgent, type AgentCandidate, type SuggestionReason } from './suggestAgent'
 
 const FIELD_LABEL = 'mb-1.5 block text-xs font-medium text-muted-foreground'
@@ -111,6 +112,8 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   /** The team the person picked under More options. */
   const [pickedTeam, setPickedTeam] = useState<string | null>(null)
   const [roles, setRoles] = useState<Record<string, string>>({})
+  /** The goal picked under More options, for the team it was picked on. */
+  const [pickedGoal, setPickedGoal] = useState<{ teamId: string; goalId: string } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -154,6 +157,12 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   const teamMembers = candidates.filter((c) => c.teamId === team)
   const manyTeams = new Set(candidates.map((c) => c.teamId)).size > 1
   const teamName = (id: string) => activeTeams.find((t) => t.id === id)?.name ?? ''
+  // The team's goals, read once More options shows the Goal field.
+  const teamGoals = useTeamGoals(team || null, moreOpen)
+  const goalId =
+    pickedGoal && pickedGoal.teamId === team && teamGoals?.some((g) => g.id === pickedGoal.goalId)
+      ? pickedGoal.goalId
+      : null
 
   // More options replaces its own button, so focus moves on to its first field.
   useEffect(() => {
@@ -189,7 +198,10 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
 
   // One key per draft, so a create whose answer was lost and is sent again returns the
   // same task. Editing the draft makes it another create.
-  const draftKey = useMemo(() => crypto.randomUUID(), [trimmedTitle, description, agent?.id])
+  const draftKey = useMemo(
+    () => crypto.randomUUID(),
+    [trimmedTitle, description, agent?.id, goalId],
+  )
 
   // Enter in the one field submits the form, so this is also the Enter path.
   async function handleSubmit(e: React.FormEvent) {
@@ -202,6 +214,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
         title: trimmedTitle,
         description: description.trim() || undefined,
         teamId: team,
+        ...(goalId ? { goalId } : {}),
       })
       if (mine.ok) {
         addToast({ type: 'success', message: 'Task added for you' })
@@ -221,6 +234,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
       teamId: agent.teamId,
       assigneeAgentId: agent.id,
       idempotencyKey: draftKey,
+      ...(goalId ? { goalId } : {}),
     })
     if (task) {
       rememberAssignee(agent.teamId, agent.id)
@@ -374,6 +388,24 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
               {reason && !forMe ? <span data-testid="new-task-suggestion">{reason}</span> : null}
             </div>
           )}
+
+          {moreOpen && teamGoals && teamGoals.length > 0 ? (
+            <div>
+              <span className={FIELD_LABEL}>Goal</span>
+              <Select
+                aria-label="Goal"
+                data-testid="new-task-goal"
+                value={goalId ?? ''}
+                onChange={(v) => setPickedGoal(v ? { teamId: team, goalId: v } : null)}
+                disabled={submitting}
+                style={{ width: '100%' }}
+                options={[
+                  { value: '', label: 'No goal' },
+                  ...teamGoals.map((g) => ({ value: g.id, label: g.title })),
+                ]}
+              />
+            </div>
+          ) : null}
 
           {moreOpen ? (
             <div>
