@@ -361,7 +361,9 @@ describe("a board change frame names the task's goal", () => {
     if (!g.ok) throw new Error(g.reason)
     const t = createTask(db, { title: 'Linked', teamId: 'T', goalId: g.value.id })
     const frames: Array<Record<string, unknown>> = []
-    const stop = subscribeBoardChange('T', (c) => frames.push(c as Record<string, unknown>))
+    const stop = subscribeBoardChange('T', (c) =>
+      frames.push(c as unknown as Record<string, unknown>),
+    )
     publishBoardChangeWithAttention(db, 'T', { id: t.id, title: t.title })
     stop()
     expect(frames[0]?.['goalId']).toBe(g.value.id)
