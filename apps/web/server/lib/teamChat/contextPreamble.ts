@@ -40,6 +40,7 @@ import { asc, eq } from 'drizzle-orm'
 
 import { connectorsForRun } from '../connectors/agentConnectors'
 import { listLiveConnectors } from '../connectors/supervisor'
+import { buildGoalsBlock } from '../home/goalContext'
 import { buildLastAttemptNote } from '../resumeNote'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
@@ -374,6 +375,8 @@ export function buildServerTeamContext(
   selfAgentId: string,
   framing: TurnFraming,
   roomId: string | null = null,
+  /** The board task the run works on, when it has one: its goal rides the turn. */
+  taskId: string | null = null,
 ): string | null {
   const runtime = readAgentRuntime(db, selfAgentId)
   const rulesContent = readTeamRulesContent(db, teamId).trim()
@@ -428,11 +431,15 @@ export function buildServerTeamContext(
   // fires at once, which is not so here.
   const planBlock = buildPlanApprovalBlock(db, teamId, selfAgentId, roomId)
 
+  // The team's goals for a lead; a worker's own task's goal (lib/home/goalContext).
+  const goalsBlock = buildGoalsBlock(db, teamId, { isLeader: framing.isLeader, taskId })
+
   const composed = [
     personaBlock,
     rulesBlock,
     aboutUserBlock,
     rosterBlock,
+    goalsBlock,
     coordinationBlock,
     planBlock,
     scheduledBlock,

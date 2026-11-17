@@ -1839,6 +1839,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       requestedBy: run.request.requestedBy ?? null,
       key: `main:${deps.teamId}:${run.deliveryId}`,
       ...(chatSessionKey ? { chatSessionKey } : {}),
+      ...(run.request.goalId ? { goalId: run.request.goalId } : {}),
     }
     return { input, turn, request: run.request }
   }

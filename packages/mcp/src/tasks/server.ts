@@ -66,6 +66,7 @@ import {
 import { z } from 'zod'
 
 import { withInboxPiggyback } from '../piggyback'
+import { HOME_READ_TOOL_NAMES, HOME_WRITE_TOOL_NAMES, homeTools } from './homeTools'
 import {
   buildServer,
   jsonResult,
@@ -1307,6 +1308,19 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
   ]
 
+  // Home: the team's goals, KPIs and pages (./homeTools). Writes need a session
+  // bound to its agent and team.
+  tools.push(
+    ...homeTools({
+      db,
+      ...(boundTeamId ? { teamId: boundTeamId } : {}),
+      ...(boundAgentId ? { agentId: boundAgentId } : {}),
+      ...(boundExecutionId ? { executionId: boundExecutionId } : {}),
+      ...(boundTaskId ? { taskId: boundTaskId } : {}),
+      isLead,
+    }),
+  )
+
   /**
    * A readable id in an argument becomes the task's id before the tool sees it, so
    * every tool takes both and no tool can miss it. A reference that does not resolve
@@ -1333,6 +1347,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   if (opts?.unverifiedCaller === true)
     for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES, 'write_plan'])
       withheld.add(name)
+  // Home's writes are attributed to the agent: with no verified agent there is no one
+  // to attribute them to, so an unidentified caller gets Home's reads only.
+  if (opts?.unverifiedCaller === true || !boundAgentId)
+    for (const name of HOME_WRITE_TOOL_NAMES) withheld.add(name)
   const active = (
     chatRun
       ? tools.filter((t) =>
@@ -1342,6 +1360,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         ? tools.filter(
             (t) =>
               READ_ONLY_TOOL_NAMES.has(t.name) ||
+              HOME_READ_TOOL_NAMES.has(t.name) ||
               (ASK_TOOL_NAMES.has(t.name) && !withheld.has(t.name)),
           )
         : tools.filter((t) => !withheld.has(t.name))

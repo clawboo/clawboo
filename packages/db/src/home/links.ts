@@ -200,3 +200,11 @@ export function goalForNewTaskTx(
   )
   return link?.goalId ?? null
 }
+
+/** One task's goal, as the resolver reads it, or null. */
+export function resolveTaskGoal(db: ClawbooDb, taskId: string): GoalLink | null {
+  const row = db.select(LINK_COLUMNS).from(tasks).where(eq(tasks.id, taskId)).get() as
+    TaskLinkRow | undefined
+  if (!row) return null
+  return resolveGoalLinks(db, [row], loadGoalTeams(db)).get(row.id) ?? null
+}

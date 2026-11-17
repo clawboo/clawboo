@@ -122,6 +122,9 @@ export interface EnqueueUserMessageInput {
   /** It failed the person check: a script, an agent's command. It runs, but no person
    *  asked for it, so its bubble says so and what it hands out names no one. */
   notFromPerson?: boolean
+  /** The team goal a person filed the message under (checked on the team by the
+   *  caller): the request's main task serves it, and so does its work. */
+  goalId?: string | null
 }
 
 /** What became of an ingested message. `ok` means the target's turn started, or
@@ -567,6 +570,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
             request: {
               words: stimulus,
               requestedBy: input.notFromPerson ? null : (input.person ?? { ...LOCAL_PERSON }),
+              ...(input.goalId && !input.notFromPerson ? { goalId: input.goalId } : {}),
             },
           }
       // Persist the user message under the target's team key (observability seed).

@@ -31,6 +31,9 @@ export const createTaskBody = z.object({
   // Makes the create safe to repeat: the same key returns the same task. The New task
   // dialog sends one per draft.
   idempotencyKey: z.string().min(1).max(200).optional(),
+  // The team goal it serves: a goal of `teamId`, or null for none. Absent: its
+  // parent's goal, when there is one on its team.
+  goalId: z.string().min(1).nullable().optional(),
 })
 export type CreateTaskBody = z.infer<typeof createTaskBody>
 
@@ -81,6 +84,8 @@ export const updateTaskBody = z
     // those two statuses; the repository checks it falls between the task's
     // creation and now.
     completedAt: z.number().int().positive().optional(),
+    // Link the task to a goal of its own team, or unlink it with null. A person's write.
+    goalId: z.string().min(1).nullable().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, { message: 'at least one field required' })
   .refine((b) => b.completedAt === undefined || b.status === 'done' || b.status === 'cancelled', {

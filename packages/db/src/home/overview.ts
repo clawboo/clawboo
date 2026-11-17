@@ -137,6 +137,11 @@ function costOf(
   return { usd, includesEstimates }
 }
 
+/** One goal's progress, out of an index already built. */
+export function goalProgressOf(index: GoalIndex, goalId: string): GoalProgressRecord {
+  return progressOf(index.byGoal.get(goalId) ?? [], index.now)
+}
+
 export function goalSummaries(
   db: ClawbooDb,
   goals: readonly TeamGoalRecord[],

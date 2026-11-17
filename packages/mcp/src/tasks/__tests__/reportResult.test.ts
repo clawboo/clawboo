@@ -93,7 +93,8 @@ describe('report_result', () => {
         'write_plan',
       ]),
     )
-    expect(names).toHaveLength(5)
+    // Plus Home's five reads.
+    expect(names).toHaveLength(10)
   })
 
   it('takes a run’s own task by its id, and refuses another task', async () => {

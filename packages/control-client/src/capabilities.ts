@@ -137,6 +137,10 @@ export const ENGINE_FEATURES = [
   // sets `data-clawboo-embed-titlebar` on <html> (with --clawboo-titlebar-inset and
   // --clawboo-titlebar-left). A layout the dashboard supports; it has no route.
   'ui.embedTitlebar',
+  // Home: a team's goals, KPIs, pages and status line, and the All teams view
+  // (GET /api/home and /api/home/teams/:teamId/...). Agents reach it through the
+  // Tasks MCP tools. See home.ts.
+  'home.goals',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 

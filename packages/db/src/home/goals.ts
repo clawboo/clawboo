@@ -8,7 +8,7 @@ import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { immediateWrite, type BoardTx } from '../board/contention'
-import { teamGoalHealth, teamGoals, teams, type DbTeamGoal } from '../schema'
+import { agents, teamGoalHealth, teamGoals, teams, type DbTeamGoal } from '../schema'
 import {
   actorJson,
   cleanTitle,
@@ -90,6 +90,12 @@ function goalRowTx(
     .from(teamGoals)
     .where(and(eq(teamGoals.id, goalId), eq(teamGoals.teamId, teamId)))
     .get()
+}
+
+/** An agent as Home records it: its id and its registry name. */
+export function agentActorOf(db: ClawbooDb | BoardTx, agentId: string): HomeActor {
+  const row = db.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).get()
+  return { kind: 'agent', id: agentId, name: row?.name ?? null }
 }
 
 export function teamExistsForHome(db: ClawbooDb | BoardTx, teamId: string): boolean {

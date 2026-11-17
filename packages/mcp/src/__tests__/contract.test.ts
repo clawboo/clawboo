@@ -69,7 +69,18 @@ describe('Tasks MCP', () => {
   it('readOnly mode serves only the board read surface', async () => {
     const client = await connectInMemory(createTasksServer(db, { readOnly: true }))
     const names = await listToolNames(client)
-    expect(names.sort()).toEqual(['get_task', 'list_tasks'])
+    // The board's reads and Home's (goals, KPIs, pages); no writes.
+    expect(names.sort()).toEqual(
+      [
+        'get_task',
+        'get_goal',
+        'list_goals',
+        'list_kpis',
+        'list_pages',
+        'list_tasks',
+        'read_page',
+      ].sort(),
+    )
 
     // The read tools work against the shared substrate…
     const writer = await connectInMemory(createTasksServer(db))

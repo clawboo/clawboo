@@ -105,6 +105,39 @@ import { teamMemberRolesGET } from './teamMemberRoles'
 import { teamRulesGET, teamRulesPUT } from './teamRules'
 import { teamAgentWakesGET, teamAgentWakesPUT } from './teamAgentWakes'
 import { teamPlanApprovalGET, teamPlanApprovalPUT } from './teamPlanApproval'
+import {
+  homeGET,
+  homeGoalDELETE,
+  homeGoalGET,
+  homeGoalHealthPOST,
+  homeGoalPATCH,
+  homeGoalsGET,
+  homeGoalsPOST,
+  homeGoalsReorderPOST,
+  homeGoalUpdatesGET,
+  homeGoalUpdatesPOST,
+  homeKpiAcceptPOST,
+  homeKpiDELETE,
+  homeKpiDismissPOST,
+  homeKpiPATCH,
+  homeKpisGET,
+  homeKpisPOST,
+  homeKpiValuesGET,
+  homeKpiValuesPOST,
+  homePageDELETE,
+  homePageGET,
+  homePagePATCH,
+  homePagePinPOST,
+  homePageRevertPOST,
+  homePageRevisionsGET,
+  homePagesGET,
+  homePagesPOST,
+  homeSettingsGET,
+  homeSettingsPUT,
+  homeUpdateDiscardPOST,
+  homeUpdatePublishPOST,
+  homeWeeklyUpdatesPOST,
+} from './home'
 import { teamVerifyCommandGET, teamVerifyCommandPUT } from './teamVerifyCommand'
 import {
   teamBriefGET,
@@ -435,6 +468,39 @@ router.get('/api/team-rules/:teamId', teamRulesGET)
 router.put('/api/team-rules/:teamId', teamRulesPUT)
 router.get('/api/team-plan-approval/:teamId', teamPlanApprovalGET)
 router.put('/api/team-plan-approval/:teamId', sensitiveLimiter, teamPlanApprovalPUT)
+
+// Home: a team's goals, KPIs, pages and status line (see api/home.ts).
+router.get('/api/home', homeGET)
+router.get('/api/home/teams/:teamId/goals', homeGoalsGET)
+router.post('/api/home/teams/:teamId/goals', homeGoalsPOST)
+router.post('/api/home/teams/:teamId/goals/reorder', homeGoalsReorderPOST)
+router.get('/api/home/teams/:teamId/goals/:goalId', homeGoalGET)
+router.patch('/api/home/teams/:teamId/goals/:goalId', homeGoalPATCH)
+router.delete('/api/home/teams/:teamId/goals/:goalId', homeGoalDELETE)
+router.post('/api/home/teams/:teamId/goals/:goalId/health', homeGoalHealthPOST)
+router.get('/api/home/teams/:teamId/goals/:goalId/updates', homeGoalUpdatesGET)
+router.post('/api/home/teams/:teamId/goals/:goalId/updates', homeGoalUpdatesPOST)
+router.post('/api/home/teams/:teamId/updates/:updateId/publish', homeUpdatePublishPOST)
+router.post('/api/home/teams/:teamId/updates/:updateId/discard', homeUpdateDiscardPOST)
+router.get('/api/home/teams/:teamId/kpis', homeKpisGET)
+router.post('/api/home/teams/:teamId/kpis', homeKpisPOST)
+router.patch('/api/home/teams/:teamId/kpis/:kpiId', homeKpiPATCH)
+router.delete('/api/home/teams/:teamId/kpis/:kpiId', homeKpiDELETE)
+router.post('/api/home/teams/:teamId/kpis/:kpiId/accept', homeKpiAcceptPOST)
+router.post('/api/home/teams/:teamId/kpis/:kpiId/dismiss', homeKpiDismissPOST)
+router.get('/api/home/teams/:teamId/kpis/:kpiId/values', homeKpiValuesGET)
+router.post('/api/home/teams/:teamId/kpis/:kpiId/values', homeKpiValuesPOST)
+router.get('/api/home/teams/:teamId/pages', homePagesGET)
+router.post('/api/home/teams/:teamId/pages', homePagesPOST)
+router.get('/api/home/teams/:teamId/pages/:pageId', homePageGET)
+router.patch('/api/home/teams/:teamId/pages/:pageId', homePagePATCH)
+router.delete('/api/home/teams/:teamId/pages/:pageId', homePageDELETE)
+router.get('/api/home/teams/:teamId/pages/:pageId/revisions', homePageRevisionsGET)
+router.post('/api/home/teams/:teamId/pages/:pageId/revert', homePageRevertPOST)
+router.post('/api/home/teams/:teamId/pages/:pageId/pin', homePagePinPOST)
+router.get('/api/home/teams/:teamId/settings', homeSettingsGET)
+router.put('/api/home/teams/:teamId/settings', sensitiveLimiter, homeSettingsPUT)
+router.post('/api/home/teams/:teamId/weekly-updates', sensitiveLimiter, homeWeeklyUpdatesPOST)
 router.get('/api/team-verify-command/:teamId', teamVerifyCommandGET)
 // Sets a shell command the verification gate later runs: rate-limited like the
 // other routes that change what runs.

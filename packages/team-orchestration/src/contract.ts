@@ -50,7 +50,12 @@ import {
 } from './boardOrchestration'
 import { BUDGET_HELD_CODE, BUDGET_REFUSED_CODE, DeliveryRefusedError } from './deliveryRefused'
 import type { RunStamp, TurnOrigin } from './turnOrigin'
-import type { BoardTask, CompleteExecutionOutcome, EngineBoardClient } from './boardClient'
+import type {
+  BoardTask,
+  CompleteExecutionOutcome,
+  EngineBoardClient,
+  HandOffInput,
+} from './boardClient'
 
 // ─── The board-agnostic inspection + control surface ──────────────────────────
 // A superset of `BoardClient` the contract scenarios use. Both the in-memory fake
@@ -5392,6 +5397,22 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       return d?.task.parentTaskId as string
     }
     const lastUpdate = (delivered: Delivered[]): Delivered => reflections(delivered).at(-1)!
+
+    it('carries the goal the person filed the message under to its main task', async () => {
+      const { board, orchestrator } = makeHarness()
+      const seen: Array<HandOffInput['mainTask']> = []
+      const real = board.createHandOff.bind(board)
+      board.createHandOff = async (input: HandOffInput) => {
+        seen.push(input.mainTask)
+        return real(input)
+      }
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r1', 'delegate', { assignee: 'Bug Boo', task: 'write the form' }),
+        { ...asked('d1'), request: { words: 'Build it', requestedBy: PERSON, goalId: 'goal-1' } },
+      )
+      expect(seen[0]).toMatchObject({ title: 'Build it', goalId: 'goal-1' })
+    })
 
     it('a plain answer creates no task', async () => {
       const { board, delivered, orchestrator } = makeHarness()

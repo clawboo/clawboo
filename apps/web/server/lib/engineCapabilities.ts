@@ -151,6 +151,12 @@ export const FEATURE_ROUTES = {
     'POST /api/agents/:agentId/computer/control',
     'POST /api/agents/:agentId/computer/input',
   ],
+  'home.goals': [
+    'GET /api/home',
+    'GET /api/home/teams/:teamId/goals',
+    'GET /api/home/teams/:teamId/kpis',
+    'GET /api/home/teams/:teamId/pages',
+  ],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
 export function buildEngineCapabilities(): EngineCapabilities {
@@ -245,6 +251,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // The dashboard page's own layout, so no route and no switch: an app that
     // shows it in its own window can ask for the slim top bar.
     'ui.embedTitlebar': true,
+    // Always on: goals, KPIs, pages and the status line have no switch.
+    'home.goals': true,
   }
   return {
     version,

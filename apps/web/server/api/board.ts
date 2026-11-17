@@ -20,6 +20,7 @@ import {
   agents,
   appendAudit,
   assignTaskDelegation,
+  goalIsOnTeam,
   attentionForTask,
   attentionForTasks,
   claimBody,
@@ -417,6 +418,11 @@ export function boardCreatePOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'one_assignee' })
       return
     }
+    // A goal must be one of the task's own team's.
+    if (input.goalId && !goalIsOnTeam(db, input.goalId, input.teamId)) {
+      res.status(400).json({ error: 'goal_other_team' })
+      return
+    }
     if (
       (assigneeAgentId || assignToMe || namesAnAgent(input.sourceDelegationId)) &&
       refuseUnlessPerson(req, res)
@@ -797,6 +803,15 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       refuseUnlessPerson(req, res)
     )
       return
+    // Linking a task to a goal is a person's write, and only to a goal of the
+    // task's own team.
+    if (rest.goalId !== undefined && current && rest.goalId !== (current.goalId ?? null)) {
+      if (refuseUnlessPerson(req, res)) return
+      if (rest.goalId !== null && !goalIsOnTeam(db, rest.goalId, current.teamId)) {
+        res.status(400).json({ error: 'goal_other_team' })
+        return
+      }
+    }
     const humanOverride = byPerson && overrideAsked
     const allowedPriority = priorityFor(req, priority)
     const fields = {
