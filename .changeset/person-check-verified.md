@@ -1,9 +1,0 @@
----
-'clawboo': minor
----
-
-Behind a sign-in proxy, an administrator can now say that only a person the proxy signed for acts as a person. Set `personCheck` to `verified` (or `CLAWBOO_PERSON_CHECK=verified`) with the proxy identity lane on, and the person check stops taking the dashboard page's own marks, which anything holding the access token could send: answering approvals, moving cards, Retry, pausing and the other person writes need a token your proxy signed. The same setting makes Clawboo's Gateway WebSocket open only for such a person, since the dashboard answers OpenClaw approvals over it, and every route of an agent's screen need one: its live view, its browser's screenshots, take over, and view and control links. Each live view belongs to the person who opened it, and its stream ends every 5 minutes so the page comes back with a fresh signed request, keeping a take over. The lane's `required` mode always works this way. The server refuses to start with `verified` and the lane off.
-
-A second switch, `proxyIdentityControlClaim: required` (or `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM=required`), makes taking over an agent's screen need the proxy's say-so: a `control` claim naming the agent, in a request-bound token, on the take over and on every batch of input after. A batch without it answers `403` with `"error": "control_claim"` and hands the screen back to the agent. The server refuses to start with it and the lane off or `session` binding.
-
-`GET /api/access/identity` now says `personCheck` and `controlClaim`, and the new `auth.personCheck` and `computer.controlClaim` capability flags say an engine enforces them. Both settings are off by default, so nothing changes until an administrator sets them. A link's page now sends this address's cookies, so a sign-in proxy in front can tell who opened it.

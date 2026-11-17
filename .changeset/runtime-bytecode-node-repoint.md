@@ -1,9 +1,0 @@
----
-'clawboo': patch
----
-
-Connectors started through npm (`npx`, `npm` or `node`), and the npm that installs a runtime into Clawboo's runtimes folder, now start with `PYTHONDONTWRITEBYTECODE=1`, so a native part's build (such as `fsevents` for the browser connector) no longer writes Python `__pycache__` folders into the folder of the npm that runs it. A connector another program starts, such as `uvx`, gets no Python setting added. A `PYTHONDONTWRITEBYTECODE` or `PYTHONPYCACHEPREFIX` already set in the server's environment passes through instead, and commands you approve run as you configured them. With agents as their own user, a process started as the agent user never gets the server's `PYTHONPYCACHEPREFIX`, and gets `PYTHONDONTWRITEBYTECODE=1` in its place.
-
-A runtime Clawboo installed whose Node.js is gone, such as when an app that runs Clawboo on a Node.js of its own is moved or renamed, now moves to the Node.js Clawboo runs on when that is the same version or a later release of the same major version on the same kind of processor. At startup or the next time Clawboo looks for it, its launchers and then its record are rewritten (a failure puts the launchers back, and a stop part way is finished at the next start), and the server log says what moved. On any other Node.js it still reads as not installed until you install it again.
-
-A runtime installed on Homebrew's `node` formula now names that Node.js by its versioned folder rather than the formula's link, which `brew upgrade` moves to each new major version, so the runtime no longer runs on a major version it was not installed for. An upgrade within the major version is followed once Clawboo runs on the new version. A runtime installed this way before keeps the link: install it again after a `brew upgrade` to a new major version. A formula held to one major version, such as `node@24`, keeps its link.
