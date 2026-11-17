@@ -143,7 +143,7 @@ Claude Code and Codex run with their own sandboxes and approval prompts turned o
 
 <Accordion title="Dashboard views in code">
 
-The main area shows one `ViewMode` from `apps/web/src/stores/view.ts`: an agent page (`agent`), a team chat in General or a room (`groupChat`), a team's Home (`teamspace`), Boo Zero (`booZero`), the welcome screen (`welcome`), or a nav panel (`nav`). Each nav panel has a `NavView` id, which is what `navigateTo(view)` takes. The labels come from `apps/web/src/lib/navLabels.ts`.
+The main area shows one `ViewMode` from `apps/web/src/stores/view.ts`: an agent page (`agent`), a team chat in General or a room (`groupChat`), Boo Zero (`booZero`), the welcome screen (`welcome`), or a nav panel (`nav`). Each nav panel has a `NavView` id, which is what `navigateTo(view)` takes. The labels come from `apps/web/src/lib/navLabels.ts`.
 
 | `NavView` id   | Label         | Where it lives                      |
 | -------------- | ------------- | ----------------------------------- |

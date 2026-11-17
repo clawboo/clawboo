@@ -37,7 +37,7 @@ Use this page to open a chat, send work, aim a message at one agent, stop work, 
 
 <Step title="Pick the team">
 
-Click the team's icon in the narrow rail at the far left. The team's Home page opens, and the sidebar lists the team's agents and then its chats.
+Click the team's icon in the narrow rail at the far left. [Home](/using/home) opens on the team, and the sidebar lists the team's agents and then its chats.
 
 </Step>
 
