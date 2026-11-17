@@ -122,10 +122,21 @@ export function HomeSettingsDialog({
               hours and 4 times a day. Each costs a model call; Home names the lead and the model
               under the line.
             </span>
+            {!current.leadCanWriteStatus ? (
+              <span
+                className="mt-1.5 block text-xs leading-relaxed text-foreground"
+                data-testid="home-lead-cannot-write"
+              >
+                This team&apos;s lead cannot write it: an OpenClaw lead has no way to, and a team
+                with no lead has nobody to. Home keeps writing the line from the board.
+              </span>
+            ) : null}
           </span>
           <Switch
             checked={current.leadWritesStatus}
-            disabled={busy === 'lead'}
+            // A lead that cannot write the line is never offered it: turning it on would
+            // be refused, so the switch says why instead. One already on can be turned off.
+            disabled={busy === 'lead' || (!current.leadCanWriteStatus && !current.leadWritesStatus)}
             onChange={(next) => void setLeadWrites(next)}
             label="The lead writes the status line"
           />

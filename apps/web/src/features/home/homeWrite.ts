@@ -29,6 +29,8 @@ const CODE_WORDS: Record<string, string> = {
   not_active: 'That KPI is archived.',
   wrong_source: 'Only a KPI a person types takes values by hand.',
   archived: 'That is archived.',
+  lead_cannot_write:
+    'This team’s lead cannot write the status line: an OpenClaw lead has no way to, and a team with no lead has nobody to.',
 }
 
 export async function homeWrite<T>(

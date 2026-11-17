@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { defaultHomeSettings } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
+import { useToastStore } from '@/stores/toast'
 
 import { HomeSettingsDialog } from '../HomeSettingsDialog'
 
@@ -66,6 +67,54 @@ describe('Home settings', () => {
     )
     await user.click(await screen.findByTestId('home-weekly-on', {}, T))
     expect(await screen.findByTestId('home-weekly-manage', {}, T)).toBeInTheDocument()
+  })
+
+  it('says why the switch is off for a lead that cannot write the line, and keeps it off', async () => {
+    render(
+      <HomeSettingsDialog
+        open
+        onClose={() => {}}
+        teamId="t1"
+        teamName="Launch"
+        settings={{ ...defaultHomeSettings(), leadCanWriteStatus: false }}
+        onChanged={() => {}}
+      />,
+    )
+    const toggle = await screen.findByRole('switch', { name: 'The lead writes the status line' }, T)
+    expect(toggle).toBeDisabled()
+    expect(screen.getByTestId('home-lead-cannot-write')).toHaveTextContent(
+      'an OpenClaw lead has no way to',
+    )
+  })
+
+  it('says so in plain words when the server refuses the lead line', async () => {
+    useToastStore.setState({ toasts: [] })
+    server.use(
+      http.put('/api/home/teams/:teamId/settings', () =>
+        HttpResponse.json({ ok: false, error: 'lead_cannot_write' }, { status: 409 }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(
+      <HomeSettingsDialog
+        open
+        onClose={() => {}}
+        teamId="t1"
+        teamName="Launch"
+        settings={defaultHomeSettings()}
+        onChanged={() => {}}
+      />,
+    )
+    const toggle = await screen.findByRole('switch', { name: 'The lead writes the status line' }, T)
+    await user.click(toggle)
+    await waitFor(
+      () =>
+        expect(useToastStore.getState().toasts[0]?.message).toMatch(
+          /lead cannot write the status line/,
+        ),
+      T,
+    )
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
   })
 
   it('does not promise a run link Home does not show', async () => {
