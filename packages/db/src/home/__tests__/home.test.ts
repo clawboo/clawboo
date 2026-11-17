@@ -23,6 +23,7 @@ import {
   costRecords,
   executionProcesses,
   orchestrationEvents,
+  teamGoalUpdates,
   teamKpiValues,
   teamPageRevisions,
   tasks,
@@ -33,6 +34,7 @@ import {
   createTeamGoal,
   getTeamGoal,
   goalHealthHistory,
+  listTeamGoals,
   reorderTeamGoals,
   setTeamGoalHealth,
   updateTeamGoal,
@@ -42,10 +44,13 @@ import {
   addPersonKpiValue,
   createTeamKpi,
   dismissKpiSuggestion,
+  getTeamKpi,
   kpiTiles,
+  listKpiValues,
   listTeamKpis,
   reportAgentKpiValue,
   suggestTeamKpi,
+  updateTeamKpi,
 } from '../kpis'
 import {
   loadGoalTeams,
@@ -55,7 +60,7 @@ import {
   setTaskGoal,
 } from '../links'
 import { computeMetric, statusSentence, teamSnapshot } from '../metrics'
-import { allTeamsHome, goalDetail, teamHome } from '../overview'
+import { allTeamsHome, buildGoalIndex, goalDetail, goalSummaries, teamHome } from '../overview'
 import {
   agentWritePage,
   archiveTeamPage,
@@ -72,6 +77,7 @@ import {
   LEAD_STATUS_MIN_GAP_MS,
   setTeamHomeSettings,
   takeLeadStatusAsk,
+  withdrawLeadStatusAsk,
   writeHomeSummary,
 } from '../summary'
 import {
@@ -377,6 +383,36 @@ describe('goal updates', () => {
     })
   })
 
+  it('archiving a goal discards its drafts, and an archived goal takes no update', () => {
+    const g = goal('T', 'G')
+    const d = draftGoalUpdate(db, { goalId: g, teamId: 'T', body: 'Draft', agent: BEA })
+    if (!d.ok) throw new Error(d.reason)
+    expect(teamHome(db, 'T')?.needsYou.draftUpdates).toHaveLength(1)
+    archiveTeamGoal(db, 'T', g)
+    expect(listGoalUpdates(db, g).map((u) => u.state)).toEqual(['discarded'])
+    expect(teamHome(db, 'T')?.needsYou.draftUpdates).toHaveLength(0)
+    // A draft that got in anyway (written in the same instant) is not published.
+    db.insert(teamGoalUpdates)
+      .values({
+        id: 'late',
+        goalId: g,
+        teamId: 'T',
+        body: 'Late',
+        author: JSON.stringify(BEA),
+        state: 'draft',
+        createdAt: Date.now(),
+      })
+      .run()
+    expect(publishGoalUpdate(db, 'T', 'late', {}, PERSON)).toEqual({
+      ok: false,
+      reason: 'goal_archived',
+    })
+    expect(createPublishedUpdate(db, 'T', g, { body: 'Too late' }, PERSON)).toEqual({
+      ok: false,
+      reason: 'goal_archived',
+    })
+  })
+
   it("a person's own update is published at once", () => {
     const g = goal('T', 'G')
     const r = createPublishedUpdate(
@@ -492,6 +528,29 @@ describe('KPIs', () => {
       value: 120,
       freshness: 'ok',
     })
+  })
+
+  it("reads only values from a KPI's current source, and keeps every value in its history", () => {
+    const k = createTeamKpi(db, 'T', { name: 'Signups', source: 'person' }, PERSON)
+    if (!k.ok) throw new Error(k.reason)
+    addPersonKpiValue(db, 'T', k.value.id, { value: 40 }, PERSON)
+    const moved = updateTeamKpi(db, 'T', k.value.id, { source: 'agent', reporterAgentId: 'bea' })
+    if (!moved.ok) throw new Error(moved.reason)
+    const tile = () => kpiTiles(db, [getTeamKpi(db, 'T', k.value.id)!], teamSnapshot(db, 'T'))[0]
+    // The person's value is not the agent's: missing until the agent reports.
+    expect(tile()?.reading).toMatchObject({
+      value: null,
+      source: 'agent',
+      latest: null,
+      freshness: 'missing',
+    })
+    const report = reportAgentKpiValue(db, { kpiId: k.value.id, teamId: 'T', agent: BEA, value: 7 })
+    if (!report.ok) throw new Error(report.reason)
+    expect(tile()?.reading).toMatchObject({ value: 7, source: 'agent', freshness: 'ok' })
+    expect(tile()?.reading.latest?.reportedBy).toEqual(BEA)
+    expect(listKpiValues(db, k.value.id).map((v) => v.value)).toEqual(
+      expect.arrayContaining([40, 7]),
+    )
   })
 
   it('caps the values one KPI takes in a day', () => {
@@ -694,38 +753,38 @@ describe("the lead's status line", () => {
 
   it('never asks about a board that has not moved since the line was turned on', () => {
     const t0 = Date.now()
-    expect(takeLeadStatusAsk(db, 'T', t0)).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0)).toBeNull()
     setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
     // Before any line: nothing moved, so no ask, however long it waits.
-    expect(takeLeadStatusAsk(db, 'T', t0 + 1000)).toBe(false)
-    expect(takeLeadStatusAsk(db, 'T', t0 + 3 * H)).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 1000)).toBeNull()
+    expect(takeLeadStatusAsk(db, 'T', t0 + 3 * H)).toBeNull()
     move(t0 + 3 * H + 1)
-    expect(takeLeadStatusAsk(db, 'T', t0 + 3 * H + 2)).toBe(true)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 3 * H + 2)).not.toBeNull()
     // Asked once for that move; the same board is not asked about again.
-    expect(takeLeadStatusAsk(db, 'T', t0 + 5 * H)).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 5 * H)).toBeNull()
   })
 
   it('never asks a lead that cannot write the line', () => {
     setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
     const t0 = Date.now()
     move(t0 + 1)
-    expect(takeLeadStatusAsk(db, 'T', t0 + 2, { leadCanWrite: false })).toBe(false)
-    expect(takeLeadStatusAsk(db, 'T', t0 + 2, { leadCanWrite: true })).toBe(true)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 2, { leadCanWrite: false })).toBeNull()
+    expect(takeLeadStatusAsk(db, 'T', t0 + 2, { leadCanWrite: true })).not.toBeNull()
   })
 
   it('asks on the same clock as lines, so every ask can be answered', () => {
     setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
     const t0 = Date.now()
     move(t0 + 1)
-    expect(takeLeadStatusAsk(db, 'T', t0 + 2)).toBe(true)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 2)).not.toBeNull()
     // A slow answer to the first ask lands.
     expect(write('Slow line.', t0 + 30 * 60 * 1000).ok).toBe(true)
     move(t0 + H)
     // Six hours after the last ask, but not after the last line: no ask, so no
     // model call whose line would come back too soon.
-    expect(takeLeadStatusAsk(db, 'T', t0 + H + 2)).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0 + H + 2)).toBeNull()
     const next = t0 + 30 * 60 * 1000 + H + 1
-    expect(takeLeadStatusAsk(db, 'T', next)).toBe(true)
+    expect(takeLeadStatusAsk(db, 'T', next)).not.toBeNull()
     // The answer lands at once, though the board has not moved since the ask.
     expect(write('Quick line.', next + 1000).ok).toBe(true)
     expect(getHomeSummary(db, 'T')?.body).toBe('Quick line.')
@@ -742,8 +801,24 @@ describe("the lead's status line", () => {
     move(t0 + 4)
     expect(write('Too soon.', t0 + 60_000)).toEqual({ ok: false, reason: 'too_soon' })
     // An ask counts on the same clock: no ask within 6 hours of a line.
-    expect(takeLeadStatusAsk(db, 'T', t0 + H - 1)).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0 + H - 1)).toBeNull()
     expect(write('Later.', t0 + H + 4).ok).toBe(true)
+  })
+
+  it('takes back an ask that never reached the lead, so the same board is asked about again', () => {
+    setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
+    const t0 = Date.now()
+    move(t0 + 1)
+    const ask = takeLeadStatusAsk(db, 'T', t0 + 2)
+    if (!ask) throw new Error('no ask')
+    expect(takeLeadStatusAsk(db, 'T', t0 + 3)).toBeNull()
+    withdrawLeadStatusAsk(db, ask)
+    // Nothing moved since, and it is not six hours on: asked again all the same.
+    const again = takeLeadStatusAsk(db, 'T', t0 + 4)
+    expect(again).not.toBeNull()
+    // Taking the first ask back again changes nothing: the newer ask stands.
+    withdrawLeadStatusAsk(db, ask)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 5)).toBeNull()
   })
 
   it('asks at most four times a day', () => {
@@ -800,6 +875,33 @@ describe('overview', () => {
     expect(detail.children.map((s) => s.goal.id)).toEqual([child])
     expect(detail.tasks.find((t) => t.taskId === a.id)?.linkedVia).toBe('own')
     expect(goalDetail(db, 'U', top)).toBeNull()
+  })
+
+  it('rolls up every child that is not archived, the same way in every view', () => {
+    const parent = goal('T', 'Launch')
+    const doneChild = goal('T', 'Docs', { parentGoalId: parent })
+    const archivedChild = goal('T', 'Old plan', { parentGoalId: parent })
+    const docs = createTask(db, { title: 'Docs page', teamId: 'T', goalId: doneChild })
+    finish(docs.id)
+    createTask(db, { title: 'Dropped idea', teamId: 'T', goalId: archivedChild })
+    updateTeamGoal(db, 'T', doneChild, { status: 'done' })
+    archiveTeamGoal(db, 'T', archivedChild)
+    const want = { total: 1, done: 1 }
+    // Home shows active goals only; the done child still counts in its parent.
+    const card = teamHome(db, 'T')?.goals.find((s) => s.goal.id === parent)
+    expect(card?.progress).toMatchObject(want)
+    expect(card?.childCount).toBe(1)
+    const row = allTeamsHome(db).teams.find((r) => r.team.id === 'T')
+    expect(row?.goals.find((s) => s.goal.id === parent)?.progress).toMatchObject(want)
+    // The goals list with archived ones, and the goal's own page: the archived
+    // child's task is not the parent's.
+    const listed = listTeamGoals(db, 'T', { includeArchived: true })
+    const summaries = goalSummaries(db, listed, buildGoalIndex(db, listed, ['T']))
+    expect(summaries.find((s) => s.goal.id === parent)?.progress).toMatchObject(want)
+    const detail = goalDetail(db, 'T', parent)
+    expect(detail?.summary.progress).toMatchObject(want)
+    expect(detail?.tasks.map((t) => t.taskId)).toEqual([docs.id])
+    expect(detail?.children.map((c) => c.goal.id)).toEqual([doneChild])
   })
 
   it('marks a goal with no update inside its cadence', () => {

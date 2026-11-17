@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, gte, inArray, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { immediateWrite, type BoardTx } from '../board/contention'
@@ -198,17 +198,29 @@ export function listKpiValues(db: ClawbooDb, kpiId: string, limit = 100): KpiVal
     .map(toValueRecord)
 }
 
-function latestValues(db: ClawbooDb, kpiIds: readonly string[]): Map<string, KpiValueRecord> {
+/**
+ * Each stored KPI's newest value from its current source: a person's values for a
+ * `person` KPI, an agent's for an `agent` one. A value's source is who reported it
+ * (`reportedBy.kind`), so after a person changes a KPI's source it reads missing
+ * until the new source reports. Its value history keeps every value.
+ */
+function latestValues(db: ClawbooDb, kpis: readonly TeamKpiRecord[]): Map<string, KpiValueRecord> {
   const out = new Map<string, KpiValueRecord>()
-  for (const id of kpiIds) {
+  for (const kpi of kpis) {
+    if (kpi.source === 'computed') continue
     const row = db
       .select()
       .from(teamKpiValues)
-      .where(eq(teamKpiValues.kpiId, id))
+      .where(
+        and(
+          eq(teamKpiValues.kpiId, kpi.id),
+          sql`json_extract(${teamKpiValues.reportedBy}, '$.kind') = ${kpi.source}`,
+        ),
+      )
       .orderBy(desc(teamKpiValues.asOf), desc(teamKpiValues.createdAt))
       .limit(1)
       .get()
-    if (row) out.set(id, toValueRecord(row))
+    if (row) out.set(kpi.id, toValueRecord(row))
   }
   return out
 }
@@ -219,10 +231,7 @@ export function kpiTiles(
   kpis: readonly TeamKpiRecord[],
   snap: TeamSnapshot,
 ): KpiTileRecord[] {
-  const stored = latestValues(
-    db,
-    kpis.filter((k) => k.source !== 'computed').map((k) => k.id),
-  )
+  const stored = latestValues(db, kpis)
   return kpis.map((kpi) => ({ kpi, reading: readingOf(db, kpi, snap, stored.get(kpi.id) ?? null) }))
 }
 

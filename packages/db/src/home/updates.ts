@@ -284,6 +284,7 @@ export function createPublishedUpdate(
         .where(and(eq(teamGoals.id, goalId), eq(teamGoals.teamId, teamId)))
         .get()
       if (!goal) return refuse('goal_not_found')
+      if (goal.archivedAt !== null) return refuse('goal_archived')
       const now = Date.now()
       const row: DbTeamGoalUpdate = {
         id: randomUUID(),
@@ -334,6 +335,8 @@ export function publishGoalUpdate(
       if (row.state !== 'draft') return refuse('not_draft')
       const goal = tx.select().from(teamGoals).where(eq(teamGoals.id, row.goalId)).get()
       if (!goal) return refuse('goal_not_found')
+      // An archived goal takes no updates; archiving it discarded its drafts.
+      if (goal.archivedAt !== null) return refuse('goal_archived')
       const edited: DbTeamGoalUpdate = {
         ...row,
         ...(body !== undefined ? { body } : {}),

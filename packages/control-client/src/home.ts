@@ -436,13 +436,26 @@ export interface HomeRecentFile {
   modifiedAt: number
 }
 
+/**
+ * Why a team's lead cannot write the status line:
+ * - `no_lead`: the team has no lead.
+ * - `openclaw_lead`: an OpenClaw lead's Tasks tools carry no identity, so they never
+ *   include `write_home_summary`.
+ * - `tasks_read_only`: a Clawboo native lead whose board access is read-only (the
+ *   native default). Full board access in its settings gives it the tool.
+ * - `tasks_off`: a Clawboo native lead with board access off.
+ */
+export type LeadCannotWriteReason = 'no_lead' | 'openclaw_lead' | 'tasks_read_only' | 'tasks_off'
+
 export interface TeamHomeSettings {
   /** The team lead writes the status line (costs model calls). Off by default. */
   leadWritesStatus: boolean
-  /** Whether the team's lead can write it at all. An OpenClaw lead cannot: its Tasks
-   *  tools carry no identity, so it is never offered `write_home_summary`. Turning the
-   *  line on for such a team answers 409 `lead_cannot_write`. */
+  /** Whether the team's lead can write it at all: only a lead whose Tasks tools are
+   *  bound to it and not read-only is offered `write_home_summary`. Turning the line
+   *  on for a team whose lead cannot answers 409 `lead_cannot_write`. */
   leadCanWriteStatus: boolean
+  /** Why not, when `leadCanWriteStatus` is false; null when it is true. */
+  leadCannotWriteReason: LeadCannotWriteReason | null
   /** The routine that asks the lead for weekly goal updates, when turned on. */
   weeklyUpdatesRoutineId: string | null
 }
@@ -462,6 +475,9 @@ export interface TeamHome {
   routines: HomeUpcomingRoutine[]
   /** Pinned pages that are not archived. */
   pinnedPages: TeamPage[]
+  /** Up to 8 files from the top of the folders of the team's most recently changed
+   *  tasks, the most recently modified first. Each folder's first 40 entries by name
+   *  are read, so this is not a search for the newest file anywhere. */
   recentFiles: HomeRecentFile[]
 }
 

@@ -7,9 +7,15 @@ import {
   GOAL_HEALTHS,
   GOAL_STATUSES,
   HOME_COMPUTED_METRICS,
+  HOME_DESCRIPTION_MAX_CHARS,
   KPI_DIRECTIONS,
+  KPI_NOTE_MAX_CHARS,
   KPI_PERIODS,
   KPI_SOURCES,
+  KPI_UNIT_MAX_CHARS,
+  MAX_UPDATE_CADENCE_DAYS,
+  PAGE_BODY_MAX_CHARS,
+  SOURCE_URL_MAX_CHARS,
 } from './types'
 
 const actorSchema = z.object({
@@ -20,11 +26,11 @@ const actorSchema = z.object({
 const epoch = z.number().int().nonnegative()
 
 const goalFields = {
-  description: z.string().max(20_000).optional(),
+  description: z.string().max(HOME_DESCRIPTION_MAX_CHARS).optional(),
   parentGoalId: z.string().min(1).nullable().optional(),
   owner: actorSchema.nullable().optional(),
   targetDate: epoch.nullable().optional(),
-  updateCadenceDays: z.number().int().min(1).max(365).optional(),
+  updateCadenceDays: z.number().int().min(1).max(MAX_UPDATE_CADENCE_DAYS).optional(),
 }
 export const homeCreateGoalBody = z.object({ title: z.string(), ...goalFields })
 export const homeUpdateGoalBody = z.object({
@@ -45,7 +51,7 @@ export const homePublishBody = z.object({
 })
 
 const kpiFields = {
-  unit: z.string().max(40).optional(),
+  unit: z.string().max(KPI_UNIT_MAX_CHARS).optional(),
   direction: z.enum(KPI_DIRECTIONS).optional(),
   target: z.number().finite().nullable().optional(),
   period: z.enum(KPI_PERIODS).optional(),
@@ -67,19 +73,19 @@ export const homeUpdateKpiBody = z.object({
 export const homeValueBody = z.object({
   value: z.number().finite(),
   asOf: epoch.optional(),
-  note: z.string().max(2_000).nullable().optional(),
-  sourceUrl: z.string().max(2_000).nullable().optional(),
+  note: z.string().max(KPI_NOTE_MAX_CHARS).nullable().optional(),
+  sourceUrl: z.string().max(SOURCE_URL_MAX_CHARS).nullable().optional(),
 })
 
 export const homeCreatePageBody = z.object({
   title: z.string(),
-  body: z.string().max(200_000).optional(),
+  body: z.string().max(PAGE_BODY_MAX_CHARS).optional(),
   goalId: z.string().min(1).nullable().optional(),
   pinned: z.boolean().optional(),
 })
 export const homeUpdatePageBody = z.object({
   title: z.string().optional(),
-  body: z.string().max(200_000).optional(),
+  body: z.string().max(PAGE_BODY_MAX_CHARS).optional(),
   goalId: z.string().min(1).nullable().optional(),
 })
 export const homeRevertBody = z.object({ revision: z.number().int().positive() })
