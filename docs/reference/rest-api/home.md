@@ -38,39 +38,40 @@ Every route is on the general [rate limit](/reference/rest-api/index#rate-limits
 
 ## Routes
 
-| Method | Path                                                | Summary                                                |
-| ------ | --------------------------------------------------- | ------------------------------------------------------ |
-| GET    | `/api/home`                                         | One team's Home (`?teamId=`), or all teams without one |
-| GET    | `/api/home/teams/:teamId/goals`                     | The team's goals with progress and cost                |
-| POST   | `/api/home/teams/:teamId/goals`                     | Create a goal                                          |
-| POST   | `/api/home/teams/:teamId/goals/reorder`             | Put goals in a new order                               |
-| GET    | `/api/home/teams/:teamId/goals/:goalId`             | A goal's own page                                      |
-| PATCH  | `/api/home/teams/:teamId/goals/:goalId`             | Change a goal                                          |
-| DELETE | `/api/home/teams/:teamId/goals/:goalId`             | Archive a goal                                         |
-| POST   | `/api/home/teams/:teamId/goals/:goalId/health`      | Set a goal's health, or clear it                       |
-| GET    | `/api/home/teams/:teamId/goals/:goalId/updates`     | A goal's updates, newest first                         |
-| POST   | `/api/home/teams/:teamId/goals/:goalId/updates`     | A person writes an update, published at once           |
-| POST   | `/api/home/teams/:teamId/updates/:updateId/publish` | Publish a draft, edited first if the body says so      |
-| POST   | `/api/home/teams/:teamId/updates/:updateId/discard` | Discard a draft                                        |
-| GET    | `/api/home/teams/:teamId/kpis`                      | Active and suggested KPIs with their readings          |
-| POST   | `/api/home/teams/:teamId/kpis`                      | Define a KPI                                           |
-| PATCH  | `/api/home/teams/:teamId/kpis/:kpiId`               | Change a KPI                                           |
-| DELETE | `/api/home/teams/:teamId/kpis/:kpiId`               | Archive a KPI                                          |
-| POST   | `/api/home/teams/:teamId/kpis/:kpiId/accept`        | Accept an agent's suggestion, with edits               |
-| POST   | `/api/home/teams/:teamId/kpis/:kpiId/dismiss`       | Dismiss an agent's suggestion                          |
-| GET    | `/api/home/teams/:teamId/kpis/:kpiId/values`        | A KPI's stored values, newest first                    |
-| POST   | `/api/home/teams/:teamId/kpis/:kpiId/values`        | A person types a value (person-source KPIs only)       |
-| GET    | `/api/home/teams/:teamId/pages`                     | The team's pages                                       |
-| POST   | `/api/home/teams/:teamId/pages`                     | Create a page                                          |
-| GET    | `/api/home/teams/:teamId/pages/:pageId`             | A page with its newest words                           |
-| PATCH  | `/api/home/teams/:teamId/pages/:pageId`             | A new revision, or a new goal link                     |
-| DELETE | `/api/home/teams/:teamId/pages/:pageId`             | Archive a page                                         |
-| GET    | `/api/home/teams/:teamId/pages/:pageId/revisions`   | Every revision, newest first                           |
-| POST   | `/api/home/teams/:teamId/pages/:pageId/revert`      | A new revision that copies an old one                  |
-| POST   | `/api/home/teams/:teamId/pages/:pageId/pin`         | Pin or unpin a page on Home                            |
-| GET    | `/api/home/teams/:teamId/settings`                  | The team's Home settings                               |
-| PUT    | `/api/home/teams/:teamId/settings`                  | Turn the lead-written status line on or off            |
-| POST   | `/api/home/teams/:teamId/weekly-updates`            | Turn on weekly updates (makes a team routine)          |
+| Method | Path                                                        | Summary                                                |
+| ------ | ----------------------------------------------------------- | ------------------------------------------------------ |
+| GET    | `/api/home`                                                 | One team's Home (`?teamId=`), or all teams without one |
+| GET    | `/api/home/teams/:teamId/goals`                             | The team's goals with progress and cost                |
+| POST   | `/api/home/teams/:teamId/goals`                             | Create a goal                                          |
+| POST   | `/api/home/teams/:teamId/goals/reorder`                     | Put goals in a new order                               |
+| GET    | `/api/home/teams/:teamId/goals/:goalId`                     | A goal's own page                                      |
+| PATCH  | `/api/home/teams/:teamId/goals/:goalId`                     | Change a goal                                          |
+| DELETE | `/api/home/teams/:teamId/goals/:goalId`                     | Archive a goal                                         |
+| POST   | `/api/home/teams/:teamId/goals/:goalId/health`              | Set a goal's health, or clear it                       |
+| GET    | `/api/home/teams/:teamId/goals/:goalId/updates`             | A goal's updates, newest first                         |
+| POST   | `/api/home/teams/:teamId/goals/:goalId/updates`             | A person writes an update, published at once           |
+| POST   | `/api/home/teams/:teamId/updates/:updateId/publish`         | Publish a draft, edited first if the body says so      |
+| POST   | `/api/home/teams/:teamId/updates/:updateId/discard`         | Discard a draft                                        |
+| GET    | `/api/home/teams/:teamId/kpis`                              | Active and suggested KPIs with their readings          |
+| POST   | `/api/home/teams/:teamId/kpis`                              | Define a KPI                                           |
+| PATCH  | `/api/home/teams/:teamId/kpis/:kpiId`                       | Change a KPI                                           |
+| DELETE | `/api/home/teams/:teamId/kpis/:kpiId`                       | Archive a KPI                                          |
+| POST   | `/api/home/teams/:teamId/kpis/:kpiId/accept`                | Accept an agent's suggestion, with edits               |
+| POST   | `/api/home/teams/:teamId/kpis/:kpiId/dismiss`               | Dismiss an agent's suggestion                          |
+| GET    | `/api/home/teams/:teamId/kpis/:kpiId/values`                | A KPI's stored values, newest first                    |
+| POST   | `/api/home/teams/:teamId/kpis/:kpiId/values`                | A person types a value (person-source KPIs only)       |
+| GET    | `/api/home/teams/:teamId/pages`                             | The team's pages                                       |
+| POST   | `/api/home/teams/:teamId/pages`                             | Create a page                                          |
+| GET    | `/api/home/teams/:teamId/pages/:pageId`                     | A page with its newest words                           |
+| PATCH  | `/api/home/teams/:teamId/pages/:pageId`                     | A new revision, or a new goal link                     |
+| DELETE | `/api/home/teams/:teamId/pages/:pageId`                     | Archive a page                                         |
+| GET    | `/api/home/teams/:teamId/pages/:pageId/revisions`           | Revisions newest first, without their words, paged     |
+| GET    | `/api/home/teams/:teamId/pages/:pageId/revisions/:revision` | One revision with its words                            |
+| POST   | `/api/home/teams/:teamId/pages/:pageId/revert`              | A new revision that copies an old one                  |
+| POST   | `/api/home/teams/:teamId/pages/:pageId/pin`                 | Pin or unpin a page on Home                            |
+| GET    | `/api/home/teams/:teamId/settings`                          | The team's Home settings                               |
+| PUT    | `/api/home/teams/:teamId/settings`                          | Turn the lead-written status line on or off            |
+| POST   | `/api/home/teams/:teamId/weekly-updates`                    | Turn on weekly updates (makes a team routine)          |
 
 A goal, update, KPI or page of another team answers `404`, the same as one that does not exist. A team that does not exist answers `404` with `"error": "team_not_found"`. With [roles](/guides/sso-proxy) enforced, reads need `see`, writes need `work`, the settings write needs an owner or operator, and turning on weekly updates needs `setup`. A guest reaches only the teams their token lists, and the all-teams read shows only those.
 
@@ -78,14 +79,14 @@ A goal, update, KPI or page of another team answers `404`, the same as one that 
 
 A refused write answers `{ "ok": false, "error": "<code>" }`:
 
-| Status | Codes                                                                                                                                        |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `invalid` (a body field), `empty`, `too_long`, `invalid_parent`, `parent_has_parent`, `goal_has_children`, `goal_other_team`, `wrong_source` |
-| 403    | `person_only`                                                                                                                                |
-| 404    | `team_not_found`, `goal_not_found`, `update_not_found`, `kpi_not_found`, `page_not_found`, `revision_not_found`                              |
-| 409    | `goal_archived`, `not_draft`, `not_suggested`, `not_active`, `archived`, `too_many`                                                          |
+| Status | Codes                                                                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `invalid` (a body field, or a query or path number that is not a whole number in range), `empty`, `too_long`, `invalid_parent`, `parent_has_parent`, `goal_has_children`, `goal_other_team`, `wrong_source` |
+| 403    | `person_only`                                                                                                                                                                                               |
+| 404    | `team_not_found`, `goal_not_found`, `update_not_found`, `kpi_not_found`, `page_not_found`, `revision_not_found`                                                                                             |
+| 409    | `goal_archived`, `not_draft`, `not_suggested`, `not_active`, `archived`, `too_many`, `lead_cannot_write`                                                                                                    |
 
-`too_many` is a limit: 100 goals, 60 KPIs and 300 pages a team (not counting archived ones), 10 suggestions waiting at once, 500 revisions a page, 5 drafts waiting on one goal from other agents, and 100 values a KPI takes in a rolling day.
+`too_many` is a limit: 100 goals and 60 KPIs a team (not counting archived ones), 10 suggestions waiting at once, 5 drafts waiting on one goal (each agent holds at most one, rewritten in place), and 100 values a KPI takes in a rolling day. Pages limit agents only, so a person is never stopped from editing or reverting one: an agent may not start a page once the team has 300 (not counting archived ones), nor more than 10 new pages a day, nor add a revision to a page that has 200, nor more than 6 revisions to one page in an hour. `lead_cannot_write`: see [Settings and weekly updates](#settings-and-weekly-updates).
 
 ---
 
@@ -104,7 +105,8 @@ TeamHome {
   team: { id, name, icon, color, leaderAgentId }
   asOf: number
   status: StatusLine        // see "The status line"
-  settings: { leadWritesStatus: boolean, weeklyUpdatesRoutineId: string | null }
+  settings: { leadWritesStatus: boolean, leadCanWriteStatus: boolean,
+              weeklyUpdatesRoutineId: string | null }
   needsYou: {
     total: number           // tasks + approvals + drafts + suggestions
     tasks: Array<{ taskId, identifier, title, teamId, reason }>   // the Board's reasons
@@ -151,7 +153,7 @@ StatusLine {
 }
 ```
 
-By default the line is computed from `facts`, for example "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent." A team can turn on a line its lead writes ([settings](#settings-and-weekly-updates)). Then, every 15 minutes, Clawboo asks the lead for one in the team chat (it shows as "Routine · Home status line") when the team's board changed since the last line, at most once every 6 hours and 4 times in a rolling day. The lead answers with the `write_home_summary` tool, which keeps to the same limits. A written line older than a day gives way to the computed one. Each ask is a model call, so it is off until a person turns it on.
+By default the line is computed from `facts`, for example "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent." A team can turn on a line its lead writes ([settings](#settings-and-weekly-updates)). Each ask is a model call, so it is off until a person turns it on, and the asks keep to limits that waste none. Every 15 minutes Clawboo looks at the teams that turned it on and asks the lead for a line in the team chat (it shows as "Routine · Home status line") only when the team's board moved past every point already seen: where it stood when the line was turned on, at the last ask, and at the last line. An untouched board is never asked about. Asks and lines share one clock: at most one every 6 hours, counting both, and at most 4 asks in a rolling day. The lead answers with the `write_home_summary` tool, and a line that answers the ask always lands. A line the lead writes unasked keeps to the same board and clock rules. A lead that cannot hold the tool (an OpenClaw lead) is never asked, even if the lead changed after the line was turned on. A written line older than a day gives way to the computed one.
 
 ## Goals
 
@@ -211,7 +213,7 @@ GoalDetail {
 
 ### Linking tasks to goals
 
-`POST /api/board` and `PATCH /api/board/:taskId` take `goalId` (a goal of the task's own team, or `null` to unlink); another team's goal answers `400` with `"error": "goal_other_team"`. Changing a task's goal is a person's write. A person's team chat message (`POST /api/teams/:id/chat`) can carry `goalId` too: the request's main task, and the work filed under it, serve that goal. Board task rows carry `goalId`.
+`POST /api/board` and `PATCH /api/board/:taskId` take `goalId`: a goal of the task's own team, or `null` for none. Another team's goal answers `400` with `"error": "goal_other_team"`. Changing a task's goal is a person's write (on `POST`, a `goalId` from a caller that is not a person is ignored and the task takes its parent's goal). `null` takes the task off every goal, its request's included, and the work under it with it. When a task's goal changes, the work under it that still carried the old goal moves to the new one; work a person put on another goal stays there. A person's team chat message (`POST /api/teams/:id/chat`) can carry `goalId` too: the request's main task, and the work filed under it, serve that goal. Board task rows carry `goalId`.
 
 ## Goal updates
 
@@ -227,7 +229,7 @@ GoalUpdate {
 }
 ```
 
-Agents draft updates with `draft_goal_update`; a second draft from the same agent on the same goal discards its first. Publishing an update that names a health sets the goal's health, recorded as set by the person who published it.
+Agents draft updates with `draft_goal_update`. Each agent holds at most one open draft on a goal: drafting again rewrites it in place (its words, health, run and time), so the table does not grow with each draft. Publishing an update that names a health sets the goal's health, recorded as set by the person who published it.
 
 - `POST .../goals/:goalId/updates` takes `{ body, health? }`: a person's own update, published at once. Answers `{ update, goal }`.
 - `POST .../updates/:updateId/publish` takes `{ body?, health? }` to edit before publishing. Answers `{ update, goal }`; a draft that is not a draft any more answers `409 not_draft`.
@@ -274,7 +276,7 @@ A reading is `stale` when its value is older than `staleAfterHours`, and `missin
 - `PATCH .../kpis/:kpiId` takes the same fields. `DELETE` archives it.
 - `POST .../kpis/:kpiId/accept` takes the same fields as edits and makes a suggestion active; `dismiss` archives it.
 - `POST .../kpis/:kpiId/values` takes `{ value, asOf?, note?, sourceUrl? }`, only for an active KPI whose source is `person`. A source link must start with `http://` or `https://`. Answers `{ value, kpi }`.
-- `GET .../kpis/:kpiId/values?limit=` answers `{ "values": KpiValue[] }`, newest first (up to 1,000).
+- `GET .../kpis/:kpiId/values?limit=` answers `{ "values": KpiValue[] }`, newest first. `limit` is a whole number from 1 to 1,000 (default 100); anything else answers `400 invalid`.
 
 ### Computed metrics
 
@@ -305,16 +307,19 @@ TeamPage {
   updatedBy: { kind, id, name } | null
 }
 
-TeamPageRevision { id, pageId, revision, title, body, author, executionId,
-                   revertedFrom: number | null, createdAt }
+TeamPageRevisionMeta { id, pageId, revision, title, bodyChars, author, executionId,
+                       revertedFrom: number | null, createdAt }
+TeamPageRevision = TeamPageRevisionMeta & { body: string }
 ```
 
-Every edit is a new revision; nothing is overwritten, and the same words again make none. A body holds up to 200,000 characters. An agent writes pages with `write_page`, and a person can revert its revision.
+Every edit is a new revision; nothing is overwritten, and the same words again make none. A body a person writes holds up to 200,000 characters; one an agent writes, 50,000. An agent writes pages with `write_page`, inside the agent limits under [Errors](#errors), and a person can always revert its revision: no limit applies to a person's edits or reverts.
 
 - `GET .../pages` answers `{ "pages": TeamPage[] }` (`?goalId=` for one goal's, `?includeArchived=true`).
 - `POST .../pages` takes `{ title, body?, goalId?, pinned? }` and answers `{ "page": TeamPage & { body } }`.
 - `GET .../pages/:pageId` answers `{ "page": TeamPage & { body } }`.
 - `PATCH .../pages/:pageId` takes `{ title?, body?, goalId? }`. A new title or body makes a new revision; a goal change alone makes none. An archived page answers `409 archived`.
+- `GET .../pages/:pageId/revisions?before=&limit=` answers `{ revisions: TeamPageRevisionMeta[], nextBefore: number | null }`: revisions newest first without their words, up to `limit` (default 50, at most 200) numbered below `before`. Pass `nextBefore` as `before` for the next page; it is null on the last one.
+- `GET .../pages/:pageId/revisions/:revision` answers `{ "revision": TeamPageRevision }` with its words, or `404 revision_not_found`.
 - `POST .../pages/:pageId/revert` takes `{ "revision": number }` and makes a new revision with that one's title and body.
 - `POST .../pages/:pageId/pin` takes `{ "pinned": boolean }`. `DELETE` archives the page and unpins it.
 
@@ -322,11 +327,11 @@ Every edit is a new revision; nothing is overwritten, and the same words again m
 
 ### GET /api/home/teams/:teamId/settings
 
-Answers `{ "settings": { leadWritesStatus: boolean, weeklyUpdatesRoutineId: string | null } }`.
+Answers `{ "settings": { leadWritesStatus: boolean, leadCanWriteStatus: boolean, weeklyUpdatesRoutineId: string | null } }`. `leadCanWriteStatus` is false when the team's lead cannot write the line: an OpenClaw lead, whose Tasks tools carry no identity and so are never offered `write_home_summary`, or a team with no lead.
 
 ### PUT /api/home/teams/:teamId/settings
 
-Takes `{ "leadWritesStatus": boolean }`. Turns the lead-written [status line](#the-status-line) on or off for the team; each change is in the [audit log](/reference/rest-api/governance).
+Takes `{ "leadWritesStatus": boolean }`. Turns the lead-written [status line](#the-status-line) on or off for the team; each change is in the [audit log](/reference/rest-api/governance). Turning it on for a team whose lead cannot write it answers `409` with `"error": "lead_cannot_write"`. Turning it on records where the board stands, and the first ask waits for the board to move past it.
 
 ### POST /api/home/teams/:teamId/weekly-updates
 

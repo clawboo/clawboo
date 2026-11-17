@@ -317,6 +317,7 @@ The task cards.
 | `assignee_person`       | `TEXT`                                | JSON `{ id, name, role }` of that person                                                                                                                                                                                                                                                               |
 | `requested_by`          | `TEXT`                                | JSON `{ id, name, role }` of the person who asked for it, where a hand-back goes. Written by `POST /api/board`, and on a request's main task and its plan card. Null for other tasks an agent or the engine made                                                                                       |
 | `goal_id`               | `TEXT`                                | The [team goal](#team_goals) it serves, a goal of its own team, or null. Copied from its parent when the task is made; a task with none reads as its nearest parent's goal. Plain reference, no foreign key                                                                                            |
+| `goal_cleared`          | `INTEGER`, not null, default `0`      | `1`: a person took the task off every goal. Goal resolution stops here instead of reaching its request's goal, so the work under it serves no goal either                                                                                                                                              |
 
 Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_assignee_person` (`assignee_person_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique), `idx_tasks_chat_session` (`chat_session_key`, `updated_at`), `idx_tasks_goal` (`goal_id`).
 
@@ -563,7 +564,7 @@ Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
 
 ## Home
 
-In releases after 0.8.0. A team's goals, KPIs, pages and status line (see the [Home API](/reference/rest-api/home)). People and agents in these rows are JSON `{ kind: 'person' | 'agent', id, name }`. A team's Home settings live in `settings`, as `team-home:<teamId>`: JSON `{ leadWritesStatus, weeklyUpdatesRoutineId, statusAsks, statusWrites }`, the last two the times of the lead's asks and lines in the last day.
+In releases after 0.8.0. A team's goals, KPIs, pages and status line (see the [Home API](/reference/rest-api/home)). People and agents in these rows are JSON `{ kind: 'person' | 'agent', id, name }`. A team's Home settings live in `settings`, as `team-home:<teamId>`: JSON `{ leadWritesStatus, weeklyUpdatesRoutineId, statusAsks, statusWrites, onSeq, lastAskSeq, pendingAskAt }`: the times of the lead's asks and lines in the last day, the board's position when the line was turned on and at the last ask, and the newest ask until a line answers it.
 
 ### team_goals
 
@@ -647,7 +648,7 @@ Append-only: `id`, `kpi_id` (FK `team_kpis.id`, cascade), `value` (`REAL`), `as_
 
 ### team_page_revisions
 
-One row per revision, never overwritten: `id`, `page_id` (FK `team_pages.id`, cascade), `revision` (1, 2, 3 per page, at most 500), `title`, `body` (up to 200,000 characters), `author` (JSON person or agent), `execution_id`, `reverted_from` (the revision a revert copied), `created_at`. Index: the unique `idx_team_page_revisions_revision` (`page_id`, `revision`).
+One row per revision, never overwritten: `id`, `page_id` (FK `team_pages.id`, cascade), `revision` (1, 2, 3 per page; an agent may not add one to a page that has 200, a person may), `title`, `body` (up to 200,000 characters from a person, 50,000 from an agent), `author` (JSON person or agent), `execution_id`, `reverted_from` (the revision a revert copied), `created_at`. Index: the unique `idx_team_page_revisions_revision` (`page_id`, `revision`).
 
 ### team_home_summary
 
