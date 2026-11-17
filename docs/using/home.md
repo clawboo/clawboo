@@ -48,7 +48,7 @@ From top to bottom. A section with nothing in it is left out.
 
 | Section               | What it shows                                                                                                                                                                                    |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Status line**       | One sentence on where the team stands, with when it was written and who wrote it. By default Clawboo writes it from the board's numbers; see [The status line](#the-status-line).                |
+| **Status line**       | One sentence on where the team stands, with when it was written and who wrote it. By default Clawboo writes it from the board's numbers and run costs; see [The status line](#the-status-line).  |
 | **Needs you**         | Tasks waiting on you (with the Board's reason, such as **Unassigned**), approvals and questions on the Board, goal updates an agent drafted, and KPIs an agent suggested.                        |
 | **Goals**             | Each goal with its health, progress over its linked tasks, how many of the done ones passed their check, how the scope moved this week, its target date, drafts waiting, and **Update missing**. |
 | **KPIs**              | One tile per KPI: its value in its unit, the target, which way is better, the window it reads, a bar toward the target, a badge naming its source, and a **Stale** mark when a value is late.    |
@@ -144,13 +144,13 @@ An agent can suggest a KPI, with why. It cannot define one or change a target. A
 
 A page is a markdown note the team keeps, such as a launch checklist or a brand voice. Agents can write pages too, with their `write_page` tool.
 
-Every save makes a new revision, so nothing is overwritten. Open a page and click **History** to see each revision with who wrote it (you, a person, or an agent in a run) and when. Pick one to read it, and **Restore this revision** to make a new revision that copies it. The pin in a page's header pins it to Home or unpins it, and **Archive** takes it off Home.
+Every change to a page's title or text makes a new revision, so nothing is overwritten; moving a page to another goal makes none. Open a page and click **History** to see each revision with who wrote it (you, a person, or an agent in a run) and when. Pick one to read it, and **Restore this revision** to make a new revision that copies it. The pin in a page's header pins it to Home or unpins it, and **Archive** takes it off Home.
 
 A page can belong to a goal; it then shows on that goal's page.
 
 ## The status line
 
-By default Clawboo writes the status line from the board's numbers each time Home is read, for example "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent." It says **Computed from the board** under it.
+By default Clawboo writes the status line from the board's numbers and the team's run costs each time Home is read, for example "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent." It says **Computed from the board and runs** under it.
 
 You can have the team lead write it instead, in [Home settings](#home-settings). The lead writes a new one only when the board changed since the last, at most every 6 hours and 4 times a day. Each is a model call; Home names the lead and the model under the line.
 
