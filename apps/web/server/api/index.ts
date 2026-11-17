@@ -129,6 +129,7 @@ import {
   homePagePATCH,
   homePagePinPOST,
   homePageRevertPOST,
+  homePageRevisionGET,
   homePageRevisionsGET,
   homePagesGET,
   homePagesPOST,
@@ -496,6 +497,7 @@ router.get('/api/home/teams/:teamId/pages/:pageId', homePageGET)
 router.patch('/api/home/teams/:teamId/pages/:pageId', homePagePATCH)
 router.delete('/api/home/teams/:teamId/pages/:pageId', homePageDELETE)
 router.get('/api/home/teams/:teamId/pages/:pageId/revisions', homePageRevisionsGET)
+router.get('/api/home/teams/:teamId/pages/:pageId/revisions/:revision', homePageRevisionGET)
 router.post('/api/home/teams/:teamId/pages/:pageId/revert', homePageRevertPOST)
 router.post('/api/home/teams/:teamId/pages/:pageId/pin', homePagePinPOST)
 router.get('/api/home/teams/:teamId/settings', homeSettingsGET)

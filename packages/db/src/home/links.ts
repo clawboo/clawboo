@@ -12,10 +12,10 @@
 // hand-off filed under another team's request, or a task that changed teams)
 // counts as no goal, at creation and on read.
 
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
-import type { BoardTx } from '../board/contention'
+import { immediateWrite, type BoardTx } from '../board/contention'
 import { teamGoals, tasks } from '../schema'
 
 /** The columns Home reads off a task. */
@@ -24,6 +24,7 @@ export interface TaskLinkRow {
   teamId: string | null
   parentTaskId: string | null
   goalId: string | null
+  goalCleared: number
   isMainTask: number
   status: string
   dropped: number
@@ -42,6 +43,7 @@ const LINK_COLUMNS = {
   teamId: tasks.teamId,
   parentTaskId: tasks.parentTaskId,
   goalId: tasks.goalId,
+  goalCleared: tasks.goalCleared,
   isMainTask: tasks.isMainTask,
   status: tasks.status,
   dropped: tasks.dropped,
@@ -106,15 +108,18 @@ export function resolveGoalLinks(
 }
 
 function resolveOne(
-  task: Pick<TaskLinkRow, 'teamId' | 'goalId' | 'parentTaskId'>,
+  task: Pick<TaskLinkRow, 'teamId' | 'goalId' | 'goalCleared' | 'parentTaskId'>,
   lookup: (
     id: string,
-  ) => Pick<TaskLinkRow, 'id' | 'goalId' | 'parentTaskId' | 'isMainTask'> | undefined,
+  ) =>
+    Pick<TaskLinkRow, 'id' | 'goalId' | 'goalCleared' | 'parentTaskId' | 'isMainTask'> | undefined,
   goalTeams: ReadonlyMap<string, string>,
 ): GoalLink | null {
   const counts = (goalId: string | null): goalId is string =>
     goalId !== null && task.teamId !== null && goalTeams.get(goalId) === task.teamId
   if (counts(task.goalId)) return { goalId: task.goalId, via: 'own' }
+  // A person said this task serves no goal: its request's goal does not reach it.
+  if (task.goalCleared === 1) return null
   // The nearest goal up the chain: the request's when nothing between has one.
   const seen = new Set<string>()
   let cursor = task.parentTaskId
@@ -125,6 +130,8 @@ function resolveOne(
     if (counts(row.goalId)) {
       return { goalId: row.goalId, via: row.isMainTask === 1 ? 'request' : 'parent' }
     }
+    // Work under a task a person took off every goal serves none either.
+    if (row.goalCleared === 1) return null
     // Above a request is nothing of its own: a request is where its work starts.
     if (row.isMainTask === 1) break
     cursor = row.parentTaskId
@@ -166,6 +173,7 @@ export function goalForNewTaskTx(
       .select({
         id: tasks.id,
         goalId: tasks.goalId,
+        goalCleared: tasks.goalCleared,
         parentTaskId: tasks.parentTaskId,
         isMainTask: tasks.isMainTask,
       })
@@ -190,11 +198,11 @@ export function goalForNewTaskTx(
     const r = lookup(cursor)
     if (!r) break
     if (r.goalId) teamOf(r.goalId)
-    if (r.isMainTask === 1) break
+    if (r.isMainTask === 1 || r.goalCleared === 1) break
     cursor = r.parentTaskId
   }
   const link = resolveOne(
-    { teamId: row.teamId, goalId: null, parentTaskId: row.parentTaskId },
+    { teamId: row.teamId, goalId: null, goalCleared: 0, parentTaskId: row.parentTaskId },
     lookup,
     goalTeams,
   )
@@ -207,4 +215,35 @@ export function resolveTaskGoal(db: ClawbooDb, taskId: string): GoalLink | null 
     TaskLinkRow | undefined
   if (!row) return null
   return resolveGoalLinks(db, [row], loadGoalTeams(db)).get(row.id) ?? null
+}
+
+/**
+ * A person links a task to a goal of its own team, or takes it off every goal
+ * with null. Either way the work under it that still carries the goal it had
+ * moves with it: to the new goal, or (for null) to none, so it reads as the task's.
+ * The caller checks the goal is on the task's team. Returns false for no such task.
+ */
+export function setTaskGoal(db: ClawbooDb, taskId: string, goalId: string | null): boolean {
+  const before = resolveTaskGoal(db, taskId)?.goalId ?? null
+  return immediateWrite(db, (tx): boolean => {
+    const row = tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()
+    if (!row) return false
+    const now = Date.now()
+    tx.update(tasks)
+      .set({ goalId, goalCleared: goalId === null ? 1 : 0, updatedAt: now })
+      .where(eq(tasks.id, taskId))
+      .run()
+    if (before !== null && before !== goalId) {
+      tx.run(sql`
+        WITH RECURSIVE below(id) AS (
+          SELECT id FROM tasks WHERE parent_task_id = ${taskId}
+          UNION
+          SELECT t.id FROM tasks t JOIN below b ON t.parent_task_id = b.id
+        )
+        UPDATE tasks SET goal_id = ${goalId}, updated_at = ${now}
+        WHERE id IN (SELECT id FROM below) AND goal_id = ${before} AND goal_cleared = 0
+      `)
+    }
+    return true
+  })
 }

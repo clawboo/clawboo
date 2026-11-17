@@ -156,8 +156,9 @@ export interface DraftGoalUpdateInput {
 }
 
 /**
- * An agent's draft. Never published here. The same agent's earlier draft on the
- * same goal is discarded, so a weekly routine that runs twice leaves one draft.
+ * An agent's draft. Never published here. The same agent's open draft on the same
+ * goal is rewritten in place (words, health, run, time), so a weekly routine that
+ * runs twice, or a retry, leaves one row.
  */
 export function draftGoalUpdate(
   db: ClawbooDb,
@@ -176,37 +177,45 @@ export function draftGoalUpdate(
     if (!goal) return refuse('goal_not_found')
     if (goal.archivedAt !== null) return refuse('goal_archived')
     const drafts = tx
-      .select({ id: teamGoalUpdates.id, author: teamGoalUpdates.author })
+      .select()
       .from(teamGoalUpdates)
       .where(and(eq(teamGoalUpdates.goalId, goal.id), eq(teamGoalUpdates.state, 'draft')))
+      .orderBy(desc(teamGoalUpdates.createdAt))
       .all()
     const mine = drafts.filter((d) => {
       const a = parseActor(d.author)
       return a?.kind === 'agent' && a.id === input.agent.id
     })
-    if (drafts.length - mine.length >= MAX_OPEN_DRAFTS_PER_GOAL) return refuse('too_many')
-    if (mine.length > 0)
-      tx.update(teamGoalUpdates)
-        .set({ state: 'discarded' })
-        .where(
-          inArray(
-            teamGoalUpdates.id,
-            mine.map((d) => d.id),
-          ),
-        )
-        .run()
+    const now = Date.now()
+    const fields = {
+      body: body.body,
+      health: input.health ?? null,
+      executionId: input.executionId ?? null,
+      createdAt: now,
+    }
+    const open = mine[0]
+    if (open) {
+      // The agent's open draft takes the new words in place: one row per agent and
+      // goal, however often a routine or a retry drafts again.
+      tx.update(teamGoalUpdates).set(fields).where(eq(teamGoalUpdates.id, open.id)).run()
+      const older = mine.slice(1).map((d) => d.id)
+      if (older.length > 0)
+        tx.update(teamGoalUpdates)
+          .set({ state: 'discarded' })
+          .where(inArray(teamGoalUpdates.id, older))
+          .run()
+      return done(toUpdateRecord({ ...open, ...fields }))
+    }
+    if (drafts.length >= MAX_OPEN_DRAFTS_PER_GOAL) return refuse('too_many')
     const row: DbTeamGoalUpdate = {
       id: randomUUID(),
       goalId: goal.id,
       teamId: goal.teamId,
-      body: body.body,
-      health: input.health ?? null,
       author: actorJson(input.agent),
-      executionId: input.executionId ?? null,
       state: 'draft',
       publishedBy: null,
       publishedAt: null,
-      createdAt: Date.now(),
+      ...fields,
     }
     tx.insert(teamGoalUpdates).values(row).run()
     return done(toUpdateRecord(row))

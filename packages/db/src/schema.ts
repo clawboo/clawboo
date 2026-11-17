@@ -416,6 +416,8 @@ export const tasks = sqliteTable(
     // The team goal it serves (team_goals.id, same team), or NULL. Copied from the
     // request or parent at creation (see home/links.ts). No foreign key.
     goalId: text('goal_id'),
+    // 1: a person said this task serves no goal, so the resolver stops here.
+    goalCleared: integer('goal_cleared').notNull().default(0),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),

@@ -212,6 +212,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     isMainTask: input.mainTaskLead ? 1 : 0,
     chatSessionKey: input.chatSessionKey ?? null,
     goalId: input.goalId ?? null,
+    goalCleared: 0,
   }
 }
 
@@ -222,6 +223,9 @@ export function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
   // Every create path comes through here, so this is where a request's or a
   // parent's goal is copied down.
   row.goalId = goalForNewTaskTx(tx, row, input.goalId)
+  // An explicit "no goal" under a parent stops the resolver here, so the task does
+  // not read as its request's goal.
+  if (input.goalId === null && row.parentTaskId) row.goalCleared = 1
   row.identifier = allocateTaskIdentifier(tx, row.teamId)
   tx.insert(tasks).values(row).run()
   if (input.createKey) rememberCreateKey(tx, input.createKey, row.id, row.createdAt)
@@ -2345,14 +2349,10 @@ export interface TaskFields {
   /** The agent's REAL runtime. The engine hardcodes `assigneeRuntime: 'openclaw'` at
    *  create; the orchestrator corrects it to the actual runtime for the card badge. */
   assigneeRuntime?: string | null
-  /** The team goal it serves; the caller checks it is on the task's team. */
-  goalId?: string | null
 }
 
 export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFields): DbTask | null {
-  const patch: Partial<
-    Pick<DbTask, 'priority' | 'title' | 'description' | 'assigneeRuntime' | 'goalId'>
-  > & {
+  const patch: Partial<Pick<DbTask, 'priority' | 'title' | 'description' | 'assigneeRuntime'>> & {
     updatedAt: number
   } = {
     updatedAt: Date.now(),
@@ -2361,7 +2361,6 @@ export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFiel
   if (fields.title !== undefined) patch.title = fields.title
   if (fields.description !== undefined) patch.description = fields.description
   if (fields.assigneeRuntime !== undefined) patch.assigneeRuntime = fields.assigneeRuntime
-  if (fields.goalId !== undefined) patch.goalId = fields.goalId
   withWriteRetry(() => db.update(tasks).set(patch).where(eq(tasks.id, taskId)).run())
   return getTask(db, taskId)
 }

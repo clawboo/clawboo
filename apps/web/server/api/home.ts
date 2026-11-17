@@ -25,6 +25,7 @@ import {
   getTeamGoal,
   getTeamHomeSettings,
   getTeamKpi,
+  getPageRevision,
   getTeamPage,
   goalDetail,
   goalSummaries,
@@ -49,6 +50,7 @@ import {
   listTeamGoals,
   listTeamKpis,
   listTeamPages,
+  PAGE_REVISIONS_LIST_MAX,
   publishGoalUpdate,
   reorderTeamGoals,
   revertTeamPage,
@@ -56,6 +58,7 @@ import {
   setTeamHomeSettings,
   setTeamPagePinned,
   teamExistsForHome,
+  teamPageExists,
   teamHome,
   teamSnapshot,
   updateTeamGoal,
@@ -72,6 +75,7 @@ import type { Request, Response } from 'express'
 
 import { actingPerson, actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
+import { homeSettingsFor, leadCanWriteStatus } from '../lib/home/leadStatus'
 import { recentTeamFiles } from '../lib/home/recentFiles'
 import { turnOnWeeklyUpdates } from '../lib/home/weeklyUpdates'
 import { inRoleScope, roleScopeOf } from '../lib/roles/guard'
@@ -152,6 +156,22 @@ function handle(fn: (req: Request, res: Response) => void | Promise<void>) {
 
 const flag = (v: unknown): boolean => v === 'true' || v === '1'
 
+/**
+ * A whole-number query or path value within [min, max]: `undefined` when absent,
+ * `null` when present and not one (the caller answers 400). Never a fraction, which
+ * SQLite would refuse as a LIMIT.
+ */
+function wholeNumber(
+  raw: unknown,
+  min: number,
+  max = Number.MAX_SAFE_INTEGER,
+): number | null | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'string' || !/^\d{1,15}$/.test(raw)) return null
+  const n = Number(raw)
+  return n >= min && n <= max ? n : null
+}
+
 // ─── GET /api/home?teamId= ───────────────────────────────────────────────────
 
 export const homeGET = handle(async (req, res) => {
@@ -168,7 +188,10 @@ export const homeGET = handle(async (req, res) => {
       return
     }
     const recentFiles = await recentTeamFiles(db, teamId).catch(() => [])
-    res.json({ scope: 'team', home: { ...home, recentFiles } })
+    res.json({
+      scope: 'team',
+      home: { ...home, settings: homeSettingsFor(db, teamId), recentFiles },
+    })
     return
   }
   const scope = roleScopeOf(req)
@@ -397,8 +420,12 @@ export const homeKpiValuesGET = handle((req, res) => {
     sendRefusal(res, 'kpi_not_found')
     return
   }
-  const limit = Number(req.query['limit'])
-  res.json({ values: listKpiValues(db, kpiId, Number.isFinite(limit) && limit > 0 ? limit : 100) })
+  const limit = wholeNumber(req.query['limit'], 1, 1000)
+  if (limit === null) {
+    sendRefusal(res, 'invalid')
+    return
+  }
+  res.json({ values: listKpiValues(db, kpiId, limit ?? 100) })
 })
 
 // ─── Pages ───────────────────────────────────────────────────────────────────
@@ -467,11 +494,44 @@ export const homePageRevisionsGET = handle((req, res) => {
   const teamId = teamOf(req, res, db)
   if (!teamId) return
   const pageId = param(req, 'pageId')
-  if (!getTeamPage(db, teamId, pageId)) {
+  if (!teamPageExists(db, teamId, pageId)) {
     sendRefusal(res, 'page_not_found')
     return
   }
-  res.json({ revisions: listPageRevisions(db, pageId) })
+  const before = wholeNumber(req.query['before'], 1)
+  const limit = wholeNumber(req.query['limit'], 1, PAGE_REVISIONS_LIST_MAX)
+  if (before === null || limit === null) {
+    sendRefusal(res, 'invalid')
+    return
+  }
+  res.json(
+    listPageRevisions(db, pageId, {
+      ...(before !== undefined ? { before } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    }),
+  )
+})
+
+export const homePageRevisionGET = handle((req, res) => {
+  const db = getDb()
+  const teamId = teamOf(req, res, db)
+  if (!teamId) return
+  const pageId = param(req, 'pageId')
+  if (!teamPageExists(db, teamId, pageId)) {
+    sendRefusal(res, 'page_not_found')
+    return
+  }
+  const number = wholeNumber(param(req, 'revision'), 1)
+  if (number === null || number === undefined) {
+    sendRefusal(res, 'invalid')
+    return
+  }
+  const revision = getPageRevision(db, pageId, number)
+  if (!revision) {
+    sendRefusal(res, 'revision_not_found')
+    return
+  }
+  res.json({ revision })
 })
 
 export const homePageRevertPOST = handle((req, res) => {
@@ -508,7 +568,7 @@ export const homeSettingsGET = handle((req, res) => {
   const db = getDb()
   const teamId = teamOf(req, res, db)
   if (!teamId) return
-  res.json({ settings: getTeamHomeSettings(db, teamId) })
+  res.json({ settings: homeSettingsFor(db, teamId) })
 })
 
 // The lead-written status line costs model calls, so turning it on is a person's
@@ -521,7 +581,13 @@ export const homeSettingsPUT = handle((req, res) => {
   const body = homeSettingsBody.safeParse(req.body)
   if (!body.success) return badBody(res, body.error)
   const previous = getTeamHomeSettings(db, teamId).leadWritesStatus
-  const settings = setTeamHomeSettings(db, teamId, body.data)
+  // A lead that cannot hold write_home_summary would be asked for nothing.
+  if (body.data.leadWritesStatus && !previous && !leadCanWriteStatus(db, teamId)) {
+    res.status(409).json({ ok: false, error: 'lead_cannot_write' })
+    return
+  }
+  setTeamHomeSettings(db, teamId, body.data)
+  const settings = homeSettingsFor(db, teamId)
   if (previous !== settings.leadWritesStatus)
     appendAudit(db, {
       eventType: 'board',
@@ -553,7 +619,7 @@ export const homeWeeklyUpdatesPOST = handle(async (req, res) => {
           ...actorField(req),
         },
       })
-    res.json(result)
+    res.json({ ...result, settings: homeSettingsFor(db, teamId) })
   } catch (err) {
     if (err instanceof InvalidRoutineTargetError) {
       res.status(400).json({ ok: false, error: 'invalid_routine_target', message: err.message })

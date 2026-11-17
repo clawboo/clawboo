@@ -3,9 +3,20 @@
 // The status line is computed from the board by default (metrics.ts). A person
 // can turn on a written one per team: then the team's lead is asked for one in
 // a short turn, and writes it with the Tasks tool `write_home_summary`. That
-// costs model calls, so it is off until a person turns it on, and both the asks
-// and the writes keep to the same limits: only when the board changed since the
-// last line, at most once every 6 hours, and at most 4 times in a rolling day.
+// costs model calls, so it is off until a person turns it on, and asks keep to
+// limits that waste none:
+//
+// - The lead is asked only when the board moved past every point already seen: the
+//   board's position when the line was turned on, at the last ask, and at the last
+//   line. An untouched board is never asked about, before the first line too.
+// - Asks and lines share one clock: at most one every 6 hours, counting both, and
+//   at most 4 asks in a rolling day.
+// - A line that answers the newest ask always lands, however soon after the last
+//   line, so the model call it cost is never thrown away. A line the lead writes
+//   unasked keeps to the same board and clock rules.
+//
+// The server never asks a lead that cannot hold the tool (an OpenClaw lead's Tasks
+// tools carry no identity): see apps/web/server/lib/home/leadStatus.ts.
 
 import { eq, max } from 'drizzle-orm'
 
@@ -25,10 +36,16 @@ export interface TeamHomeSettingsRecord {
 }
 
 interface StoredSettings extends TeamHomeSettingsRecord {
-  /** When the lead was last asked for a line, within the last day. */
+  /** When the lead was asked for a line, within the last day. */
   statusAsks: number[]
-  /** When the lead last wrote one, within the last day. */
+  /** When the lead wrote one, within the last day. */
   statusWrites: number[]
+  /** The board's position when the line was last turned on. */
+  onSeq: number
+  /** The board's position at the newest ask. */
+  lastAskSeq: number
+  /** The newest ask, until a line answers it. */
+  pendingAskAt: number | null
 }
 
 export function teamHomeSettingKey(teamId: string): string {
@@ -41,6 +58,9 @@ function readStored(db: ClawbooDb, teamId: string): StoredSettings {
     weeklyUpdatesRoutineId: null,
     statusAsks: [],
     statusWrites: [],
+    onSeq: 0,
+    lastAskSeq: 0,
+    pendingAskAt: null,
   }
   const raw = getSetting(db, teamHomeSettingKey(teamId))
   if (!raw) return fallback
@@ -50,6 +70,7 @@ function readStored(db: ClawbooDb, teamId: string): StoredSettings {
       Array.isArray(v)
         ? v.filter((n): n is number => typeof n === 'number' && Number.isFinite(n))
         : []
+    const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
     return {
       leadWritesStatus: doc['leadWritesStatus'] === true,
       weeklyUpdatesRoutineId:
@@ -58,6 +79,9 @@ function readStored(db: ClawbooDb, teamId: string): StoredSettings {
           : null,
       statusAsks: times(doc['statusAsks']),
       statusWrites: times(doc['statusWrites']),
+      onSeq: num(doc['onSeq']),
+      lastAskSeq: num(doc['lastAskSeq']),
+      pendingAskAt: typeof doc['pendingAskAt'] === 'number' ? doc['pendingAskAt'] : null,
     }
   } catch {
     return fallback
@@ -91,12 +115,17 @@ export function setTeamHomeSettings(
 ): TeamHomeSettingsRecord {
   const now = Date.now()
   const s = readStored(db, teamId)
+  const turningOn = patch.leadWritesStatus === true && !s.leadWritesStatus
+  const turningOff = patch.leadWritesStatus === false && s.leadWritesStatus
   const next: StoredSettings = {
     ...s,
     ...(patch.leadWritesStatus !== undefined ? { leadWritesStatus: patch.leadWritesStatus } : {}),
     ...(patch.weeklyUpdatesRoutineId !== undefined
       ? { weeklyUpdatesRoutineId: patch.weeklyUpdatesRoutineId }
       : {}),
+    // The first ask waits for the board to move past where it stands now.
+    ...(turningOn ? { onSeq: boardSeq(db, teamId), pendingAskAt: null } : {}),
+    ...(turningOff ? { pendingAskAt: null } : {}),
   }
   writeStored(db, teamId, next, now)
   return {
@@ -139,33 +168,50 @@ export function getHomeSummary(db: ClawbooDb, teamId: string): HomeSummaryRecord
   }
 }
 
-type Gate =
-  { ok: true } | { ok: false; reason: 'not_enabled' | 'unchanged' | 'too_soon' | 'too_many' }
+const lastOf = (list: readonly number[]): number => list.reduce((m, t) => Math.max(m, t), 0)
 
-function gate(
-  s: StoredSettings,
-  times: number[],
-  last: HomeSummaryRecord | null,
-  seq: number,
-  now: number,
-): Gate {
-  if (!s.leadWritesStatus) return { ok: false, reason: 'not_enabled' }
-  if (last && seq <= last.boardSeq) return { ok: false, reason: 'unchanged' }
-  const recent = times.filter((t) => now - t < DAY_MS)
-  if (recent.some((t) => now - t < LEAD_STATUS_MIN_GAP_MS)) return { ok: false, reason: 'too_soon' }
-  if (recent.length >= LEAD_STATUS_MAX_PER_DAY) return { ok: false, reason: 'too_many' }
-  return { ok: true }
+/** Did the board move past every point a line or an ask already saw? */
+function boardMoved(s: StoredSettings, last: HomeSummaryRecord | null, seq: number): boolean {
+  return seq > Math.max(s.onSeq, s.lastAskSeq, last?.boardSeq ?? 0)
+}
+
+/** Is it too soon after the last ask or line (one clock for both)? */
+function tooSoon(s: StoredSettings, now: number): boolean {
+  return now - Math.max(lastOf(s.statusAsks), lastOf(s.statusWrites)) < LEAD_STATUS_MIN_GAP_MS
+}
+
+const inLastDay = (list: readonly number[], now: number): number =>
+  list.filter((t) => now - t < DAY_MS).length
+
+/** Does a pending ask still stand? It lapses when the next ask could be made. */
+function askStands(s: StoredSettings, now: number): boolean {
+  return s.pendingAskAt !== null && now - s.pendingAskAt < LEAD_STATUS_MIN_GAP_MS
 }
 
 /**
  * Should the lead be asked for a status line now? Records the ask when it says
- * yes, so a second sweep in the same window says no.
+ * yes, so a second sweep in the same window says no. `leadCanWrite`: whether the
+ * team's lead can hold `write_home_summary` at all (the server knows; see above).
  */
-export function takeLeadStatusAsk(db: ClawbooDb, teamId: string, now = Date.now()): boolean {
+export function takeLeadStatusAsk(
+  db: ClawbooDb,
+  teamId: string,
+  now = Date.now(),
+  opts: { leadCanWrite?: boolean } = {},
+): boolean {
+  if (opts.leadCanWrite === false) return false
   const s = readStored(db, teamId)
-  const verdict = gate(s, s.statusAsks, getHomeSummary(db, teamId), boardSeq(db, teamId), now)
-  if (!verdict.ok) return false
-  writeStored(db, teamId, { ...s, statusAsks: [...s.statusAsks, now] }, now)
+  if (!s.leadWritesStatus) return false
+  const seq = boardSeq(db, teamId)
+  if (!boardMoved(s, getHomeSummary(db, teamId), seq)) return false
+  if (tooSoon(s, now)) return false
+  if (inLastDay(s.statusAsks, now) >= LEAD_STATUS_MAX_PER_DAY) return false
+  writeStored(
+    db,
+    teamId,
+    { ...s, statusAsks: [...s.statusAsks, now], lastAskSeq: seq, pendingAskAt: now },
+    now,
+  )
   return true
 }
 
@@ -197,7 +243,10 @@ export type WriteHomeSummaryResult =
         'not_enabled' | 'not_lead' | 'unchanged' | 'too_soon' | 'too_many' | 'empty' | 'too_long'
     }
 
-/** The lead writes the team's status line, inside the limits above. */
+/**
+ * The lead writes the team's status line. A line that answers the newest ask
+ * lands; one written unasked keeps to the board and clock rules above.
+ */
 export function writeHomeSummary(
   db: ClawbooDb,
   input: {
@@ -214,9 +263,15 @@ export function writeHomeSummary(
   if (!body) return { ok: false, reason: 'empty' }
   if (body.length > HOME_SUMMARY_MAX_CHARS) return { ok: false, reason: 'too_long' }
   const s = readStored(db, input.teamId)
+  if (!s.leadWritesStatus) return { ok: false, reason: 'not_enabled' }
   const seq = boardSeq(db, input.teamId)
-  const verdict = gate(s, s.statusWrites, getHomeSummary(db, input.teamId), seq, now)
-  if (!verdict.ok) return verdict
+  if (!askStands(s, now)) {
+    if (!boardMoved(s, getHomeSummary(db, input.teamId), seq))
+      return { ok: false, reason: 'unchanged' }
+    if (tooSoon(s, now)) return { ok: false, reason: 'too_soon' }
+    if (inLastDay(s.statusWrites, now) >= LEAD_STATUS_MAX_PER_DAY)
+      return { ok: false, reason: 'too_many' }
+  }
   const row = {
     teamId: input.teamId,
     body,
@@ -233,7 +288,12 @@ export function writeHomeSummary(
       .onConflictDoUpdate({ target: teamHomeSummary.teamId, set: row })
       .run(),
   )
-  writeStored(db, input.teamId, { ...s, statusWrites: [...s.statusWrites, now] }, now)
+  writeStored(
+    db,
+    input.teamId,
+    { ...s, statusWrites: [...s.statusWrites, now], pendingAskAt: null },
+    now,
+  )
   return { ok: true, value: { ...row, author: input.agent } }
 }
 

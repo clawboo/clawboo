@@ -261,7 +261,10 @@ const SCHEMA_DDL = `
       -- from the request or parent when the task is made; a read-time resolver
       -- covers tasks made before their request had one. No foreign key: a goal
       -- that is gone reads as none.
-      goal_id              TEXT
+      goal_id              TEXT,
+      -- 1: a person said this task serves no goal. The read-time resolver stops
+      -- here instead of walking up to its request's goal.
+      goal_cleared         INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);

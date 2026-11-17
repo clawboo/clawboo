@@ -250,6 +250,7 @@ const PINNED_ROUTES = [
   'PATCH /api/home/teams/:teamId/pages/:pageId',
   'DELETE /api/home/teams/:teamId/pages/:pageId',
   'GET /api/home/teams/:teamId/pages/:pageId/revisions',
+  'GET /api/home/teams/:teamId/pages/:pageId/revisions/:revision',
   'POST /api/home/teams/:teamId/pages/:pageId/revert',
   'POST /api/home/teams/:teamId/pages/:pageId/pin',
   'GET /api/home/teams/:teamId/settings',

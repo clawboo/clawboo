@@ -410,6 +410,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'PATCH /api/home/teams/:teamId/pages/:pageId': work(team('teamId')),
   'DELETE /api/home/teams/:teamId/pages/:pageId': work(team('teamId')),
   'GET /api/home/teams/:teamId/pages/:pageId/revisions': see(team('teamId')),
+  'GET /api/home/teams/:teamId/pages/:pageId/revisions/:revision': see(team('teamId')),
   'POST /api/home/teams/:teamId/pages/:pageId/revert': work(team('teamId')),
   'POST /api/home/teams/:teamId/pages/:pageId/pin': work(team('teamId')),
   'GET /api/home/teams/:teamId/settings': see(team('teamId')),

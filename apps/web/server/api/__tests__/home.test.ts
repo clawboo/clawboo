@@ -11,15 +11,22 @@ import * as client from '@clawboo/control-client'
 import * as homeDb from '@clawboo/db'
 import {
   agents,
+  createSubtask,
   createTask,
   createTeamGoal,
   createTeamKpi,
+  getSetting,
   getTask,
+  getTeamGoal,
   getTeamHomeSettings,
+  goalDetail,
   listScheduledRuns,
   setTeamHomeSettings,
+  tasks,
+  teamHomeSettingKey,
   teams,
 } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -289,18 +296,152 @@ describe('Home routes', () => {
     expect(getTeamHomeSettings(getDb(), 'T').weeklyUpdatesRoutineId).toBe(first.body['routineId'])
   })
 
-  it('asks a lead for a status line only when the team turned it on, once per window', async () => {
+  it('asks a lead for a status line only when on, once the board moved, once per window', async () => {
     const asked: Array<{ teamId: string; name: string | undefined }> = []
     const enqueue = async (teamId: string, input: { routine?: { name: string } }) => {
       asked.push({ teamId, name: input.routine?.name })
       return { ok: true as const, targetAgentId: 'a1' }
     }
-    createTask(getDb(), { title: 'Moved the board', teamId: 'T' })
-    expect(await askLeadsForStatus({ enqueue })).toEqual([])
-    setTeamHomeSettings(getDb(), 'T', { leadWritesStatus: true })
-    expect(await askLeadsForStatus({ enqueue })).toEqual(['T'])
-    expect(await askLeadsForStatus({ enqueue })).toEqual([])
+    const db = getDb()
+    const later = Date.now() + 10_000
+    createTask(db, { title: 'Moved the board', teamId: 'T' })
+    expect(await askLeadsForStatus({ enqueue, now: later })).toEqual([])
+    setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
+    // Nothing moved since it was turned on: no ask.
+    expect(await askLeadsForStatus({ enqueue, now: later })).toEqual([])
+    const t = createTask(db, { title: 'More work', teamId: 'T' })
+    db.update(tasks)
+      .set({ updatedAt: later - 1 })
+      .where(eq(tasks.id, t.id))
+      .run()
+    expect(await askLeadsForStatus({ enqueue, now: later })).toEqual(['T'])
+    expect(await askLeadsForStatus({ enqueue, now: later + 1000 })).toEqual([])
     expect(asked).toEqual([{ teamId: 'T', name: STATUS_ASK_ROUTINE_NAME }])
+  })
+
+  it('never turns on, or asks, a lead that cannot write the line', async () => {
+    const db = getDb()
+    const now = Date.now()
+    db.insert(agents)
+      .values({
+        id: 'oc',
+        runtime: 'openclaw',
+        name: 'Oc',
+        teamId: 'U',
+        gatewayId: 'oc',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    const refused = await call(
+      home.homeSettingsPUT,
+      asPerson({ params: { teamId: 'U' }, body: { leadWritesStatus: true } }),
+    )
+    expect(refused).toEqual({ status: 409, body: { ok: false, error: 'lead_cannot_write' } })
+    const read = await call(home.homeSettingsGET, req({ params: { teamId: 'U' } }))
+    expect(read.body['settings']).toMatchObject({
+      leadWritesStatus: false,
+      leadCanWriteStatus: false,
+    })
+    const ok = await call(
+      home.homeSettingsPUT,
+      asPerson({ params: { teamId: 'T' }, body: { leadWritesStatus: true } }),
+    )
+    expect(ok.body['settings']).toMatchObject({ leadWritesStatus: true, leadCanWriteStatus: true })
+    // Turned on while a lead could write, then the lead became an OpenClaw agent: skipped.
+    setTeamHomeSettings(db, 'U', { leadWritesStatus: true })
+    const t = createTask(db, { title: 'Work', teamId: 'U' })
+    db.update(tasks)
+      .set({ updatedAt: now + 5000 })
+      .where(eq(tasks.id, t.id))
+      .run()
+    const asked: string[] = []
+    await askLeadsForStatus({
+      now: now + 10_000,
+      enqueue: async (teamId) => {
+        asked.push(teamId)
+        return { ok: true as const, targetAgentId: 'oc' }
+      },
+    })
+    expect(asked).not.toContain('U')
+  })
+
+  it("unlinks a task under a goal-linked request, so it leaves the goal's count", async () => {
+    const db = getDb()
+    const g = goalOn('T')
+    const main = createTask(db, { title: 'Request', teamId: 'T', goalId: g })
+    db.update(tasks).set({ isMainTask: 1 }).where(eq(tasks.id, main.id)).run()
+    const child = createSubtask(db, main.id, { title: 'Side quest' })
+    const linked = () =>
+      (goalDetail(db, 'T', g)?.tasks ?? []).map((t) => t.taskId).includes(child.id)
+    expect(linked()).toBe(true)
+    const out = await call(
+      boardUpdatePATCH as Handler,
+      asPerson({ params: { taskId: child.id }, body: { goalId: null } }),
+    )
+    expect(out.status).toBe(200)
+    expect(linked()).toBe(false)
+  })
+
+  it('pages revisions, serves one by number, and refuses fractions and junk', async () => {
+    const made = await call(
+      home.homePagesPOST,
+      asPerson({ params: { teamId: 'T' }, body: { title: 'Log', body: 'a' } }),
+    )
+    const pageId = (made.body['page'] as { id: string }).id
+    for (const body of ['b', 'c'])
+      await call(home.homePagePATCH, asPerson({ params: { teamId: 'T', pageId }, body: { body } }))
+    const page1 = await call(
+      home.homePageRevisionsGET,
+      req({ params: { teamId: 'T', pageId }, query: { limit: '2' } }),
+    )
+    expect(page1.body).toMatchObject({ nextBefore: 2 })
+    expect(
+      (page1.body['revisions'] as Array<{ revision: number; body?: string }>).map((r) => [
+        r.revision,
+        r.body,
+      ]),
+    ).toEqual([
+      [3, undefined],
+      [2, undefined],
+    ])
+    const one = await call(
+      home.homePageRevisionGET,
+      req({ params: { teamId: 'T', pageId, revision: '1' } }),
+    )
+    expect(one.body['revision']).toMatchObject({ revision: 1, body: 'a' })
+    expect(
+      (
+        await call(
+          home.homePageRevisionGET,
+          req({ params: { teamId: 'T', pageId, revision: '9' } }),
+        )
+      ).status,
+    ).toBe(404)
+    for (const query of [{ limit: '2.5' }, { limit: '0' }, { before: 'x' }])
+      expect(
+        (await call(home.homePageRevisionsGET, req({ params: { teamId: 'T', pageId }, query })))
+          .status,
+      ).toBe(400)
+    const k = createTeamKpi(getDb(), 'T', { name: 'NPS', source: 'person' }, PERSON)
+    if (!k.ok) throw new Error(k.reason)
+    const frac = await call(
+      home.homeKpiValuesGET,
+      req({ params: { teamId: 'T', kpiId: k.value.id }, query: { limit: '2.5' } }),
+    )
+    expect(frac).toEqual({ status: 400, body: { ok: false, error: 'invalid' } })
+  })
+
+  it('deleting a team removes its Home settings and its goals', async () => {
+    const { teamsDELETE } = await import('../teams')
+    const db = getDb()
+    const g = goalOn('U')
+    setTeamHomeSettings(db, 'U', { leadWritesStatus: true })
+    expect(getSetting(db, teamHomeSettingKey('U'))).not.toBeNull()
+    const out = await call(teamsDELETE as unknown as Handler, asPerson({ params: { id: 'U' } }))
+    expect(out.status).toBeLessThan(300)
+    expect(getSetting(db, teamHomeSettingKey('U'))).toBeNull()
+    expect(getTeamGoal(db, 'U', g)).toBeNull()
   })
 
   it('maps refusals to statuses', () => {

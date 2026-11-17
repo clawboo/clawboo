@@ -1,10 +1,12 @@
 // The lead-written status line, for teams that turned it on (off by default; it
 // costs model calls). Every 15 minutes this looks at those teams and, for each
-// whose board moved since its last line, at most once every 6 hours and 4 times a
-// day (`takeLeadStatusAsk`), posts a short ask into the team chat for the lead.
+// whose board moved past every point already seen, at most once every 6 hours
+// counting asks and lines together, and 4 asks a day (`takeLeadStatusAsk`), posts a
+// short ask into the team chat for the lead. A lead that cannot hold the tool is
+// never asked (./leadStatus).
 // The ask shows in the chat as "Routine · Home status line", so a person can see
 // what the lead was asked and what it cost. The lead answers with the Tasks tool
-// `write_home_summary`, which keeps to the same limits.
+// `write_home_summary`; a line that answers the ask always lands.
 
 import { takeLeadStatusAsk, teams, teamsWithLeadStatus, type ClawbooDb } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
@@ -17,6 +19,7 @@ import {
   type EnqueueUserMessageInput,
   type EnqueueUserMessageResult,
 } from '../teamChat/teamOrchestrator'
+import { leadCanWriteStatus } from './leadStatus'
 
 export const STATUS_ASK_INTERVAL_MS = 15 * 60 * 1000
 export const STATUS_ASK_ROUTINE_NAME = 'Home status line'
@@ -46,7 +49,10 @@ export async function askLeadsForStatus(deps: StatusAskDeps = {}): Promise<strin
   const asked: string[] = []
   for (const teamId of teamsWithLeadStatus(db, live)) {
     if (!resolveServerOrchestrated(db, teamId)) continue
-    if (!takeLeadStatusAsk(db, teamId, deps.now)) continue
+    // The lead may have changed since the line was turned on: never ask one that
+    // cannot write it.
+    if (!takeLeadStatusAsk(db, teamId, deps.now, { leadCanWrite: leadCanWriteStatus(db, teamId) }))
+      continue
     const enqueue =
       deps.enqueue ??
       ((id: string, input: EnqueueUserMessageInput) =>

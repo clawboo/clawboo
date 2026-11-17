@@ -62,7 +62,10 @@ export const KPI_PERIOD_MS: Readonly<Record<KpiPeriod, number | null>> = {
 export const HOME_TITLE_MAX_CHARS = 200
 export const HOME_DESCRIPTION_MAX_CHARS = 20_000
 export const GOAL_UPDATE_MAX_CHARS = 20_000
+/** A page body a person writes. */
 export const PAGE_BODY_MAX_CHARS = 200_000
+/** A page body an agent writes: much less, so a looping agent cannot fill the file. */
+export const AGENT_PAGE_BODY_MAX_CHARS = 50_000
 export const KPI_NOTE_MAX_CHARS = 2_000
 export const KPI_UNIT_MAX_CHARS = 40
 export const SOURCE_URL_MAX_CHARS = 2_000
@@ -74,10 +77,19 @@ export const MAX_GOALS_PER_TEAM = 100
 export const MAX_KPIS_PER_TEAM = 60
 /** Suggestions waiting for a person, per team. */
 export const MAX_OPEN_KPI_SUGGESTIONS = 10
-/** Pages a team may have that are not archived. */
+// Pages. A person is never stopped from editing or reverting a page: these caps
+// hold agents only, so a looping agent cannot lock a page or the team's pages.
+/** Pages a team may have that are not archived, before agents may start no more. */
 export const MAX_PAGES_PER_TEAM = 300
-/** Revisions one page may have. */
-export const MAX_PAGE_REVISIONS = 500
+/** New pages one agent may start on a team in a rolling day. */
+export const AGENT_PAGES_PER_DAY = 10
+/** Revisions a page may have before agents may add no more (people still may). */
+export const AGENT_PAGE_REVISION_CAP = 200
+/** Revisions one agent may add to one page in a rolling hour. */
+export const AGENT_PAGE_REVISIONS_PER_HOUR = 6
+/** The revision list's page size: its default and its most. */
+export const PAGE_REVISIONS_LIST_DEFAULT = 50
+export const PAGE_REVISIONS_LIST_MAX = 200
 /** Drafts waiting on one goal. */
 export const MAX_OPEN_DRAFTS_PER_GOAL = 5
 /** Values one KPI may take in a rolling day. */

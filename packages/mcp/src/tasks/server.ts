@@ -1347,9 +1347,9 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   if (opts?.unverifiedCaller === true)
     for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES, 'write_plan'])
       withheld.add(name)
-  // Home's writes are attributed to the agent: with no verified agent there is no one
-  // to attribute them to, so an unidentified caller gets Home's reads only.
-  if (opts?.unverifiedCaller === true || !boundAgentId)
+  // Home's writes are recorded with the agent, on its team: a caller with no verified
+  // agent, or an agent bound to no team, gets Home's reads only.
+  if (opts?.unverifiedCaller === true || !boundAgentId || !boundTeamId)
     for (const name of HOME_WRITE_TOOL_NAMES) withheld.add(name)
   const active = (
     chatRun

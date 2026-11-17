@@ -24,6 +24,7 @@ import {
   executionProcesses,
   orchestrationEvents,
   teamKpiValues,
+  teamPageRevisions,
   tasks,
   teams,
 } from '../../schema'
@@ -46,13 +47,20 @@ import {
   reportAgentKpiValue,
   suggestTeamKpi,
 } from '../kpis'
-import { loadGoalTeams, loadTaskLinkRows, resolveGoalLinks } from '../links'
+import {
+  loadGoalTeams,
+  loadTaskLinkRows,
+  resolveGoalLinks,
+  resolveTaskGoal,
+  setTaskGoal,
+} from '../links'
 import { computeMetric, statusSentence, teamSnapshot } from '../metrics'
 import { allTeamsHome, goalDetail, teamHome } from '../overview'
 import {
   agentWritePage,
   archiveTeamPage,
   createTeamPage,
+  getPageRevision,
   listPageRevisions,
   listTeamPages,
   revertTeamPage,
@@ -60,12 +68,20 @@ import {
 } from '../pages'
 import {
   getHomeSummary,
+  LEAD_STATUS_MAX_PER_DAY,
   LEAD_STATUS_MIN_GAP_MS,
   setTeamHomeSettings,
   takeLeadStatusAsk,
   writeHomeSummary,
 } from '../summary'
-import { DAY_MS, MAX_KPI_VALUES_PER_DAY, type HomeActor } from '../types'
+import {
+  AGENT_PAGE_BODY_MAX_CHARS,
+  AGENT_PAGE_REVISION_CAP,
+  AGENT_PAGE_REVISIONS_PER_HOUR,
+  DAY_MS,
+  MAX_KPI_VALUES_PER_DAY,
+  type HomeActor,
+} from '../types'
 import {
   createPublishedUpdate,
   discardGoalUpdate,
@@ -174,6 +190,41 @@ describe('goal links', () => {
     expect(links.get(grandchild.id)).toEqual({ goalId: g, via: 'request' })
   })
 
+  it('unlinking a task under a goal-linked request takes it and its work off the goal', () => {
+    const g = goal('T', 'Launch')
+    const main = createTask(db, { title: 'Request', teamId: 'T', goalId: g })
+    db.update(tasks).set({ isMainTask: 1 }).where(eq(tasks.id, main.id)).run()
+    const child = createSubtask(db, main.id, { title: 'Side quest' })
+    const grandchild = createSubtask(db, child.id, { title: 'Deeper' })
+    expect(resolveTaskGoal(db, child.id)?.goalId).toBe(g)
+    expect(setTaskGoal(db, child.id, null)).toBe(true)
+    expect(resolveTaskGoal(db, child.id)).toBeNull()
+    expect(resolveTaskGoal(db, grandchild.id)).toBeNull()
+    // New work under it takes no goal either.
+    expect(createSubtask(db, child.id, { title: 'Later' }).goalId).toBeNull()
+    expect(resolveTaskGoal(db, main.id)?.goalId).toBe(g)
+    // A new task made with an explicit "no goal" under the request is off it too.
+    const off = createTask(db, { title: 'Off', teamId: 'T', parentTaskId: main.id, goalId: null })
+    expect(resolveTaskGoal(db, off.id)).toBeNull()
+  })
+
+  it("changing a request's goal moves the work that inherited the old one", () => {
+    const g1 = goal('T', 'Old')
+    const g2 = goal('T', 'New')
+    const g3 = goal('T', 'Other')
+    const main = createTask(db, { title: 'Request', teamId: 'T', goalId: g1 })
+    db.update(tasks).set({ isMainTask: 1 }).where(eq(tasks.id, main.id)).run()
+    const a = createSubtask(db, main.id, { title: 'A' })
+    const deep = createSubtask(db, a.id, { title: 'A1' })
+    const b = createSubtask(db, main.id, { title: 'B', goalId: g3 })
+    expect(a.goalId).toBe(g1)
+    setTaskGoal(db, main.id, g2)
+    expect(getTask(db, a.id)?.goalId).toBe(g2)
+    expect(getTask(db, deep.id)?.goalId).toBe(g2)
+    // Work a person put on another goal stays there.
+    expect(getTask(db, b.id)?.goalId).toBe(g3)
+  })
+
   it('reads a stored goal of another team as none', () => {
     const onU = goal('U', 'U goal')
     const t = createTask(db, { title: 'Moved', teamId: 'T' })
@@ -274,16 +325,41 @@ describe('goal updates', () => {
     expect(kinds).toContain('goal_update_published')
   })
 
-  it('a second draft by the same agent replaces its first; other agents stack', () => {
+  it("an agent's next draft rewrites its open one in place; other agents stack", () => {
     const g = goal('T', 'G')
-    const first = draftGoalUpdate(db, { goalId: g, teamId: 'T', body: 'One', agent: BEA })
-    draftGoalUpdate(db, { goalId: g, teamId: 'T', body: 'Two', agent: BEA })
+    const first = draftGoalUpdate(db, {
+      goalId: g,
+      teamId: 'T',
+      body: 'One',
+      agent: BEA,
+      executionId: 'ex-1',
+    })
+    if (!first.ok) throw new Error(first.reason)
+    const second = draftGoalUpdate(db, {
+      goalId: g,
+      teamId: 'T',
+      body: 'Two',
+      health: 'at_risk',
+      agent: BEA,
+      executionId: 'ex-2',
+    })
+    if (!second.ok) throw new Error(second.reason)
+    expect(second.value).toMatchObject({
+      id: first.value.id,
+      body: 'Two',
+      health: 'at_risk',
+      executionId: 'ex-2',
+    })
+    expect(second.value.createdAt).toBeGreaterThanOrEqual(first.value.createdAt)
     draftGoalUpdate(db, { goalId: g, teamId: 'T', body: 'Cy', agent: CY })
-    const states = listGoalUpdates(db, g).map((u) => [u.body, u.state])
-    expect(states).toContainEqual(['One', 'discarded'])
-    expect(states).toContainEqual(['Two', 'draft'])
-    expect(states).toContainEqual(['Cy', 'draft'])
-    expect(first.ok).toBe(true)
+    // One row per agent: the table does not grow with every draft.
+    expect(listGoalUpdates(db, g).map((u) => [u.body, u.state])).toEqual(
+      expect.arrayContaining([
+        ['Two', 'draft'],
+        ['Cy', 'draft'],
+      ]),
+    )
+    expect(listGoalUpdates(db, g)).toHaveLength(2)
   })
 
   it('refuses another team, and a discarded draft cannot be published', () => {
@@ -510,13 +586,84 @@ describe('pages', () => {
     const reverted = revertTeamPage(db, 'T', p.value.id, 1, { actor: PERSON })
     if (!reverted.ok) throw new Error(reverted.reason)
     expect(reverted.value).toMatchObject({ revision: 3, body: 'v1' })
-    const revs = listPageRevisions(db, p.value.id)
-    expect(revs.map((r) => [r.revision, r.body, r.revertedFrom])).toEqual([
-      [3, 'v1', 1],
-      [2, 'v2 by agent', null],
-      [1, 'v1', null],
+    const revs = listPageRevisions(db, p.value.id).revisions
+    expect(revs.map((r) => [r.revision, r.bodyChars, r.revertedFrom])).toEqual([
+      [3, 2, 1],
+      [2, 11, null],
+      [1, 2, null],
     ])
     expect(revs[1]?.executionId).toBe('ex-3')
+    expect('body' in revs[0]!).toBe(false)
+    expect(getPageRevision(db, p.value.id, 2)?.body).toBe('v2 by agent')
+    expect(getPageRevision(db, p.value.id, 9)).toBeNull()
+  })
+
+  it('pages the revision list, newest first', () => {
+    const p = createTeamPage(db, 'T', { title: 'Log', body: '0' }, { actor: PERSON })
+    if (!p.ok) throw new Error(p.reason)
+    for (let i = 1; i < 5; i++)
+      updateTeamPage(db, 'T', p.value.id, { body: String(i) }, { actor: PERSON })
+    const first = listPageRevisions(db, p.value.id, { limit: 2 })
+    expect(first.revisions.map((r) => r.revision)).toEqual([5, 4])
+    expect(first.nextBefore).toBe(4)
+    const second = listPageRevisions(db, p.value.id, { before: 4, limit: 2 })
+    expect(second.revisions.map((r) => r.revision)).toEqual([3, 2])
+    const last = listPageRevisions(db, p.value.id, { before: 2, limit: 2 })
+    expect(last).toMatchObject({ nextBefore: null })
+    expect(last.revisions.map((r) => r.revision)).toEqual([1])
+  })
+
+  it('never stops a person editing or reverting a page agents filled', () => {
+    const p = createTeamPage(db, 'T', { title: 'Busy', body: 'mine' }, { actor: PERSON })
+    if (!p.ok) throw new Error(p.reason)
+    // A page a looping agent filled past every cap: the agents' and the 500 every
+    // writer used to be held to.
+    const filled = Math.max(AGENT_PAGE_REVISION_CAP, 500)
+    const now = Date.now()
+    db.insert(teamPageRevisions)
+      .values(
+        Array.from({ length: filled }, (_, i) => ({
+          id: `r${i}`,
+          pageId: p.value.id,
+          revision: i + 2,
+          title: 'Busy',
+          body: `agent ${i}`,
+          author: JSON.stringify(BEA),
+          createdAt: now - DAY_MS,
+        })),
+      )
+      .run()
+    const more = agentWritePage(db, { teamId: 'T', pageId: p.value.id, body: 'again', agent: BEA })
+    expect(more).toEqual({ ok: false, reason: 'too_many' })
+    const edit = updateTeamPage(db, 'T', p.value.id, { body: 'fixed' }, { actor: PERSON })
+    expect(edit.ok && edit.value.revision).toBe(filled + 2)
+    const back = revertTeamPage(db, 'T', p.value.id, 1, { actor: PERSON })
+    expect(back.ok && back.value.body).toBe('mine')
+  })
+
+  it('holds an agent to its hourly share of one page and a smaller body', () => {
+    const p = createTeamPage(db, 'T', { title: 'Notes', body: '' }, { actor: PERSON })
+    if (!p.ok) throw new Error(p.reason)
+    for (let i = 0; i < AGENT_PAGE_REVISIONS_PER_HOUR; i++)
+      expect(
+        agentWritePage(db, { teamId: 'T', pageId: p.value.id, body: `n${i}`, agent: BEA }).ok,
+      ).toBe(true)
+    expect(
+      agentWritePage(db, { teamId: 'T', pageId: p.value.id, body: 'one more', agent: BEA }),
+    ).toEqual({
+      ok: false,
+      reason: 'too_many',
+    })
+    // Another agent has its own share; a person has none.
+    expect(agentWritePage(db, { teamId: 'T', pageId: p.value.id, body: 'cy', agent: CY }).ok).toBe(
+      true,
+    )
+    const big = 'x'.repeat(AGENT_PAGE_BODY_MAX_CHARS + 1)
+    expect(agentWritePage(db, { teamId: 'T', title: 'Huge', body: big, agent: CY })).toEqual({
+      ok: false,
+      reason: 'too_long',
+    })
+    expect(createTeamPage(db, 'T', { title: 'Huge', body: big }, { actor: PERSON }).ok).toBe(true)
   })
 
   it('refuses another team, and an archived page takes no revision', () => {
@@ -536,37 +683,79 @@ describe('pages', () => {
 })
 
 describe("the lead's status line", () => {
-  it('only when turned on, by the lead, when the board moved, inside the limits', () => {
-    const write = (body: string, now: number, isLead = true) =>
-      writeHomeSummary(db, { teamId: 'T', agent: BEA, isLead, body }, now)
+  /** Move T's board: a task changes at `at`. */
+  const move = (at: number): void => {
+    const t = createTask(db, { title: `Work ${at}`, teamId: 'T' })
+    db.update(tasks).set({ updatedAt: at }).where(eq(tasks.id, t.id)).run()
+  }
+  const write = (body: string, now: number, isLead = true) =>
+    writeHomeSummary(db, { teamId: 'T', agent: BEA, isLead, body }, now)
+  const H = LEAD_STATUS_MIN_GAP_MS
+
+  it('never asks about a board that has not moved since the line was turned on', () => {
+    const t0 = Date.now()
+    expect(takeLeadStatusAsk(db, 'T', t0)).toBe(false)
+    setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
+    // Before any line: nothing moved, so no ask, however long it waits.
+    expect(takeLeadStatusAsk(db, 'T', t0 + 1000)).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 3 * H)).toBe(false)
+    move(t0 + 3 * H + 1)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 3 * H + 2)).toBe(true)
+    // Asked once for that move; the same board is not asked about again.
+    expect(takeLeadStatusAsk(db, 'T', t0 + 5 * H)).toBe(false)
+  })
+
+  it('never asks a lead that cannot write the line', () => {
+    setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
+    const t0 = Date.now()
+    move(t0 + 1)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 2, { leadCanWrite: false })).toBe(false)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 2, { leadCanWrite: true })).toBe(true)
+  })
+
+  it('asks on the same clock as lines, so every ask can be answered', () => {
+    setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
+    const t0 = Date.now()
+    move(t0 + 1)
+    expect(takeLeadStatusAsk(db, 'T', t0 + 2)).toBe(true)
+    // A slow answer to the first ask lands.
+    expect(write('Slow line.', t0 + 30 * 60 * 1000).ok).toBe(true)
+    move(t0 + H)
+    // Six hours after the last ask, but not after the last line: no ask, so no
+    // model call whose line would come back too soon.
+    expect(takeLeadStatusAsk(db, 'T', t0 + H + 2)).toBe(false)
+    const next = t0 + 30 * 60 * 1000 + H + 1
+    expect(takeLeadStatusAsk(db, 'T', next)).toBe(true)
+    // The answer lands at once, though the board has not moved since the ask.
+    expect(write('Quick line.', next + 1000).ok).toBe(true)
+    expect(getHomeSummary(db, 'T')?.body).toBe('Quick line.')
+  })
+
+  it('holds a line written unasked to the board and the shared clock', () => {
     const t0 = Date.now()
     expect(write('Hello', t0)).toEqual({ ok: false, reason: 'not_enabled' })
     setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
     expect(write('Hello', t0, false)).toEqual({ ok: false, reason: 'not_lead' })
-    const first = write('Two requests in flight.', t0)
-    expect(first.ok).toBe(true)
-    // Nothing moved on the board since.
-    expect(write('Again', t0 + LEAD_STATUS_MIN_GAP_MS + 1)).toEqual({
-      ok: false,
-      reason: 'unchanged',
-    })
-    const task = createTask(db, { title: 'New work', teamId: 'T' })
-    db.update(tasks)
-      .set({ updatedAt: t0 + 1000 })
-      .where(eq(tasks.id, task.id))
-      .run()
-    expect(write('Too soon', t0 + 60_000)).toEqual({ ok: false, reason: 'too_soon' })
-    expect(write('Later', t0 + LEAD_STATUS_MIN_GAP_MS + 1).ok).toBe(true)
-    expect(getHomeSummary(db, 'T')?.body).toBe('Later')
+    expect(write('Nothing moved.', t0 + 1)).toEqual({ ok: false, reason: 'unchanged' })
+    move(t0 + 2)
+    expect(write('Moved.', t0 + 3).ok).toBe(true)
+    move(t0 + 4)
+    expect(write('Too soon.', t0 + 60_000)).toEqual({ ok: false, reason: 'too_soon' })
+    // An ask counts on the same clock: no ask within 6 hours of a line.
+    expect(takeLeadStatusAsk(db, 'T', t0 + H - 1)).toBe(false)
+    expect(write('Later.', t0 + H + 4).ok).toBe(true)
   })
 
-  it('asks at most once per window, and only when on', () => {
-    expect(takeLeadStatusAsk(db, 'T')).toBe(false)
+  it('asks at most four times a day', () => {
     setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
-    const now = Date.now()
-    expect(takeLeadStatusAsk(db, 'T', now)).toBe(true)
-    expect(takeLeadStatusAsk(db, 'T', now + 1000)).toBe(false)
-    expect(takeLeadStatusAsk(db, 'T', now + LEAD_STATUS_MIN_GAP_MS + 1)).toBe(true)
+    const t0 = Date.now()
+    let asks = 0
+    for (let i = 0; i < 6; i++) {
+      const at = t0 + i * (H / 1.5)
+      move(at)
+      if (takeLeadStatusAsk(db, 'T', at + 1)) asks++
+    }
+    expect(asks).toBeLessThanOrEqual(LEAD_STATUS_MAX_PER_DAY)
   })
 })
 
@@ -634,7 +823,16 @@ describe('overview', () => {
     expect(home.needsYou.total).toBeGreaterThanOrEqual(2)
     expect(home.status.source).toBe('computed')
     setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
-    writeHomeSummary(db, { teamId: 'T', agent: BEA, isLead: true, body: 'All calm.' })
+    const moved = createTask(db, { title: 'Moved', teamId: 'T' })
+    db.update(tasks)
+      .set({ updatedAt: Date.now() + 1000 })
+      .where(eq(tasks.id, moved.id))
+      .run()
+    writeHomeSummary(
+      db,
+      { teamId: 'T', agent: BEA, isLead: true, body: 'All calm.' },
+      Date.now() + 2000,
+    )
     expect(teamHome(db, 'T')?.status).toMatchObject({
       source: 'lead',
       text: 'All calm.',

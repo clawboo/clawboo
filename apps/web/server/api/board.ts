@@ -21,6 +21,7 @@ import {
   appendAudit,
   assignTaskDelegation,
   goalIsOnTeam,
+  setTaskGoal,
   attentionForTask,
   attentionForTasks,
   claimBody,
@@ -802,7 +803,14 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const { status, humanOverride: overrideAsked, completedAt, priority, ...rest } = parsed.data
+    const {
+      status,
+      humanOverride: overrideAsked,
+      completedAt,
+      priority,
+      goalId: goalAsked,
+      ...rest
+    } = parsed.data
     const byPerson = actsAsPerson(req)
     // A task's title and description are the brief its next run is told to follow, so
     // changing them takes a person's request. Sent unchanged, they change nothing.
@@ -815,10 +823,14 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     )
       return
     // Linking a task to a goal is a person's write, and only to a goal of the
-    // task's own team.
-    if (rest.goalId !== undefined && current && rest.goalId !== (current.goalId ?? null)) {
+    // task's own team. Null takes it off every goal, its request's included.
+    const goalChange =
+      goalAsked !== undefined &&
+      current !== null &&
+      (goalAsked !== (current.goalId ?? null) || (goalAsked === null && current.goalCleared !== 1))
+    if (goalChange) {
       if (refuseUnlessPerson(req, res)) return
-      if (rest.goalId !== null && !goalIsOnTeam(db, rest.goalId, current.teamId)) {
+      if (goalAsked !== null && !goalIsOnTeam(db, goalAsked, current.teamId)) {
         res.status(400).json({ error: 'goal_other_team' })
         return
       }
@@ -924,6 +936,9 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         })
       }
     }
+    // The work under it that carried its old goal moves with it (setTaskGoal).
+    if (goalChange && goalAsked !== undefined)
+      runOwnWrite(db, ownWriterOf(req), taskId, () => setTaskGoal(db, taskId, goalAsked))
     const hasFields = Object.keys(fields).length > 0
     const task = hasFields
       ? runOwnWrite(db, ownWriterOf(req), taskId, () => updateTaskFields(db, taskId, fields))

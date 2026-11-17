@@ -16,6 +16,7 @@ import {
   listTasks,
   settings,
   teamAgentWakesSettingKey,
+  teamHomeSettingKey,
   stopTasksWaitingToStart,
   teamExists,
   planApprovalSettingKey,
@@ -375,6 +376,7 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
           teamAgentWakesSettingKey(teamId),
           planApprovalSettingKey(teamId),
           chatClearedSettingKey(teamId),
+          teamHomeSettingKey(teamId),
         ]),
       )
       .run()

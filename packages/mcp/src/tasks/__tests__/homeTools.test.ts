@@ -6,8 +6,10 @@
 import {
   agents,
   createDb,
+  createTask,
   createTeamGoal,
   createTeamKpi,
+  getPageRevision,
   getTeamGoal,
   listGoalUpdates,
   listKpiValues,
@@ -128,11 +130,12 @@ describe('Home on the Tasks tools', () => {
     }
     await callText(client, 'write_page', { pageId: made.page.id, body: 'two' })
     expect(
-      listPageRevisions(db, made.page.id).map((r) => [r.revision, r.body, r.executionId]),
+      listPageRevisions(db, made.page.id).revisions.map((r) => [r.revision, r.executionId]),
     ).toEqual([
-      [2, 'two', 'ex-1'],
-      [1, 'one', 'ex-1'],
+      [2, 'ex-1'],
+      [1, 'ex-1'],
     ])
+    expect(getPageRevision(db, made.page.id, 2)?.body).toBe('two')
   })
 
   it('serves an unidentified caller the reads only', async () => {
@@ -149,6 +152,13 @@ describe('Home on the Tasks tools', () => {
       expect(names).not.toContain(write)
   })
 
+  it('serves an agent bound to no team the reads only, as it could write nowhere', async () => {
+    const names = await listToolNames(await connect({ boundScope: { agentId: 'coder' } }))
+    expect(names).toContain('list_goals')
+    for (const write of ['report_kpi', 'suggest_kpi', 'write_page', 'draft_goal_update'])
+      expect(names).not.toContain(write)
+  })
+
   it('offers write_home_summary to the lead only, inside the team’s switch', async () => {
     expect(await listToolNames(await connect(BOUND))).not.toContain('write_home_summary')
     const lead = await connect({ ...BOUND, isLeadAgent: () => true })
@@ -156,6 +166,9 @@ describe('Home on the Tasks tools', () => {
     const off = await callText(lead, 'write_home_summary', { text: 'All calm.' })
     expect(off.isError).toBe(true)
     setTeamHomeSettings(db, 'A', { leadWritesStatus: true })
+    // Nothing on the board moved since it was turned on: a line unasked is refused.
+    expect((await callText(lead, 'write_home_summary', { text: 'All calm.' })).isError).toBe(true)
+    createTask(db, { title: 'New work', teamId: 'A' })
     expect((await callText(lead, 'write_home_summary', { text: 'All calm.' })).isError).toBe(false)
   })
 })
