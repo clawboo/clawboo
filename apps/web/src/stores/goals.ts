@@ -26,6 +26,9 @@ interface GoalsStore {
 }
 
 const inflight = new Map<string, Promise<GoalOption[]>>()
+/** Each team's newest read. A forced read always starts a new one (a goal changed
+ *  after the read in flight began), and only the newest read's answer is kept. */
+const generation = new Map<string, number>()
 
 export const useGoalsStore = create<GoalsStore>((set, get) => ({
   byTeam: {},
@@ -33,7 +36,9 @@ export const useGoalsStore = create<GoalsStore>((set, get) => ({
     const known = get().byTeam[teamId]
     if (known && !force) return Promise.resolve(known)
     const running = inflight.get(teamId)
-    if (running) return running
+    if (running && !force) return running
+    const mine = (generation.get(teamId) ?? 0) + 1
+    generation.set(teamId, mine)
     const read = listGoals(teamId)
       .then((goals) =>
         goals
@@ -48,15 +53,21 @@ export const useGoalsStore = create<GoalsStore>((set, get) => ({
       )
       .catch(() => [] as GoalOption[])
       .then((list) => {
+        // A newer read started meanwhile: its answer is the one to keep.
+        if (generation.get(teamId) !== mine) return get().byTeam[teamId] ?? list
         set((s) => ({ byTeam: { ...s.byTeam, [teamId]: list } }))
         return list
       })
-      .finally(() => inflight.delete(teamId))
+      .finally(() => {
+        if (inflight.get(teamId) === read) inflight.delete(teamId)
+      })
     inflight.set(teamId, read)
     return read
   },
   invalidate: (teamId) => {
-    if (get().byTeam[teamId] === undefined) return
+    // Unknown and not being read: nothing to refresh. A first read in flight began
+    // before the change, so it is read again.
+    if (get().byTeam[teamId] === undefined && !inflight.has(teamId)) return
     void get().load(teamId, true)
   },
 }))
@@ -64,6 +75,7 @@ export const useGoalsStore = create<GoalsStore>((set, get) => ({
 /** Test helper: forget every team's goals. */
 export function resetGoalsStore(): void {
   inflight.clear()
+  generation.clear()
   useGoalsStore.setState({ byTeam: {} })
 }
 

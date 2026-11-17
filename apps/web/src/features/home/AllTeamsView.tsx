@@ -119,7 +119,7 @@ function TeamCard({
       type="button"
       data-testid="home-team-card"
       onClick={() => onPick(team.id)}
-      aria-label={`Open ${team.name} Home`}
+      title={`Open ${team.name} Home`}
       className={`${HOME_CARD} flex min-w-0 cursor-pointer flex-col gap-3 p-4 text-left transition-colors hover:border-border-strong focus-visible:outline-2 focus-visible:outline-offset-2`}
     >
       <span className="flex min-w-0 items-center gap-2.5">
@@ -137,7 +137,7 @@ function TeamCard({
       <span className="text-[13px] leading-snug text-foreground">
         {status.text}
         <span className="mt-0.5 block text-xs text-muted-foreground">
-          {status.source === 'lead' ? 'Written by the lead' : 'Computed from the board'}
+          {status.source === 'lead' ? 'Written by the lead' : 'Computed from the board and runs'}
         </span>
       </span>
       {goals.length > 0 ? (

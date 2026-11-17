@@ -4,7 +4,7 @@
 // edit or discard, and the published history), what its tasks cost, the goals
 // under it and the pages linked to it.
 
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Archive, ChevronLeft, FileText, Pencil, Plus } from 'lucide-react'
@@ -34,6 +34,7 @@ import { Select } from '@/features/shared/Select'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { confirm } from '@/stores/confirm'
 
+import type { GoalDialogContext } from './GoalDialog'
 import { GoalRow } from './GoalRow'
 import {
   actorName,
@@ -76,8 +77,10 @@ export interface GoalPageActions {
   openPage: (pageId: string) => void
   addPage: (goalId: string) => void
   addKpi: (goalId: string) => void
-  addChildGoal: (parentId: string) => void
-  editGoal: (goal: TeamGoal) => void
+  /** A new goal under this one, with the parent's title for the picker. */
+  addChildGoal: (parentId: string, context: GoalDialogContext) => void
+  /** Edit this goal, with what the page knows of its parent and children. */
+  editGoal: (goal: TeamGoal, context: GoalDialogContext) => void
   /** Something on the goal changed: Home's lists read again. */
   changed: () => void
 }
@@ -101,7 +104,11 @@ export function GoalPage({
   actions: GoalPageActions
 }) {
   const [detail, setDetail] = useState<GoalDetail | null>(null)
+  // Only the server saying "no such goal" (a 404) means it is gone. Any other failed
+  // read keeps the last detail on screen and says the read failed, with Try again.
   const [missing, setMissing] = useState(false)
+  const [readFailed, setReadFailed] = useState(false)
+  const [retrying, setRetrying] = useState(false)
 
   const read = useCallback(async () => {
     try {
@@ -110,14 +117,31 @@ export function GoalPage({
         setDetail(got)
         setMissing(false)
       } else setMissing(true)
+      setReadFailed(false)
     } catch {
-      setMissing(true)
+      setReadFailed(true)
     }
   }, [teamId, goalId])
 
   useEffect(() => {
     void read()
   }, [read, reloadKey])
+
+  const retry = async () => {
+    setRetrying(true)
+    await read()
+    setRetrying(false)
+  }
+
+  // Opening a goal moves focus to its title, so a keyboard or screen reader user lands
+  // on the page they opened rather than on the row that is gone.
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const focusedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!detail || focusedFor.current === detail.summary.goal.id) return
+    focusedFor.current = detail.summary.goal.id
+    headingRef.current?.focus()
+  }, [detail])
 
   const changed = () => {
     void read()
@@ -136,6 +160,23 @@ export function GoalPage({
     </button>
   )
 
+  const readFailedNote = readFailed ? (
+    <div
+      role="status"
+      data-testid="goal-read-failed"
+      className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground"
+    >
+      <span className="min-w-0 flex-1">
+        {detail
+          ? 'This goal could not be read again, so what shows may be out of date.'
+          : 'This goal could not be read.'}
+      </span>
+      <Button size="sm" variant="secondary" loading={retrying} onClick={() => void retry()}>
+        Try again
+      </Button>
+    </div>
+  ) : null
+
   if (missing) {
     return (
       <div className="flex flex-col gap-3" data-testid="goal-page">
@@ -143,6 +184,14 @@ export function GoalPage({
         <p className="text-sm text-muted-foreground">
           This goal is not on {teamName} any more. It may have been archived.
         </p>
+      </div>
+    )
+  }
+  if (!detail && readFailed) {
+    return (
+      <div className="flex flex-col gap-3" data-testid="goal-page">
+        {back}
+        {readFailedNote}
       </div>
     )
   }
@@ -208,13 +257,16 @@ export function GoalPage({
     <div className="flex flex-col gap-7" data-testid="goal-page">
       <div className="flex flex-col gap-3">
         {back}
+        {readFailedNote}
         <div className="flex flex-wrap items-start gap-3">
           <span className="mt-2" style={{ opacity: summary.updateMissing ? 0.45 : 1 }}>
             <HealthDot health={goal.health} size={12} />
           </span>
           <div className="min-w-0 flex-1">
             <h2
-              className="m-0 text-section font-semibold tracking-tight text-foreground"
+              ref={headingRef}
+              tabIndex={-1}
+              className="m-0 text-section font-semibold tracking-tight text-foreground outline-none"
               data-testid="goal-title-heading"
             >
               {goal.title}
@@ -259,7 +311,12 @@ export function GoalPage({
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => actions.editGoal(goal)}
+              onClick={() =>
+                actions.editGoal(goal, {
+                  parent,
+                  childCount: Math.max(children.length, summary.childCount),
+                })
+              }
               data-testid="goal-edit"
             >
               <Pencil size={14} aria-hidden />
@@ -446,7 +503,12 @@ export function GoalPage({
             <button
               type="button"
               className={HEADING_ACTION}
-              onClick={() => actions.addChildGoal(goal.id)}
+              onClick={() =>
+                actions.addChildGoal(goal.id, {
+                  parent: { id: goal.id, title: goal.title },
+                  childCount: 0,
+                })
+              }
             >
               <Plus size={13} strokeWidth={2.25} aria-hidden />
               Add goal

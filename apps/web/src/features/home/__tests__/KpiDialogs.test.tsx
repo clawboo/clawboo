@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { KpiValue } from '@clawboo/control-client'
 
-import { HOME_FIXTURE_NOW, makeKpi, makeKpiTile } from '@/__vitest__/homeFixtures'
+import { HOME_FIXTURE_NOW, makeGoalSummary, makeKpi, makeKpiTile } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
 import { useFleetStore } from '@/stores/fleet'
 
@@ -158,6 +158,34 @@ describe('the KPI editor', () => {
     )
     await user.click(within(dialog).getByTestId('kpi-dismiss'))
     expect(onDismiss).toHaveBeenCalledWith(suggested)
+  })
+})
+
+describe("the KPI editor's goal picker", () => {
+  it('names a linked goal that is no longer active instead of showing No goal, and keeps it', async () => {
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.patch('/api/home/teams/:teamId/kpis/:kpiId', async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ kpi: makeKpiTile({ id: 'k1' }) })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <KpiDialog
+        mode={{ kind: 'edit', kpi: makeKpi({ id: 'k1', name: 'Signups', goalId: 'g-done' }) }}
+        onClose={() => {}}
+        teamId="t1"
+        goals={[makeGoalSummary({ id: 'g1', title: 'Launch the beta' })]}
+        onSaved={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('kpi-dialog', {}, T)
+    expect(within(dialog).getByRole('button', { name: 'Goal' })).toHaveTextContent(
+      'A goal that is not active',
+    )
+    await user.click(within(dialog).getByTestId('kpi-save'))
+    await waitFor(() => expect(body).toMatchObject({ goalId: 'g-done' }), T)
   })
 })
 

@@ -3,7 +3,7 @@
 // owner (you or an agent on the team), a target date, and how often an update is
 // expected. Health is set on the goal's page, not here.
 
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 
 import {
   createGoal,
@@ -34,6 +34,15 @@ const NO_PARENT = ''
 const NO_OWNER = ''
 const ME = 'person'
 
+/** What the goal page knows that `goals` may not: `goals` holds active goals only, and
+ *  is empty until the team's Home has loaded (a goal opened from All teams). */
+export interface GoalDialogContext {
+  /** The edited goal's parent, or the parent a new goal goes under. */
+  parent: { id: string; title: string } | null
+  /** How many goals sit under the edited goal. */
+  childCount: number
+}
+
 export function GoalDialog({
   open,
   onClose,
@@ -41,17 +50,19 @@ export function GoalDialog({
   goals,
   editing,
   defaultParentId = null,
+  context = null,
   onSaved,
 }: {
   open: boolean
   onClose: () => void
   teamId: string
-  /** The team's goals, for the parent picker. */
+  /** The team's active goals, for the parent picker. */
   goals: GoalSummary[]
   /** The goal being edited; null for a new one. */
   editing: TeamGoal | null
   /** A new goal under this one (from a goal page's "Add a goal under it"). */
   defaultParentId?: string | null
+  context?: GoalDialogContext | null
   onSaved: (goal: TeamGoal) => void
 }) {
   return (
@@ -69,6 +80,7 @@ export function GoalDialog({
         goals={goals}
         editing={editing}
         defaultParentId={defaultParentId}
+        context={context}
         onSaved={onSaved}
       />
     </Modal>
@@ -81,6 +93,7 @@ function GoalForm({
   goals,
   editing,
   defaultParentId,
+  context,
   onSaved,
 }: {
   onClose: () => void
@@ -88,6 +101,7 @@ function GoalForm({
   goals: GoalSummary[]
   editing: TeamGoal | null
   defaultParentId: string | null
+  context: GoalDialogContext | null
   onSaved: (goal: TeamGoal) => void
 }) {
   const ids = {
@@ -119,15 +133,21 @@ function GoalForm({
   const [busy, setBusy] = useState(false)
 
   // A goal with goals under it stays on top: one level only.
-  const hasChildren = editing ? goals.some((g) => g.goal.parentGoalId === editing.id) : false
-  const parentOptions = goals.filter(
-    (g) => g.goal.parentGoalId === null && g.goal.id !== editing?.id,
-  )
-
-  // The parent picked before may be gone after a refresh.
-  useEffect(() => {
-    if (parentId && !goals.some((g) => g.goal.id === parentId)) setParentId(NO_PARENT)
-  }, [goals, parentId])
+  const hasChildren = editing
+    ? (context?.childCount ?? 0) > 0 || goals.some((g) => g.goal.parentGoalId === editing.id)
+    : false
+  // The parent the goal has (or a new goal goes under) is always offered, even when it
+  // is done, dropped or not loaded: a parent nobody changed is never cleared.
+  const startParent = editing ? editing.parentGoalId : defaultParentId
+  const parentOptions = [
+    ...goals
+      .filter((g) => g.goal.parentGoalId === null && g.goal.id !== editing?.id)
+      .map((g) => ({ value: g.goal.id, label: g.goal.title })),
+  ]
+  if (startParent && !parentOptions.some((o) => o.value === startParent)) {
+    const known = context?.parent?.id === startParent ? context.parent.title : null
+    parentOptions.push({ value: startParent, label: known ?? 'A goal that is not active' })
+  }
 
   const cadenceDays = Number(cadence)
   const cadenceOk = Number.isInteger(cadenceDays) && cadenceDays >= 1 && cadenceDays <= 90
@@ -145,10 +165,14 @@ function GoalForm({
   async function save() {
     if (!canSave) return
     setBusy(true)
+    const parentGoalId = parentId || null
     const input = {
       title: title.trim(),
       description,
-      parentGoalId: hasChildren ? null : parentId || null,
+      // Sent only when the person changed it: an edit never moves a goal by accident.
+      ...(hasChildren || (editing && parentGoalId === editing.parentGoalId)
+        ? {}
+        : { parentGoalId }),
       owner: ownerActor(),
       targetDate: fromDateInput(targetDate),
       updateCadenceDays: cadenceDays,
@@ -221,10 +245,7 @@ function GoalForm({
               value={hasChildren ? NO_PARENT : parentId}
               onChange={setParentId}
               disabled={busy || hasChildren}
-              options={[
-                { value: NO_PARENT, label: 'None (a top goal)' },
-                ...parentOptions.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-              ]}
+              options={[{ value: NO_PARENT, label: 'None (a top goal)' }, ...parentOptions]}
             />
             {hasChildren ? (
               <p className={FIELD_HINT}>It has goals under it, so it stays a top goal.</p>

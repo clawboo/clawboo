@@ -28,6 +28,7 @@ export function GoalRow({
     <button
       type="button"
       data-testid="home-goal-row"
+      data-goal-id={goal.id}
       onClick={() => onOpen(goal.id)}
       className={`${HOME_ROW} flex-col items-stretch gap-1.5 ${indent ? 'pl-8' : ''}`}
     >

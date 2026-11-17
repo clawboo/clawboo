@@ -14,8 +14,9 @@ export const HOME_POLL_MS = 15_000
 export type HomeLoad =
   | { state: 'loading' }
   | { state: 'ready'; data: HomeResponse }
-  /** `missing`: this engine has no Home (an older one), or the team is gone. */
-  | { state: 'error'; missing: boolean }
+  /** `missing`: this engine has no Home routes (an older one). `teamGone`: the
+   *  server has no such team (deleted since), so Home goes back to All teams. */
+  | { state: 'error'; missing: boolean; teamGone: boolean }
 
 export function useHome(teamId: string): { load: HomeLoad; refresh: () => Promise<void> } {
   const [load, setLoad] = useState<HomeLoad>({ state: 'loading' })
@@ -31,11 +32,15 @@ export function useHome(teamId: string): { load: HomeLoad; refresh: () => Promis
       setLoad({ state: 'ready', data })
     } catch (err) {
       if (id !== seq.current) return
-      // A failed poll keeps what is on screen; only a first read shows the error.
-      if (shownFor.current === teamId) return
+      const known = err instanceof HomeRequestError
+      const teamGone = known && err.code === 'team_not_found'
+      // A failed poll keeps what is on screen; only a first read shows the error. A
+      // team that is gone is said even mid-visit, so Home can leave it.
+      if (shownFor.current === teamId && !teamGone) return
       setLoad({
         state: 'error',
-        missing: err instanceof HomeRequestError && err.status === 404,
+        missing: known && err.status === 404 && !teamGone,
+        teamGone,
       })
     }
   }, [teamId])

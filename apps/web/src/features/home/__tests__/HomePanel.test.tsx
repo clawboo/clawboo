@@ -185,7 +185,7 @@ beforeEach(() => {
   resetGoalsStore()
   useToastStore.setState({ toasts: [] })
   useFleetStore.setState({ agents: [{ id: 'a1', name: 'Iris', teamId: 't1' }] as never })
-  useTeamStore.setState({ teams: teams as never, selectedTeamId: 't1' })
+  useTeamStore.setState({ teams: teams as never, selectedTeamId: 't1', hydrated: true })
   useViewStore.setState({ viewMode: { type: 'nav', view: 'home' }, homeFocus: null })
 })
 
@@ -219,7 +219,10 @@ describe('the team picker', () => {
     expect(await screen.findByTestId('all-teams-home', {}, T)).toBeInTheDocument()
     expect(screen.getByTestId('home-totals')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Open Support Home' }))
+    // The card's button reads as its content (name, status, numbers), not a bare label.
+    const card = screen.getByRole('button', { name: /Support.*Nothing in flight\./ })
+    expect(card).not.toHaveAttribute('aria-label')
+    await user.click(card)
     expect(await screen.findByTestId('team-home', {}, T)).toBeInTheDocument()
     expect(reads).toEqual([null, 't2'])
     expect(screen.getByTestId('home-team-picker')).toHaveTextContent('Support')
@@ -281,7 +284,9 @@ describe("a team's Home", () => {
       ).toBeTruthy()
     }
     expect(screen.queryByTestId('home-first-run')).toBeNull()
-    expect(screen.getByTestId('home-status-source')).toHaveTextContent('Computed from the board')
+    expect(screen.getByTestId('home-status-source')).toHaveTextContent(
+      'Computed from the board and runs',
+    )
   })
 
   it('hides empty sections and offers first-run prompts to a team with nothing yet', async () => {
@@ -402,6 +407,78 @@ describe("a team's Home", () => {
     await user.click(within(dialog).getByTestId('goal-save'))
     await waitFor(() => expect(body).toMatchObject({ title: 'Ship it', updateCadenceDays: 7 }), T)
     expect(await screen.findByTestId('goal-title-heading', {}, T)).toHaveTextContent('Ship it')
+  })
+})
+
+describe('when the team goes away', () => {
+  it('falls back to All teams when the last team was deleted', async () => {
+    useTeamStore.setState({ teams: [], selectedTeamId: null, hydrated: true })
+    useViewStore.setState({ homeFocus: { teamId: 't1', goalId: null, nonce: 1 } })
+    serveHome((id) => emptyTeamHome(id, 'Launch'))
+    render(<HomePanel />)
+    // All teams, with no teams to show: its empty state, not the dead team's Home.
+    expect(await screen.findByText('No teams yet', {}, T)).toBeInTheDocument()
+    expect(reads[reads.length - 1]).toBeNull()
+    expect(screen.queryByTestId('team-home')).toBeNull()
+  })
+
+  it('waits for the team list before deciding a team is gone', async () => {
+    useTeamStore.setState({ teams: [], selectedTeamId: 't1', hydrated: false })
+    serveHome((id) => emptyTeamHome(id, 'Launch'))
+    render(<HomePanel />)
+    await waitFor(() => expect(reads).toEqual(['t1']), T)
+    act(() => useTeamStore.getState().hydrateTeams(teams as never))
+    expect(await screen.findByTestId('team-home', {}, T)).toBeInTheDocument()
+  })
+
+  it('falls back to All teams when the server says the team is gone', async () => {
+    server.use(
+      http.get('/api/home', ({ request }) => {
+        const teamId = new URL(request.url).searchParams.get('teamId')
+        reads.push(teamId)
+        return teamId
+          ? HttpResponse.json({ ok: false, error: 'team_not_found' }, { status: 404 })
+          : HttpResponse.json({ scope: 'all', home: emptyAllTeamsHome() })
+      }),
+    )
+    render(<HomePanel />)
+    await waitFor(() => expect(reads).toEqual(['t1', null]), T)
+    expect(screen.queryByText('Home is not available here')).toBeNull()
+    expect(screen.getByTestId('home-team-picker')).toHaveTextContent('All teams')
+  })
+})
+
+describe('focus between Home and a goal', () => {
+  it("lands on the goal's title, and Back returns to its row", async () => {
+    serveHome((id) => fullHome(id))
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', ({ params }) =>
+        HttpResponse.json({
+          goal: {
+            summary: makeGoalSummary({
+              id: String(params.goalId),
+              teamId: 't1',
+              title: 'Grow the list',
+            }),
+            parent: null,
+            children: [],
+            healthHistory: [],
+            tasks: [],
+            kpis: [],
+            updates: [],
+            pages: [],
+          },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<HomePanel />)
+    await screen.findByTestId('team-home', {}, T)
+    await user.click(screen.getAllByTestId('home-goal-row')[1]!)
+    const heading = await screen.findByTestId('goal-title-heading', {}, T)
+    await waitFor(() => expect(heading).toHaveFocus(), T)
+    await user.click(screen.getByTestId('goal-back'))
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('data-goal-id', 'g2'), T)
   })
 })
 

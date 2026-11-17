@@ -95,18 +95,22 @@ function actions(): GoalPageActions {
   }
 }
 
-function renderPage(a = actions()) {
-  render(
+function page(a: GoalPageActions, reloadKey = 0) {
+  return (
     <GoalPage
       teamId="t1"
       teamName="Launch"
       goalId="g1"
       now={HOME_FIXTURE_NOW}
       names={{ meId: 'local', agentName: (id) => (id === 'a1' ? 'Maya' : null) }}
-      reloadKey={0}
+      reloadKey={reloadKey}
       actions={a}
-    />,
+    />
   )
+}
+
+function renderPage(a = actions()) {
+  render(page(a))
   return a
 }
 
@@ -222,6 +226,80 @@ describe('a goal page', () => {
     expect(row).toHaveTextContent('Checked')
     await user.click(row)
     expect(a.openTask).toHaveBeenCalledWith('task-1')
+  })
+
+  it('moves focus to the goal title when it opens', async () => {
+    renderPage()
+    const heading = await screen.findByTestId('goal-title-heading', {}, T)
+    await waitFor(() => expect(heading).toHaveFocus(), T)
+  })
+
+  it('passes what it knows of the parent and children to Edit', async () => {
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', () =>
+        HttpResponse.json({
+          goal: detail({
+            summary: {
+              ...detail().summary,
+              goal: { ...detail().summary.goal, parentGoalId: 'g0' },
+            },
+            parent: { id: 'g0', title: 'Ship 1.0' },
+          }),
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    const a = renderPage()
+    await user.click(await screen.findByTestId('goal-edit', {}, T))
+    expect(a.editGoal).toHaveBeenCalledWith(expect.objectContaining({ id: 'g1' }), {
+      parent: { id: 'g0', title: 'Ship 1.0' },
+      childCount: 0,
+    })
+  })
+
+  it('says a failed read failed, with Try again, rather than calling the goal gone', async () => {
+    let fail = true
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', () =>
+        fail
+          ? HttpResponse.json({ error: 'boom' }, { status: 500 })
+          : HttpResponse.json({ goal: detail() }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    expect(await screen.findByTestId('goal-read-failed', {}, T)).toHaveTextContent(
+      'This goal could not be read.',
+    )
+    expect(screen.queryByText(/not on Launch any more/)).toBeNull()
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByTestId('goal-title-heading', {}, T)).toHaveTextContent(
+      'Launch the beta',
+    )
+    expect(screen.queryByTestId('goal-read-failed')).toBeNull()
+  })
+
+  it('keeps the last good goal on screen when a later read fails', async () => {
+    let fail = false
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', () =>
+        fail
+          ? HttpResponse.json({ error: 'boom' }, { status: 503 })
+          : HttpResponse.json({ goal: detail() }),
+      ),
+    )
+    const a = actions()
+    const { rerender } = render(page(a, 0))
+    await screen.findByTestId('goal-title-heading', {}, T)
+    fail = true
+    // A dialog on Home saved something: the page reads again, and that read fails.
+    rerender(page(a, 1))
+    expect(await screen.findByTestId('goal-read-failed', {}, T)).toHaveTextContent(
+      'could not be read again',
+    )
+    expect(screen.getByTestId('goal-title-heading')).toHaveTextContent('Launch the beta')
+    expect(screen.queryByText(/not on Launch any more/)).toBeNull()
   })
 
   it('says so when the goal is not on the team any more', async () => {

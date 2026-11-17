@@ -39,7 +39,7 @@ import { useToastStore } from '@/stores/toast'
 import { useViewStore } from '@/stores/view'
 
 import { AllTeamsView } from './AllTeamsView'
-import { GoalDialog } from './GoalDialog'
+import { GoalDialog, type GoalDialogContext } from './GoalDialog'
 import { GoalPage } from './GoalPage'
 import { DIALOG_PANEL } from './homeForm'
 import { HomeSettingsDialog } from './HomeSettingsDialog'
@@ -58,6 +58,7 @@ const CLOCK_MS = 30_000
 export function HomePanel() {
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
+  const teamsHydrated = useTeamStore((s) => s.hydrated)
   const homeFocus = useViewStore((s) => s.homeFocus)
   const activeTeams = useMemo(() => teams.filter((t) => !t.isArchived), [teams])
 
@@ -69,6 +70,7 @@ export function HomePanel() {
   const [goalDialog, setGoalDialog] = useState<{
     editing: TeamGoal | null
     parentId: string | null
+    context?: GoalDialogContext
   } | null>(null)
   const [kpiDialog, setKpiDialog] = useState<{ teamId: string; mode: KpiDialogMode } | null>(null)
   const [kpiDetail, setKpiDetail] = useState<KpiTile | null>(null)
@@ -80,16 +82,8 @@ export function HomePanel() {
   const [now, setNow] = useState(() => Date.now())
   const names = useHomeNames()
 
-  // A team that went away (deleted or archived) falls back to All teams.
-  const team = teamFilter === ALL ? null : (activeTeams.find((t) => t.id === teamFilter) ?? null)
-  useEffect(() => {
-    if (teamFilter !== ALL && teams.length > 0 && !team) {
-      setTeamFilter(ALL)
-      setGoalId(null)
-    }
-  }, [teamFilter, team, teams.length])
-
-  // The rail or a goal chip asked for a team (and maybe a goal).
+  // The rail or a goal chip asked for a team (and maybe a goal). Taken before the
+  // fallback below, which then sends a request for a team that is gone to All teams.
   useEffect(() => {
     if (!homeFocus) return
     setTeamFilter(homeFocus.teamId)
@@ -97,12 +91,42 @@ export function HomePanel() {
     useViewStore.getState().clearHomeFocus()
   }, [homeFocus])
 
+  // A team that went away (deleted or archived) falls back to All teams, once the
+  // team list is known: before it loads, an unknown id may simply not be read yet.
+  // Deleting the last team leaves no teams, which still falls back.
+  const team = teamFilter === ALL ? null : (activeTeams.find((t) => t.id === teamFilter) ?? null)
+  const teamsKnown = teamsHydrated || teams.length > 0
+  useEffect(() => {
+    if (teamFilter !== ALL && teamsKnown && !team) {
+      setTeamFilter(ALL)
+      setGoalId(null)
+    }
+  }, [teamFilter, team, teamsKnown])
+
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), CLOCK_MS)
     return () => clearInterval(id)
   }, [])
 
   const { load, refresh } = useHome(teamFilter)
+
+  // The server says the team is gone (deleted in another tab, say): back to All teams.
+  const teamGone = load.state === 'error' && load.teamGone
+  useEffect(() => {
+    if (teamGone && teamFilter !== ALL) {
+      setTeamFilter(ALL)
+      setGoalId(null)
+    }
+  }, [teamGone, teamFilter])
+
+  // Back from a goal page returns focus to that goal's row, so a keyboard or screen
+  // reader user carries on from where they were.
+  const panelRef = useRef<HTMLDivElement>(null)
+  const returnToGoal = useRef<string | null>(null)
+  const closeGoal = () => {
+    returnToGoal.current = goalId
+    setGoalId(null)
+  }
   // Each read moves the clock on, so its own times read from the moment it landed.
   useEffect(() => {
     if (load.state === 'ready') setNow(Date.now())
@@ -119,6 +143,16 @@ export function HomePanel() {
       ? load.data.home
       : null
   const goals: GoalSummary[] = teamHome?.goals ?? []
+
+  useEffect(() => {
+    const id = returnToGoal.current
+    if (goalId !== null || !id || !teamHome) return
+    returnToGoal.current = null
+    const rows = panelRef.current?.querySelectorAll<HTMLElement>('[data-testid="home-goal-row"]')
+    Array.from(rows ?? [])
+      .find((row) => row.dataset.goalId === id)
+      ?.focus()
+  }, [goalId, teamHome])
 
   // After a write: Home reads again, the open goal page too, and the Board's goal
   // chips and pickers forget the team's goals.
@@ -240,7 +274,7 @@ export function HomePanel() {
   )
 
   let body: ReactNode
-  if (load.state === 'error' && !teamHome && !allHome) {
+  if (load.state === 'error' && !load.teamGone && !teamHome && !allHome) {
     body = (
       <EmptyState
         icon={RefreshCw}
@@ -270,15 +304,15 @@ export function HomePanel() {
         names={names}
         reloadKey={goalReload}
         actions={{
-          back: () => setGoalId(null),
+          back: closeGoal,
           openGoal: setGoalId,
           openTask: setTaskId,
           openKpi: setKpiDetail,
           openPage: (pageId) => setPageTarget({ pageId }),
           addPage: (id) => setPageTarget({ newPage: true, goalId: id }),
           addKpi: (id) => setKpiDialog({ teamId: team.id, mode: { kind: 'new', goalId: id } }),
-          addChildGoal: (parentId) => setGoalDialog({ editing: null, parentId }),
-          editGoal: (goal) => setGoalDialog({ editing: goal, parentId: null }),
+          addChildGoal: (parentId, context) => setGoalDialog({ editing: null, parentId, context }),
+          editGoal: (goal, context) => setGoalDialog({ editing: goal, parentId: null, context }),
           changed: () => afterWrite(team.id),
         }}
       />
@@ -309,7 +343,7 @@ export function HomePanel() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-background" data-testid="home-panel">
+    <div ref={panelRef} className="flex h-full flex-col bg-background" data-testid="home-panel">
       {header}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1120px] px-4 pb-10 pt-3 sm:px-6">{body}</div>
@@ -358,6 +392,7 @@ export function HomePanel() {
             goals={goals}
             editing={goalDialog?.editing ?? null}
             defaultParentId={goalDialog?.parentId ?? null}
+            context={goalDialog?.context ?? null}
             onSaved={(goal) => {
               afterWrite(team.id)
               if (!goalDialog?.editing) setGoalId(goal.id)

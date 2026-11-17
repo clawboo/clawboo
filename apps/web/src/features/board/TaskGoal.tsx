@@ -38,7 +38,7 @@ export function GoalChip({ goalId, teamId }: { goalId: string; teamId: string | 
     <span
       data-testid="task-goal-chip"
       title={`Goal: ${goal.title}`}
-      className="inline-flex max-w-[160px] items-center gap-1 truncate rounded-md border border-border px-1.5 text-xs text-muted-foreground"
+      className="inline-flex max-w-[160px] shrink-0 items-center gap-1 truncate rounded-md border border-border px-1.5 font-sans text-xs normal-case tracking-normal text-muted-foreground"
     >
       <Target size={11} strokeWidth={2} aria-hidden className="shrink-0" />
       <span className="truncate">{goal.title}</span>

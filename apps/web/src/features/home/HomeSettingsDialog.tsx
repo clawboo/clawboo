@@ -2,7 +2,7 @@
 // lead to draft an update for each active goal), and the lead-written status line
 // (off by default, because it costs model calls).
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 
 import {
@@ -35,6 +35,10 @@ export function HomeSettingsDialog({
   onChanged: (settings: TeamHomeSettings) => void
 }) {
   const [busy, setBusy] = useState<'lead' | 'weekly' | null>(null)
+  // What the server last said. A save shows at once, not when Home's next read lands
+  // (and still shows if that read fails); a newer read replaces it.
+  const [current, setCurrent] = useState(settings)
+  useEffect(() => setCurrent(settings), [settings])
 
   async function setLeadWrites(next: boolean) {
     setBusy('lead')
@@ -42,7 +46,10 @@ export function HomeSettingsDialog({
       updateTeamHomeSettings(teamId, { leadWritesStatus: next }),
     )
     setBusy(null)
-    if (saved) onChanged(saved)
+    if (saved) {
+      setCurrent(saved)
+      onChanged(saved)
+    }
   }
 
   async function weekly() {
@@ -51,7 +58,10 @@ export function HomeSettingsDialog({
       success: 'Weekly updates are on. The lead drafts them; you publish them.',
     })
     setBusy(null)
-    if (result) onChanged(result.settings)
+    if (result) {
+      setCurrent(result.settings)
+      onChanged(result.settings)
+    }
   }
 
   return (
@@ -76,7 +86,7 @@ export function HomeSettingsDialog({
               it off in Routines.
             </span>
           </span>
-          {settings.weeklyUpdatesRoutineId ? (
+          {current.weeklyUpdatesRoutineId ? (
             <Button
               size="sm"
               variant="secondary"
@@ -107,13 +117,14 @@ export function HomeSettingsDialog({
               The lead writes the status line
             </span>
             <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-              Off, Home writes one sentence from the board&apos;s numbers. On, the team lead writes
-              it in a short turn, only when the board changed, at most every 6 hours and 4 times a
-              day. Each costs a model call; Home shows the model and run behind it.
+              Off, Home writes one sentence from the board&apos;s numbers and run costs. On, the
+              team lead writes it in a short turn, only when the board changed, at most every 6
+              hours and 4 times a day. Each costs a model call; Home names the lead and the model
+              under the line.
             </span>
           </span>
           <Switch
-            checked={settings.leadWritesStatus}
+            checked={current.leadWritesStatus}
             disabled={busy === 'lead'}
             onChange={(next) => void setLeadWrites(next)}
             label="The lead writes the status line"

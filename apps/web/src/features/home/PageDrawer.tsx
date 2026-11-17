@@ -32,7 +32,7 @@ import { Tabs } from '@/features/shared/Tabs'
 import { confirm } from '@/stores/confirm'
 
 import { actorName, formatDate, relativeTime } from './homeFormat'
-import { FIELD_LABEL, INPUT_CLASS, TEXTAREA_CLASS, FULL_WIDTH } from './homeForm'
+import { FIELD_LABEL, INPUT_CLASS, TEXTAREA_CLASS, FULL_WIDTH, goalOptions } from './homeForm'
 import type { HomeNames } from './useHomeNames'
 import { homeWrite } from './homeWrite'
 
@@ -305,16 +305,31 @@ function PageEditor({
   const [goalId, setGoalId] = useState(page?.goalId ?? defaultGoalId ?? NO_GOAL)
   const [pinned, setPinned] = useState(true)
   const [busy, setBusy] = useState(false)
-  const changed =
-    !page || title.trim() !== page.title || body !== page.body || (goalId || null) !== page.goalId
+  // A new title or text makes a revision; a new goal alone does not.
+  const titleChanged = !page || title.trim() !== page.title
+  const bodyChanged = !page || body !== page.body
+  const goalChanged = !page || (goalId || null) !== page.goalId
+  const changed = titleChanged || bodyChanged || goalChanged
   const canSave = title.trim().length > 0 && changed && !busy
+  const saveNote = !page
+    ? 'Saving makes revision 1.'
+    : titleChanged || bodyChanged
+      ? `Saving makes revision ${page.revision + 1}.`
+      : goalChanged
+        ? 'Saving changes only its goal, so it makes no new revision.'
+        : null
 
   async function save() {
     if (!canSave) return
     setBusy(true)
     const saved = await homeWrite(page ? 'save the page' : 'add the page', () =>
       page
-        ? updatePage(teamId, page.id, { title: title.trim(), body, goalId: goalId || null })
+        ? updatePage(teamId, page.id, {
+            // Only what changed, so a goal-only edit makes no revision.
+            ...(titleChanged ? { title: title.trim() } : {}),
+            ...(bodyChanged ? { body } : {}),
+            ...(goalChanged ? { goalId: goalId || null } : {}),
+          })
         : createPage(teamId, { title: title.trim(), body, goalId: goalId || null, pinned }),
     )
     setBusy(false)
@@ -361,7 +376,7 @@ function PageEditor({
           />
         </div>
         <div className="flex flex-wrap items-end gap-4">
-          {goals.length > 0 ? (
+          {goals.length > 0 || page?.goalId ? (
             <div className="min-w-[200px] flex-1">
               <span className={FIELD_LABEL}>Goal</span>
               <Select
@@ -370,10 +385,7 @@ function PageEditor({
                 value={goalId}
                 onChange={setGoalId}
                 disabled={busy}
-                options={[
-                  { value: NO_GOAL, label: 'No goal' },
-                  ...goals.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-                ]}
+                options={goalOptions(goals, page?.goalId ?? null)}
               />
             </div>
           ) : null}
@@ -392,9 +404,7 @@ function PageEditor({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 border-t border-border px-5 py-3">
-        <span className="text-xs text-muted-foreground">
-          {page ? `Saving makes revision ${page.revision + 1}.` : 'Saving makes revision 1.'}
-        </span>
+        <span className="text-xs text-muted-foreground">{saveNote}</span>
         <span className="flex-1" />
         <Button variant="secondary" onClick={onCancel} disabled={busy}>
           Cancel

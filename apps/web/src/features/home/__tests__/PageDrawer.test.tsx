@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { TeamPageRevision, TeamPageWithBody } from '@clawboo/control-client'
 
-import { HOME_FIXTURE_NOW, makePage } from '@/__vitest__/homeFixtures'
+import { HOME_FIXTURE_NOW, makeGoalSummary, makePage } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
 
 import { PageDrawer } from '../PageDrawer'
@@ -102,19 +102,72 @@ describe('a team page', () => {
     const user = userEvent.setup()
     const onChanged = renderDrawer()
     await user.click(await screen.findByTestId('page-edit', {}, T))
-    expect(screen.getByText('Saving makes revision 3.')).toBeInTheDocument()
     const text = screen.getByTestId('page-body-input')
     await user.clear(text)
     await user.type(text, 'New body')
+    expect(screen.getByText('Saving makes revision 3.')).toBeInTheDocument()
     await user.click(screen.getByTestId('page-save'))
-    await waitFor(
-      () => expect(body).toEqual({ title: 'Launch checklist', body: 'New body', goalId: null }),
-      T,
-    )
+    // Only what changed: the text.
+    await waitFor(() => expect(body).toEqual({ body: 'New body' }), T)
     expect(await screen.findByTestId('page-byline', {}, T)).toHaveTextContent(
       'Revision 3, written by you',
     )
     expect(onChanged).toHaveBeenCalled()
+  })
+
+  it('moves a page to another goal without a new revision, and says so', async () => {
+    let body: unknown = null
+    server.use(
+      http.get('/api/home/teams/:teamId/pages/:pageId', () => HttpResponse.json({ page: page() })),
+      http.patch('/api/home/teams/:teamId/pages/:pageId', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ page: page({ goalId: 'g1' }) })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <PageDrawer
+        target={{ pageId: 'p1' }}
+        onClose={() => {}}
+        teamId="t1"
+        goals={[makeGoalSummary({ id: 'g1', title: 'Launch the beta' })]}
+        now={HOME_FIXTURE_NOW}
+        names={names}
+        onChanged={() => {}}
+      />,
+    )
+    await user.click(await screen.findByTestId('page-edit', {}, T))
+    await user.click(screen.getByRole('button', { name: 'Goal' }))
+    await user.click(await screen.findByRole('option', { name: 'Launch the beta' }))
+    expect(
+      screen.getByText('Saving changes only its goal, so it makes no new revision.'),
+    ).toBeInTheDocument()
+    await user.click(screen.getByTestId('page-save'))
+    await waitFor(() => expect(body).toEqual({ goalId: 'g1' }), T)
+  })
+
+  it('names a linked goal that is no longer active in the editor', async () => {
+    server.use(
+      http.get('/api/home/teams/:teamId/pages/:pageId', () =>
+        HttpResponse.json({ page: page({ goalId: 'g-done' }) }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(
+      <PageDrawer
+        target={{ pageId: 'p1' }}
+        onClose={() => {}}
+        teamId="t1"
+        goals={[makeGoalSummary({ id: 'g1', title: 'Launch the beta' })]}
+        now={HOME_FIXTURE_NOW}
+        names={names}
+        onChanged={() => {}}
+      />,
+    )
+    await user.click(await screen.findByTestId('page-edit', {}, T))
+    expect(screen.getByRole('button', { name: 'Goal' })).toHaveTextContent(
+      'A goal that is not active',
+    )
   })
 
   it('lists who wrote each revision and restores an old one as a new revision', async () => {

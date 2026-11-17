@@ -289,7 +289,7 @@ function StatusLine({ home, now, names }: { home: TeamHome; now: number; names: 
         <p className="m-0 mt-1 text-xs text-muted-foreground" data-testid="home-status-source">
           {lead
             ? `Written by ${actorName(status.author, names)}${status.model ? ` (${status.model})` : ''}`
-            : 'Computed from the board'}
+            : 'Computed from the board and runs'}
           {` · as of ${relativeTime(status.asOf, now)}`}
         </p>
       </div>

@@ -32,7 +32,14 @@ import { Select } from '@/features/shared/Select'
 import { useFleetStore } from '@/stores/fleet'
 
 import { isPointInTime, METRIC_HINT, METRIC_LABEL, PERIOD_LABEL } from './homeFormat'
-import { DIALOG_PANEL, FIELD_HINT, FIELD_LABEL, INPUT_CLASS, FULL_WIDTH } from './homeForm'
+import {
+  DIALOG_PANEL,
+  FIELD_HINT,
+  FIELD_LABEL,
+  INPUT_CLASS,
+  FULL_WIDTH,
+  goalOptions,
+} from './homeForm'
 import { homeWrite } from './homeWrite'
 
 export type KpiDialogMode =
@@ -353,7 +360,7 @@ function KpiForm({
               />
             </div>
           ) : null}
-          {goals.length > 0 ? (
+          {goals.length > 0 || base?.goalId ? (
             <div>
               <span className={FIELD_LABEL}>Goal</span>
               <Select
@@ -362,10 +369,7 @@ function KpiForm({
                 value={goalId}
                 onChange={setGoalId}
                 disabled={busy}
-                options={[
-                  { value: NO_GOAL, label: 'No goal' },
-                  ...goals.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-                ]}
+                options={goalOptions(goals, base?.goalId ?? null)}
               />
             </div>
           ) : null}
