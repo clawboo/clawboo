@@ -413,7 +413,18 @@ export function boardCreatePOST(req: Request, res: Response): void {
       return
     }
     const db = getDb()
-    const { assigneeAgentId, assignToMe, idempotencyKey, priority, ...input } = parsed.data
+    const {
+      assigneeAgentId,
+      assignToMe,
+      idempotencyKey,
+      priority,
+      goalId: goalAsked,
+      ...rest
+    } = parsed.data
+    // Naming a task's goal is a person's choice, as changing it is (see the PATCH).
+    // Any other caller's task takes its parent's goal, as an agent's create does.
+    const input: typeof rest & { goalId?: string | null } =
+      actsAsPerson(req) && goalAsked !== undefined ? { ...rest, goalId: goalAsked } : rest
     if (assigneeAgentId && assignToMe) {
       res.status(400).json({ error: 'one_assignee' })
       return

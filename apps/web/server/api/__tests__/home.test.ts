@@ -243,6 +243,12 @@ describe('Home routes', () => {
     )
     const taskId = (created.body['task'] as { id: string; goalId: string }).id
     expect(getTask(db, taskId)?.goalId).toBe(mine)
+    // A caller that is not a person cannot name a goal: its task takes its parent's.
+    const scripted = await call(
+      boardCreatePOST as Handler,
+      req({ body: { title: 'Scripted', teamId: 'T', goalId: mine } }),
+    )
+    expect(getTask(db, (scripted.body['task'] as { id: string }).id)?.goalId).toBeNull()
     expect(
       (
         await call(
