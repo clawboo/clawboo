@@ -62,6 +62,7 @@ import {
   tasksInRoom,
   type TaskSectionId,
 } from './teamTasks'
+import { GoalChip } from '@/features/board/TaskGoal'
 
 const EMPTY_TASKS = new Map<string, BoardTaskView>()
 
@@ -103,12 +104,15 @@ function subtitleOf(
 
 function TaskRow({
   task,
+  teamId = null,
   onOpen,
   nested = false,
   request = null,
   progress = null,
 }: {
   task: BoardTaskView
+  /** The list's team, for a task row that does not carry its own. */
+  teamId?: string | null
   onOpen: () => void
   /** Drawn under its request's row. */
   nested?: boolean
@@ -133,14 +137,17 @@ function TaskRow({
         <span className="truncate text-[13px] font-medium text-foreground">
           {task.title || 'Untitled task'}
         </span>
-        <span className="truncate text-[11.5px] text-muted-foreground">
-          {task.identifier ? (
-            <span className="font-mono" data-testid="team-task-id">
-              {task.identifier} ·{' '}
-            </span>
-          ) : null}
-          {request && !nested ? `${requestLabel(request)} · ` : ''}
-          {progress ?? subtitleOf(task, assigneeName, me)}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-[11.5px] text-muted-foreground">
+            {task.identifier ? (
+              <span className="font-mono" data-testid="team-task-id">
+                {task.identifier} ·{' '}
+              </span>
+            ) : null}
+            {request && !nested ? `${requestLabel(request)} · ` : ''}
+            {progress ?? subtitleOf(task, assigneeName, me)}
+          </span>
+          {task.goalId ? <GoalChip goalId={task.goalId} teamId={task.teamId ?? teamId} /> : null}
         </span>
       </span>
       {task.assigneeAgentId && <AgentBooAvatar agentId={task.assigneeAgentId} size={20} />}
@@ -193,6 +200,7 @@ function TaskSections({
   emptyHelper,
   onOpen,
   after,
+  teamId = null,
 }: {
   tasks: BoardTaskView[]
   loaded: boolean
@@ -200,6 +208,8 @@ function TaskSections({
   emptyHelper: string
   onOpen: (taskId: string) => void
   after?: ReactNode
+  /** The team the list is for, so a task's goal chip can name its goal. */
+  teamId?: string | null
 }) {
   const groups = useMemo(() => groupTeamTasks(tasks), [tasks])
   const nesting = useMemo(() => buildRequestNesting(tasks), [tasks])
@@ -262,6 +272,7 @@ function TaskSections({
                     <TaskRow
                       key={t.id}
                       task={t}
+                      teamId={teamId}
                       nested={nested}
                       request={request}
                       progress={
@@ -304,6 +315,7 @@ function TaskList({
       approvals={approvals}
       emptyHelper="When the team takes on work from the chat, its tasks show up here."
       onOpen={onOpen}
+      teamId={teamId}
     />
   )
 }

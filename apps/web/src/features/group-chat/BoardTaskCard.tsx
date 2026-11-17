@@ -45,6 +45,7 @@ import type { BoardTaskView } from '@/stores/board'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { useViewStore } from '@/stores/view'
+import { GoalChip } from '@/features/board/TaskGoal'
 
 // Compact pill vocabulary for the chat timeline. Deliberately SHORTER than the
 // board's STATUS_LABEL ("Working", not "In progress") because this pill sits in a
@@ -278,6 +279,9 @@ export const BoardTaskCard = memo(function BoardTaskCard({
                 ·
               </span>
               <time className="tracking-normal normal-case">{formatTimestamp(task.updatedAt)}</time>
+              {task.goalId ? (
+                <GoalChip goalId={task.goalId} teamId={task.teamId ?? teamId} />
+              ) : null}
             </span>
           </div>
         </div>
