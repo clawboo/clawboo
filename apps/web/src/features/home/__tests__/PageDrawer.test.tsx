@@ -40,6 +40,7 @@ const revisions: TeamPageRevision[] = [
     revision: 2,
     title: 'Launch checklist',
     body: '# Launch checklist\n\n- Landing page',
+    bodyChars: 34,
     author: MAYA,
     executionId: 'e1',
     revertedFrom: null,
@@ -51,12 +52,33 @@ const revisions: TeamPageRevision[] = [
     revision: 1,
     title: 'Launch checklist',
     body: 'First draft',
+    bodyChars: 11,
     author: ME,
     executionId: null,
     revertedFrom: null,
     createdAt: HOME_FIXTURE_NOW - 86_400_000,
   },
 ]
+
+/** The list answers without words; one revision's words come from its own read. */
+const meta = ({ body: _body, ...rest }: TeamPageRevision) => rest
+
+function serveRevisions(list = revisions) {
+  const reads: string[] = []
+  server.use(
+    http.get('/api/home/teams/:teamId/pages/:pageId/revisions', ({ request }) => {
+      reads.push(new URL(request.url).search)
+      return HttpResponse.json({ revisions: list.map(meta), nextBefore: null })
+    }),
+    http.get('/api/home/teams/:teamId/pages/:pageId/revisions/:revision', ({ params }) => {
+      const found = list.find((r) => r.revision === Number(params.revision))
+      return found
+        ? HttpResponse.json({ revision: found })
+        : HttpResponse.json({ ok: false, error: 'revision_not_found' }, { status: 404 })
+    }),
+  )
+  return reads
+}
 
 function renderDrawer(target: Parameters<typeof PageDrawer>[0]['target'] = { pageId: 'p1' }) {
   const onChanged = vi.fn()
@@ -172,11 +194,9 @@ describe('a team page', () => {
 
   it('lists who wrote each revision and restores an old one as a new revision', async () => {
     let reverted: unknown = null
+    serveRevisions()
     server.use(
       http.get('/api/home/teams/:teamId/pages/:pageId', () => HttpResponse.json({ page: page() })),
-      http.get('/api/home/teams/:teamId/pages/:pageId/revisions', () =>
-        HttpResponse.json({ revisions }),
-      ),
       http.post('/api/home/teams/:teamId/pages/:pageId/revert', async ({ request }) => {
         reverted = await request.json()
         return HttpResponse.json({
@@ -189,13 +209,43 @@ describe('a team page', () => {
     await screen.findByTestId('page-byline', {}, T)
     await user.click(screen.getByRole('tab', { name: /History/ }))
     const list = await screen.findByTestId('page-revisions', {}, T)
-    expect(list).toHaveTextContent('Written by Maya in a run')
-    expect(list).toHaveTextContent('Written by you')
+    expect(list).toHaveTextContent('Written by Maya in a run, 34 characters')
+    expect(list).toHaveTextContent('Written by you, 11 characters')
     await user.click(within(list).getByRole('button', { name: /Revision 1/ }))
-    expect(screen.getByTestId('page-revision-preview')).toHaveTextContent('First draft')
+    // Its words are read when it is picked.
+    expect(
+      await within(screen.getByTestId('page-revision-preview')).findByText('First draft', {}, T),
+    ).toBeInTheDocument()
     await user.click(screen.getByTestId('page-restore'))
     await waitFor(() => expect(reverted).toEqual({ revision: 1 }), T)
     expect(await screen.findByTestId('page-byline', {}, T)).toHaveTextContent('Revision 3')
+  })
+
+  it('reads a long history a page at a time', async () => {
+    const older: TeamPageRevision = { ...revisions[1]!, id: 'r0', revision: 0, title: 'Old' }
+    const before: string[] = []
+    server.use(
+      http.get('/api/home/teams/:teamId/pages/:pageId', () => HttpResponse.json({ page: page() })),
+      http.get('/api/home/teams/:teamId/pages/:pageId/revisions', ({ request }) => {
+        const q = new URL(request.url).searchParams
+        before.push(q.get('before') ?? '')
+        return q.get('before') === '1'
+          ? HttpResponse.json({ revisions: [meta(older)], nextBefore: null })
+          : HttpResponse.json({ revisions: revisions.map(meta), nextBefore: 1 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderDrawer()
+    await screen.findByTestId('page-byline', {}, T)
+    await user.click(screen.getByRole('tab', { name: /History/ }))
+    await screen.findByTestId('page-revisions', {}, T)
+    await user.click(screen.getByTestId('page-revisions-older'))
+    await waitFor(
+      () => expect(screen.getAllByRole('button', { name: /^Revision/ })).toHaveLength(3),
+      T,
+    )
+    expect(before).toEqual(['', '1'])
+    expect(screen.queryByTestId('page-revisions-older')).toBeNull()
   })
 
   it('unpins a pinned page', async () => {

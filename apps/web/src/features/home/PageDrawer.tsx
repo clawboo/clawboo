@@ -5,7 +5,7 @@
 // or an agent and its run), and Restore makes a new revision that copies an old
 // one. A page can be pinned to the team's Home, or archived.
 
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Archive, Pencil, Pin, PinOff, RotateCcw, X } from 'lucide-react'
@@ -14,12 +14,14 @@ import {
   archivePage,
   createPage,
   getPage,
+  getPageRevision,
   listPageRevisions,
   revertPage,
   setPagePinned,
   updatePage,
   type GoalSummary,
   type TeamPageRevision,
+  type TeamPageRevisionMeta,
   type TeamPageWithBody,
 } from '@clawboo/control-client'
 
@@ -30,6 +32,7 @@ import { Select } from '@/features/shared/Select'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { Tabs } from '@/features/shared/Tabs'
 import { confirm } from '@/stores/confirm'
+import { useToastStore } from '@/stores/toast'
 
 import { actorName, formatDate, relativeTime } from './homeFormat'
 import { FIELD_LABEL, INPUT_CLASS, TEXTAREA_CLASS, FULL_WIDTH, goalOptions } from './homeForm'
@@ -423,6 +426,14 @@ function PageEditor({
   )
 }
 
+/** How many revisions the history reads at a time. */
+const REVISIONS_PAGE = 50
+
+type RevisionPreview =
+  | { revision: number; state: 'loading' }
+  | { revision: number; state: 'ready'; data: TeamPageRevision }
+  | { revision: number; state: 'missing' | 'failed' }
+
 function PageHistory({
   teamId,
   page,
@@ -436,16 +447,25 @@ function PageHistory({
   names: HomeNames
   onRestored: (page: TeamPageWithBody) => void
 }) {
-  const [revisions, setRevisions] = useState<TeamPageRevision[] | null>(null)
+  // The list is newest first and without words, a page at a time; one revision's
+  // words are read when it is picked.
+  const [revisions, setRevisions] = useState<TeamPageRevisionMeta[] | null>(null)
+  const [nextBefore, setNextBefore] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
-  const [picked, setPicked] = useState<number | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [preview, setPreview] = useState<RevisionPreview | null>(null)
   const [busy, setBusy] = useState(false)
+  const pickedRef = useRef<number | null>(null)
 
   useEffect(() => {
     let live = true
-    listPageRevisions(teamId, page.id)
+    setRevisions(null)
+    setFailed(false)
+    listPageRevisions(teamId, page.id, { limit: REVISIONS_PAGE })
       .then((list) => {
-        if (live) setRevisions(list)
+        if (!live) return
+        setRevisions(list.revisions)
+        setNextBefore(list.nextBefore)
       })
       .catch(() => {
         if (live) setFailed(true)
@@ -454,6 +474,43 @@ function PageHistory({
       live = false
     }
   }, [teamId, page.id, page.revision])
+
+  async function showOlder() {
+    if (nextBefore === null) return
+    setLoadingMore(true)
+    try {
+      const list = await listPageRevisions(teamId, page.id, {
+        before: nextBefore,
+        limit: REVISIONS_PAGE,
+      })
+      setRevisions((now) => [...(now ?? []), ...list.revisions])
+      setNextBefore(list.nextBefore)
+    } catch {
+      useToastStore
+        .getState()
+        .addToast({ type: 'error', message: 'Couldn’t read older revisions. Please try again.' })
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  async function pick(revision: number) {
+    if (pickedRef.current === revision) {
+      pickedRef.current = null
+      setPreview(null)
+      return
+    }
+    pickedRef.current = revision
+    setPreview({ revision, state: 'loading' })
+    try {
+      const data = await getPageRevision(teamId, page.id, revision)
+      // A later pick wins over a slow read for an earlier one.
+      if (pickedRef.current !== revision) return
+      setPreview(data ? { revision, state: 'ready', data } : { revision, state: 'missing' })
+    } catch {
+      if (pickedRef.current === revision) setPreview({ revision, state: 'failed' })
+    }
+  }
 
   if (failed) return <p className="text-sm text-muted-foreground">The history could not be read.</p>
   if (!revisions) {
@@ -465,20 +522,18 @@ function PageHistory({
     )
   }
 
-  const shown = revisions.find((r) => r.revision === picked) ?? null
-
-  async function restore(r: TeamPageRevision) {
+  async function restore(revision: number) {
     setBusy(true)
     const saved = await homeWrite(
       'restore the revision',
-      () => revertPage(teamId, page.id, r.revision),
-      {
-        success: `Restored revision ${r.revision} as revision ${page.revision + 1}.`,
-      },
+      () => revertPage(teamId, page.id, revision),
+      { success: `Restored revision ${revision} as revision ${page.revision + 1}.` },
     )
     setBusy(false)
     if (saved) onRestored(saved)
   }
+
+  const picked = preview?.revision ?? null
 
   return (
     <div className="flex flex-col gap-4">
@@ -488,7 +543,7 @@ function PageHistory({
             <button
               type="button"
               aria-pressed={picked === r.revision}
-              onClick={() => setPicked(picked === r.revision ? null : r.revision)}
+              onClick={() => void pick(r.revision)}
               className={[
                 'flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]',
                 picked === r.revision ? 'bg-foreground/[0.04]' : '',
@@ -510,34 +565,63 @@ function PageHistory({
                   ? `Written by ${actorName(r.author, names)}${r.executionId ? ' in a run' : ''}`
                   : `Written by ${actorName(r.author, names)}`}
                 {r.revertedFrom !== null ? `, restoring revision ${r.revertedFrom}` : ''}
+                {`, ${r.bodyChars.toLocaleString('en-US')} ${r.bodyChars === 1 ? 'character' : 'characters'}`}
               </span>
             </button>
           </li>
         ))}
       </ol>
-      {shown ? (
+      {nextBefore !== null ? (
+        <div>
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={loadingMore}
+            onClick={() => void showOlder()}
+            data-testid="page-revisions-older"
+          >
+            Show older revisions
+          </Button>
+        </div>
+      ) : null}
+      {preview ? (
         <div className="rounded-xl border border-border p-4" data-testid="page-revision-preview">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground">{shown.title}</span>
-            <span className="flex-1" />
-            {shown.revision !== page.revision ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                loading={busy}
-                onClick={() => void restore(shown)}
-                data-testid="page-restore"
-              >
-                <RotateCcw size={14} aria-hidden />
-                Restore this revision
-              </Button>
-            ) : null}
-          </div>
-          <div className="min-w-0 break-words text-sm text-foreground [&>*:first-child]:mt-0">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-              {shown.body || '_Empty_'}
-            </ReactMarkdown>
-          </div>
+          {preview.state === 'loading' ? (
+            <div className="flex flex-col gap-2">
+              <Skeleton height={16} width="40%" />
+              <Skeleton height={14} />
+            </div>
+          ) : preview.state === 'ready' ? (
+            <>
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-sm font-semibold text-foreground">{preview.data.title}</span>
+                <span className="flex-1" />
+                {preview.revision !== page.revision ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={busy}
+                    onClick={() => void restore(preview.revision)}
+                    data-testid="page-restore"
+                  >
+                    <RotateCcw size={14} aria-hidden />
+                    Restore this revision
+                  </Button>
+                ) : null}
+              </div>
+              <div className="min-w-0 break-words text-sm text-foreground [&>*:first-child]:mt-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+                  {preview.data.body || '_Empty_'}
+                </ReactMarkdown>
+              </div>
+            </>
+          ) : (
+            <p className="m-0 text-sm text-muted-foreground">
+              {preview.state === 'missing'
+                ? 'That revision is not there any more.'
+                : 'That revision could not be read.'}
+            </p>
+          )}
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">Pick a revision to read it.</p>
