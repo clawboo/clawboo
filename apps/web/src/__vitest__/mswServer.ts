@@ -12,6 +12,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
 import { catalogHandlers } from './catalogFixtures'
+import { homeHandlers } from './homeFixtures'
 
 // Default handlers persist across resetHandlers(). The GitHub star count is the
 // one cross-origin call the panels make on mount (GitHubStarButton lives in many
@@ -34,6 +35,8 @@ export const server = setupServer(
   // mount, and detail sheets fetch bodies, so without these any test rendering
   // MarketplacePanel or CreateTeamModal trips onUnhandledRequest.
   ...catalogHandlers,
+  // Home's reads (team and All teams), empty by default: see homeFixtures.
+  ...homeHandlers,
   http.get('https://api.github.com/repos/clawboo/clawboo', () =>
     HttpResponse.json({ stargazers_count: 0 }),
   ),
