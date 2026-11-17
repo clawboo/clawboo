@@ -39,6 +39,8 @@ export type RoomedBoardChange = BoardChange & {
   assigneePerson?: string | null
   /** A card that only holds a plan. */
   planHolder?: boolean
+  /** The team goal the task itself names, or null. */
+  goalId?: string | null
 }
 
 export function publishBoardChangeWithAttention(
@@ -61,6 +63,7 @@ export function publishBoardChangeWithAttention(
       : {
           ...change,
           roomId,
+          ...(row ? { goalId: row.goalId ?? null } : {}),
           ...(row?.isMainTask === 1 ? { isMainTask: true } : {}),
           ...(isPlanHolder(row?.sourceDelegationId) ? { planHolder: true } : {}),
         }

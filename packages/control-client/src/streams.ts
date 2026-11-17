@@ -119,6 +119,8 @@ export const boardChangeFrameSchema = z.object({
   isMainTask: z.boolean().optional(),
   /** A card that only holds a plan. */
   planHolder: z.boolean().optional(),
+  /** The team goal the task itself names (its own `goalId`), or null. */
+  goalId: z.string().nullable().optional(),
 })
 export type BoardChangeFrame = z.infer<typeof boardChangeFrameSchema>
 

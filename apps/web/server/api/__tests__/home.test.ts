@@ -322,3 +322,48 @@ describe('Home routes', () => {
     expect([...client.KPI_STATUSES]).toEqual([...homeDb.KPI_STATUSES])
   })
 })
+
+describe("a board change frame names the task's goal", () => {
+  let dir: string
+  let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-home-frame-'))
+    await mkdir(path.join(dir, '.clawboo'), { recursive: true })
+    prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
+    process.env['HOME'] = dir
+    process.env['CLAWBOO_HOME'] = path.join(dir, '.clawboo')
+    expect(getDbPath().startsWith(dir)).toBe(true)
+    const now = Date.now()
+    getDb()
+      .insert(teams)
+      .values({ id: 'T', name: 'Team T', icon: 'i', color: 'c', createdAt: now, updatedAt: now })
+      .run()
+  })
+
+  afterEach(async () => {
+    resetDb()
+    if (prevHome === undefined) delete process.env['HOME']
+    else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('carries goalId, so a card can show its goal without a reload', async () => {
+    const { publishBoardChangeWithAttention } =
+      await import('../../lib/teamChat/publishBoardChange')
+    const { subscribeBoardChange } = await import('../../lib/teamChat/boardChangeBus')
+    const db = getDb()
+    const g = createTeamGoal(db, 'T', { title: 'Launch' }, PERSON)
+    if (!g.ok) throw new Error(g.reason)
+    const t = createTask(db, { title: 'Linked', teamId: 'T', goalId: g.value.id })
+    const frames: Array<Record<string, unknown>> = []
+    const stop = subscribeBoardChange('T', (c) => frames.push(c as Record<string, unknown>))
+    publishBoardChangeWithAttention(db, 'T', { id: t.id, title: t.title })
+    stop()
+    expect(frames[0]?.['goalId']).toBe(g.value.id)
+  })
+})
