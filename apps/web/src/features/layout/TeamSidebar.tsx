@@ -520,8 +520,10 @@ export function TeamSidebar({
             team={team}
             selected={team.id === selectedTeamId}
             onClick={() => {
+              // The team's Home: opens Home on the team, or switches Home to it
+              // when Home is already open.
               selectTeam(team.id)
-              useViewStore.getState().openTeamspace(team.id)
+              useViewStore.getState().openHome(team.id)
             }}
             onContextMenu={(e) => {
               e.preventDefault()

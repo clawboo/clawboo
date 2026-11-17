@@ -50,6 +50,9 @@ const PANEL_SOURCES: Record<NavView, RetryableLazy<ComponentType>> = {
       },
     })),
   ),
+  home: createRetryableLazy(() =>
+    import('@/features/home/HomePanel').then((m) => ({ default: m.HomePanel })),
+  ),
   connectors: createRetryableLazy(() =>
     import('@/features/connectors/ConnectorsPanel').then((m) => ({ default: m.ConnectorsPanel })),
   ),

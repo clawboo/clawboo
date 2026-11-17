@@ -14,6 +14,7 @@ beforeEach(() => {
     viewHistory: { past: [], future: [] },
     boardFocus: null,
     boardNeedsYouFocus: null,
+    homeFocus: null,
   })
 })
 
@@ -21,7 +22,7 @@ describe('moving between views', () => {
   it('pushes the page it leaves onto past, and every kind of move counts', () => {
     view().navigateTo('board')
     view().openAgent('a1')
-    view().openTeamspace('t1')
+    view().openHome('t1')
     view().openGroupChat('t1', 'r1')
     view().openBooZero()
     view().setViewMode({ type: 'welcome' })
@@ -30,7 +31,7 @@ describe('moving between views', () => {
       { type: 'nav', view: 'graph' },
       { type: 'nav', view: 'board' },
       { type: 'agent', agentId: 'a1' },
-      { type: 'teamspace', teamId: 't1' },
+      { type: 'nav', view: 'home' },
       { type: 'groupChat', teamId: 't1', roomId: 'r1' },
       { type: 'booZero' },
       { type: 'welcome' },
@@ -56,7 +57,7 @@ describe('moving between views', () => {
   })
 
   it('replaces a page that went away without leaving it in the history', () => {
-    view().openTeamspace('t1')
+    view().openGroupChat('t1')
     view().replaceViewMode({ type: 'welcome' })
     expect(view().viewMode).toEqual({ type: 'welcome' })
     expect(view().viewHistory.past).toEqual([{ type: 'nav', view: 'graph' }])
@@ -94,19 +95,40 @@ describe('stepping back and forward', () => {
   })
 
   it('skips and drops the pages the caller says are gone', () => {
-    view().openTeamspace('gone')
+    view().openGroupChat('gone')
     view().openAgent('a1')
-    view().openTeamspace('gone')
+    view().openGroupChat('gone')
     view().navigateTo('board')
 
-    const usable = (m: ViewMode) => !(m.type === 'teamspace' && m.teamId === 'gone')
+    const usable = (m: ViewMode) => !(m.type === 'groupChat' && m.teamId === 'gone')
     expect(view().stepViewHistory('back', usable)).toEqual({ type: 'agent', agentId: 'a1' })
     // The deleted team's page that was stepped over is gone from the history.
     expect(view().viewHistory.past).toEqual([
       { type: 'nav', view: 'graph' },
-      { type: 'teamspace', teamId: 'gone' },
+      { type: 'groupChat', teamId: 'gone' },
     ])
     expect(view().stepViewHistory('back', usable)).toEqual({ type: 'nav', view: 'graph' })
+  })
+})
+
+describe('Home', () => {
+  it('opens Home with a one-shot request for the team and goal', () => {
+    view().openHome('t1', 'g1')
+    expect(view().viewMode).toEqual({ type: 'nav', view: 'home' })
+    expect(view().homeFocus).toMatchObject({ teamId: 't1', goalId: 'g1' })
+    const first = view().homeFocus!.nonce
+    // Asking again on Home is a new request, but not a new page in the history.
+    view().openHome('t1', 'g1')
+    expect(view().homeFocus!.nonce).toBe(first + 1)
+    expect(view().viewHistory.past).toEqual([{ type: 'nav', view: 'graph' }])
+    view().clearHomeFocus()
+    expect(view().homeFocus).toBeNull()
+  })
+
+  it('keeps the request it has when opened with no team', () => {
+    view().openHome()
+    expect(view().viewMode).toEqual({ type: 'nav', view: 'home' })
+    expect(view().homeFocus).toBeNull()
   })
 })
 
@@ -126,7 +148,7 @@ describe('sameView', () => {
         { type: 'groupChat', teamId: 't1', roomId: 'r1' },
       ),
     ).toBe(false)
-    expect(sameView({ type: 'agent', agentId: 'a1' }, { type: 'teamspace', teamId: 'a1' })).toBe(
+    expect(sameView({ type: 'agent', agentId: 'a1' }, { type: 'groupChat', teamId: 'a1' })).toBe(
       false,
     )
   })

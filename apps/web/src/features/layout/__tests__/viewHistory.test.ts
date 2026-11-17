@@ -65,9 +65,9 @@ describe('viewStillExists', () => {
   it('needs the agent, or a live team, behind the page', () => {
     expect(viewStillExists({ type: 'agent', agentId: 'a1' }, teams, ['a1'])).toBe(true)
     expect(viewStillExists({ type: 'agent', agentId: 'gone' }, teams, ['a1'])).toBe(false)
-    expect(viewStillExists({ type: 'teamspace', teamId: 't1' }, teams, [])).toBe(true)
+    expect(viewStillExists({ type: 'groupChat', teamId: 't1' }, teams, [])).toBe(true)
     expect(viewStillExists({ type: 'groupChat', teamId: 'old' }, teams, [])).toBe(false)
-    expect(viewStillExists({ type: 'teamspace', teamId: 'gone' }, teams, [])).toBe(false)
+    expect(viewStillExists({ type: 'groupChat', teamId: 'gone' }, teams, [])).toBe(false)
     expect(viewStillExists({ type: 'nav', view: 'board' }, [], [])).toBe(true)
     expect(viewStillExists({ type: 'booZero' }, [], [])).toBe(true)
   })
@@ -106,7 +106,7 @@ describe('viewStillExists', () => {
 describe('goBack and goForward', () => {
   it('select the team of the page they land on, and none for Boo Zero', () => {
     const v = useViewStore.getState()
-    v.openTeamspace('t1')
+    v.openGroupChat('t1')
     v.openBooZero()
     v.openGroupChat('t2')
 
@@ -115,7 +115,7 @@ describe('goBack and goForward', () => {
     expect(useTeamStore.getState().selectedTeamId).toBeNull()
 
     goBack()
-    expect(useViewStore.getState().viewMode).toEqual({ type: 'teamspace', teamId: 't1' })
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'groupChat', teamId: 't1' })
     expect(useTeamStore.getState().selectedTeamId).toBe('t1')
 
     goForward()
@@ -129,7 +129,7 @@ describe('goBack and goForward', () => {
     useTeamStore.setState({ selectedTeamId: 't1' })
     v.openAgent('writer')
     useTeamStore.setState({ selectedTeamId: 't2' })
-    v.openTeamspace('t2')
+    v.openGroupChat('t2')
 
     goBack()
     expect(useViewStore.getState().viewMode).toEqual({ type: 'agent', agentId: 'writer' })
@@ -157,7 +157,7 @@ describe('goBack and goForward', () => {
     const v = useViewStore.getState()
     v.openAgent('a1')
     v.openAgent('deleted')
-    v.openTeamspace('old')
+    v.openGroupChat('old')
     v.navigateTo('board')
 
     goBack()

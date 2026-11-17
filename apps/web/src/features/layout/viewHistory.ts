@@ -36,8 +36,6 @@ export function viewStillExists(
       if (!mode.roomId || !rooms?.loadedTeams.has(mode.teamId)) return true
       return (rooms.roomsByTeam.get(mode.teamId) ?? []).some((r) => r.id === mode.roomId)
     }
-    case 'teamspace':
-      return teams.some((t) => t.id === mode.teamId && !t.isArchived)
     default:
       return true
   }
@@ -58,7 +56,7 @@ function usableNow(mode: ViewMode): boolean {
  *  every other page leave the selection where it is. */
 function followTeam(mode: ViewMode): void {
   const { selectTeam, teams } = useTeamStore.getState()
-  if (mode.type === 'groupChat' || mode.type === 'teamspace') selectTeam(mode.teamId)
+  if (mode.type === 'groupChat') selectTeam(mode.teamId)
   else if (mode.type === 'booZero') selectTeam(null)
   else if (mode.type === 'agent') {
     const teamId = useFleetStore.getState().agents.find((a) => a.id === mode.agentId)?.teamId

@@ -15,6 +15,9 @@ import { scopedLocalStorage } from '@/lib/clientStorage'
 // rule in `lib/topBar.ts` builds its set from this, so adding a view here keeps
 // that rule in sync automatically (every nav panel hosts the Star pill inline).
 export const NAV_VIEWS = [
+  // Home: one page for every team (a team picker like the Board's), with each
+  // team's goals, KPIs, pinned pages and a status line.
+  'home',
   'graph',
   'fleet',
   'cost',
@@ -47,8 +50,6 @@ export type ViewMode =
       /** One of the team's chat rooms; null/absent = the team's own group chat. */
       roomId?: string | null
     }
-  /** The team's overview: its graph and every task from all its rooms. */
-  | { type: 'teamspace'; teamId: string }
 
 /** A task the Board should open in its detail drawer the next time it renders
  *  (set by "Open on board" from a chat task card). `nonce` makes a second
@@ -56,6 +57,16 @@ export type ViewMode =
 export interface BoardFocus {
   taskId: string
   teamId: string | null
+  nonce: number
+}
+
+/** A request for Home to show a team (or All teams), and with `goalId` that
+ *  goal's page (set by a click on a team in the rail, and by a goal chip on the
+ *  Board). Consumed once, like `BoardFocus`. */
+export interface HomeFocus {
+  /** A team id, or `all`. */
+  teamId: string
+  goalId: string | null
   nonce: number
 }
 
@@ -102,8 +113,6 @@ export function sameView(a: ViewMode, b: ViewMode): boolean {
         a.teamId === (b as typeof a).teamId &&
         (a.roomId ?? null) === ((b as typeof a).roomId ?? null)
       )
-    case 'teamspace':
-      return a.teamId === (b as typeof a).teamId
     default:
       return true
   }
@@ -156,8 +165,13 @@ interface ViewStore {
   /** Open the team group chat view, or one of the team's chat rooms. */
   openGroupChat: (teamId: string, roomId?: string | null) => void
 
-  /** Open the team's overview (graph + tasks from every room). */
-  openTeamspace: (teamId: string) => void
+  /** Pending "show this team / goal" request for Home (consumed once). */
+  homeFocus: HomeFocus | null
+  /** Switch to Home on `teamId` (a team id or `all`; null keeps Home's team),
+   *  and with `goalId` open that goal's page. */
+  openHome: (teamId?: string | null, goalId?: string | null) => void
+  /** Home took the request. */
+  clearHomeFocus: () => void
 
   /** Whether the whole left sidebar (team rail + agent column) is collapsed. */
   columnCollapsed: boolean
@@ -278,7 +292,13 @@ export const useViewStore = create<ViewStore>((set, get) => ({
       moveTo(s, roomId ? { type: 'groupChat', teamId, roomId } : { type: 'groupChat', teamId }),
     ),
 
-  openTeamspace: (teamId) => set((s) => moveTo(s, { type: 'teamspace', teamId })),
+  homeFocus: null,
+  openHome: (teamId = null, goalId = null) =>
+    set((s) => ({
+      ...moveTo(s, { type: 'nav', view: 'home' }),
+      homeFocus: teamId ? { teamId, goalId, nonce: (s.homeFocus?.nonce ?? 0) + 1 } : s.homeFocus,
+    })),
+  clearHomeFocus: () => set({ homeFocus: null }),
 
   columnCollapsed: readStored(SIDEBAR_COLLAPSED_KEY) === '1',
   toggleColumnCollapsed: () =>
