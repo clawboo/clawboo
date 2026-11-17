@@ -150,7 +150,25 @@ describe('staleness', () => {
       { value: 1, asOf: NOW - 30 * H, freshness: 'stale' },
     )
     expect(staleWords(t, NOW)).toBe('Stale: last value 1d ago, expected every day')
-    expect(staleWords({ ...t, reading: { ...t.reading, freshness: 'ok' } }, NOW)).toBeNull()
+    const fresh = { ...t, reading: { ...t.reading, asOf: NOW - 2 * H, freshness: 'ok' as const } }
+    expect(staleWords(fresh, NOW)).toBeNull()
+  })
+
+  it('turns stale on the clock once the value passes its threshold', () => {
+    // Read as fresh, then left open: 30 hours on, a daily value is stale.
+    const t = tile(
+      { source: 'person', staleAfterHours: 24 },
+      { value: 1, asOf: NOW - 30 * H, freshness: 'ok' },
+    )
+    expect(staleWords(t, NOW)).toBe('Stale: last value 1d ago, expected every day')
+    expect(staleWords(t, NOW - 7 * H)).toBeNull()
+    // A computed KPI is worked out on read and never goes stale; nor does one with no
+    // threshold, or no value yet.
+    expect(staleWords({ ...t, kpi: { ...t.kpi, source: 'computed' } }, NOW)).toBeNull()
+    expect(staleWords({ ...t, kpi: { ...t.kpi, staleAfterHours: null } }, NOW)).toBeNull()
+    expect(
+      staleWords({ ...t, reading: { ...t.reading, asOf: null, freshness: 'missing' } }, NOW),
+    ).toBeNull()
   })
 })
 

@@ -1,6 +1,7 @@
 // Home settings show what the server saved as soon as it answers, not when Home's
 // next read lands (and still show it if that read fails), and say only what Home
-// shows about a lead-written status line.
+// shows about a lead-written status line. One write runs at a time, since each
+// answer is the whole settings.
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -131,5 +132,48 @@ describe('Home settings', () => {
     const dialog = await screen.findByTestId('home-settings', {}, T)
     expect(dialog).toHaveTextContent('Home names the lead and the model under the line.')
     expect(dialog).not.toHaveTextContent(/run behind it/)
+  })
+})
+
+describe('one settings write at a time', () => {
+  it('holds the lead switch while weekly updates are being turned on', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let puts = 0
+    server.use(
+      http.post('/api/home/teams/:teamId/weekly-updates', async () => {
+        await gate
+        return HttpResponse.json({
+          routineId: 'r1',
+          created: true,
+          settings: { ...defaultHomeSettings(), weeklyUpdatesRoutineId: 'r1' },
+        })
+      }),
+      http.put('/api/home/teams/:teamId/settings', () => {
+        puts += 1
+        return HttpResponse.json({ settings: { ...defaultHomeSettings(), leadWritesStatus: true } })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <HomeSettingsDialog
+        open
+        onClose={() => {}}
+        teamId="t1"
+        teamName="Launch"
+        settings={defaultHomeSettings()}
+        onChanged={() => {}}
+      />,
+    )
+    await user.click(await screen.findByTestId('home-weekly-on', {}, T))
+    const toggle = screen.getByRole('switch', { name: 'The lead writes the status line' })
+    await waitFor(() => expect(toggle).toBeDisabled(), T)
+    await user.click(toggle)
+    expect(puts).toBe(0)
+    release()
+    expect(await screen.findByTestId('home-weekly-manage', {}, T)).toBeInTheDocument()
+    await waitFor(() => expect(toggle).toBeEnabled(), T)
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(puts).toBe(0)
   })
 })

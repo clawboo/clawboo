@@ -1,9 +1,11 @@
 // The KPI editor and a KPI's own dialog: a computed KPI picks from the closed
 // metric list (its unit follows the metric), an agent KPI names who may report
 // it, accepting a suggestion sends the person's edits, and a person types a
-// value into a KPI whose source is a person, then sees it in the history.
+// value into a KPI whose source is a person, then sees it in the history. A save
+// in flight keeps the editor open, a late history read never hides a newer one,
+// and a value left open long enough turns stale.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -316,5 +318,127 @@ describe("a KPI's dialog", () => {
     const dialog = await screen.findByTestId('kpi-detail', {}, T)
     expect(dialog).toHaveTextContent('computed from the board')
     expect(dialog).toHaveTextContent('No agent or person types this number.')
+  })
+})
+
+describe('a KPI save in flight', () => {
+  it('keeps the editor open on Escape until the save lands', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.post('/api/home/teams/:teamId/kpis', async () => {
+        await gate
+        return HttpResponse.json({ kpi: makeKpiTile({ id: 'k-new', source: 'computed' }) })
+      }),
+    )
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <KpiDialog
+        mode={{ kind: 'new' }}
+        onClose={onClose}
+        teamId="t1"
+        goals={[]}
+        onSaved={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('kpi-dialog', {}, T)
+    await user.type(within(dialog).getByTestId('kpi-name'), 'Done this week')
+    await user.click(within(dialog).getByTestId('kpi-save'))
+    await user.keyboard('{Escape}')
+    expect(onClose).not.toHaveBeenCalled()
+    release()
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), T)
+  })
+})
+
+describe("a KPI's dialog over time", () => {
+  const typed = (value: number): KpiValue => ({
+    id: `v${value}`,
+    kpiId: 'k1',
+    value,
+    asOf: HOME_FIXTURE_NOW,
+    reportedBy: { kind: 'person', id: 'local', name: 'You' },
+    executionId: null,
+    taskId: null,
+    sourceUrl: null,
+    note: null,
+    createdAt: HOME_FIXTURE_NOW,
+  })
+
+  it('keeps the history read after a new value when the first read lands late', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let reads = 0
+    server.use(
+      http.get('/api/home/teams/:teamId/kpis/:kpiId/values', async () => {
+        reads += 1
+        if (reads === 1) {
+          await gate
+          return HttpResponse.json({ values: [] })
+        }
+        return HttpResponse.json({ values: [typed(7)] })
+      }),
+      http.post('/api/home/teams/:teamId/kpis/:kpiId/values', () =>
+        HttpResponse.json({
+          value: typed(7),
+          kpi: makeKpiTile(
+            { id: 'k1', name: 'Calls', unit: 'calls' },
+            { value: 7, asOf: HOME_FIXTURE_NOW, latest: typed(7), freshness: 'ok' },
+          ),
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(
+      <KpiDetailDialog
+        tile={makeKpiTile({ id: 'k1', name: 'Calls', unit: 'calls' })}
+        onClose={() => {}}
+        teamId="t1"
+        now={HOME_FIXTURE_NOW}
+        names={names}
+        onEdit={() => {}}
+        onChanged={() => {}}
+        onOpenTask={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('kpi-detail', {}, T)
+    await user.type(within(dialog).getByTestId('kpi-value-input'), '7')
+    await user.click(within(dialog).getByTestId('kpi-add-value-save'))
+    expect(await within(dialog).findByTestId('kpi-history', {}, T)).toHaveTextContent(
+      'Typed by you',
+    )
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(within(dialog).getByTestId('kpi-history')).toHaveTextContent('Typed by you')
+    expect(within(dialog).queryByText('No value typed yet.')).toBeNull()
+  })
+
+  it('turns a value stale while the dialog is open', async () => {
+    server.use(
+      http.get('/api/home/teams/:teamId/kpis/:kpiId/values', () =>
+        HttpResponse.json({ values: [typed(5)] }),
+      ),
+    )
+    const tile = makeKpiTile(
+      { id: 'k1', name: 'Calls', unit: 'calls', staleAfterHours: 1 },
+      { value: 5, asOf: HOME_FIXTURE_NOW - 30 * 60_000, latest: typed(5), freshness: 'ok' },
+    )
+    const props = {
+      tile,
+      onClose: () => {},
+      teamId: 't1',
+      names,
+      onEdit: () => {},
+      onChanged: () => {},
+      onOpenTask: () => {},
+    }
+    const { rerender } = render(<KpiDetailDialog {...props} now={HOME_FIXTURE_NOW} />)
+    const dialog = await screen.findByTestId('kpi-detail', {}, T)
+    expect(dialog).not.toHaveTextContent('Stale')
+    rerender(<KpiDetailDialog {...props} now={HOME_FIXTURE_NOW + 2 * 60 * 60_000} />)
+    expect(screen.getByTestId('kpi-detail')).toHaveTextContent('expected every hour')
   })
 })

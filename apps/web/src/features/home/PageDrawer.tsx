@@ -134,7 +134,8 @@ function PageBody({
       setPagePinned(teamId, page.id, !page.pinned),
     )
     if (saved) {
-      setPage({ ...page, pinned: saved.pinned })
+      // Only the pin changes: a revision saved while the pin was on its way stays.
+      setPage((p) => (p && p.id === saved.id ? { ...p, pinned: saved.pinned } : p))
       onChanged()
     }
   }

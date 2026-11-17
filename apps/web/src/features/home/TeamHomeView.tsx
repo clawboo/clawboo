@@ -4,7 +4,7 @@
 // when it is empty; a team with no goals, KPIs or pages yet gets first-run
 // prompts in their place.
 
-import { useId, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import {
   Bot,
   Calculator,
@@ -65,6 +65,8 @@ export function TeamHomeView({
   names,
   actions,
   closedGoals = [],
+  closedOpen = false,
+  onToggleClosed = () => {},
 }: {
   home: TeamHome
   now: number
@@ -72,6 +74,9 @@ export function TeamHomeView({
   actions: TeamHomeActions
   /** The team's done and dropped goals, for the folded list under Goals. */
   closedGoals?: GoalSummary[]
+  /** Whether that list is unfolded; Home keeps it, so it survives a goal page. */
+  closedOpen?: boolean
+  onToggleClosed?: () => void
 }) {
   const firstRun =
     home.goals.length === 0 && home.kpis.length === 0 && home.pinnedPages.length === 0
@@ -122,7 +127,13 @@ export function TeamHomeView({
       ) : null}
 
       {closedGoals.length > 0 ? (
-        <ClosedGoals goals={closedGoals} now={now} onOpen={actions.openGoal} />
+        <ClosedGoals
+          goals={closedGoals}
+          now={now}
+          open={closedOpen}
+          onToggle={onToggleClosed}
+          onOpen={actions.openGoal}
+        />
       ) : null}
 
       {home.kpis.length > 0 ? (
@@ -284,13 +295,16 @@ export function TeamHomeView({
 function ClosedGoals({
   goals,
   now,
+  open,
+  onToggle,
   onOpen,
 }: {
   goals: GoalSummary[]
   now: number
+  open: boolean
+  onToggle: () => void
   onOpen: (goalId: string) => void
 }) {
-  const [open, setOpen] = useState(false)
   const listId = useId()
   return (
     <section aria-label="Done and dropped goals" data-testid="home-closed-goals" className="-mt-4">
@@ -298,7 +312,7 @@ function ClosedGoals({
         type="button"
         aria-expanded={open}
         aria-controls={listId}
-        onClick={() => setOpen((o) => !o)}
+        onClick={onToggle}
         className={HEADING_ACTION}
         data-testid="home-closed-goals-toggle"
       >

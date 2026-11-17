@@ -73,6 +73,14 @@ export function GoalChip({
   )
 }
 
+/** What a task's goal fields say: the goal it names, the goal it counts toward, and
+ *  how it reaches that one. */
+export interface TaskGoalLink {
+  goalId: string | null
+  effectiveGoalId: string | null
+  goalLinkedVia: GoalLinkVia | null
+}
+
 /** The goal picker in a task's drawer: saved on change, and a link to the goal's
  *  page on Home. */
 export function TaskGoalSelect({
@@ -89,8 +97,9 @@ export function TaskGoalSelect({
   goalId: string | null
   /** The goal it counts toward through its request or a parent, when it names none. */
   inherited?: { goalId: string; via: GoalLinkVia } | null
-  /** The goal shown: called at once, and again with the old one if the save fails. */
-  onChange: (goalId: string | null) => void
+  /** The goal shown: called at once, and again with the old link (an inherited goal
+   *  included) if the save fails. */
+  onChange: (link: TaskGoalLink) => void
   /** The server took the change. */
   onSaved?: () => void
 }) {
@@ -109,8 +118,15 @@ export function TaskGoalSelect({
     const next = value || null
     // "No goal" on a task that inherits one takes it off that goal too.
     if (next === goalId && !(next === null && fromAbove)) return
-    const previous = goalId
-    onChange(next)
+    const previous: TaskGoalLink = goalId
+      ? { goalId, effectiveGoalId: goalId, goalLinkedVia: 'own' }
+      : {
+          goalId: null,
+          effectiveGoalId: inherited?.goalId ?? null,
+          goalLinkedVia: inherited?.via ?? null,
+        }
+    // A goal of its own is what it counts toward; none takes it off an inherited one too.
+    onChange({ goalId: next, effectiveGoalId: next, goalLinkedVia: next ? 'own' : null })
     setSaving(true)
     try {
       await setTaskGoal(taskId, next)

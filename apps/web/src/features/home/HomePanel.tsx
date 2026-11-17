@@ -80,6 +80,10 @@ export function HomePanel() {
   const [pagesOpen, setPagesOpen] = useState(false)
   const [newAnchor, setNewAnchor] = useState<HTMLElement | null>(null)
   const [goalReload, setGoalReload] = useState(0)
+  // The team whose Done and dropped list is unfolded. Kept here, beside the open goal,
+  // so the list is still open on the way back from a goal opened from it, and focus
+  // can return to that goal's row; another team starts folded.
+  const [closedOpenFor, setClosedOpenFor] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const names = useHomeNames()
 
@@ -172,13 +176,25 @@ export function HomePanel() {
     setGoalId(null)
   }
 
+  // Only the newest suggestion asked for opens: a slow read for the one picked first
+  // must not replace the one picked after it, nor open once the dialog was closed or
+  // another KPI dialog opened.
+  const suggestionAsk = useRef(0)
+  const openKpiDialog = useCallback((next: { teamId: string; mode: KpiDialogMode } | null) => {
+    suggestionAsk.current += 1
+    setKpiDialog(next)
+  }, [])
+  const closeKpiDialog = useCallback(() => openKpiDialog(null), [openKpiDialog])
   const reviewSuggestion = useCallback(async (kpiId: string, teamId: string) => {
+    const ask = ++suggestionAsk.current
     try {
       const tiles = await listKpis(teamId)
+      if (ask !== suggestionAsk.current) return
       const kpi = tiles.find((t) => t.kpi.id === kpiId)?.kpi
       if (kpi && kpi.status === 'suggested') setKpiDialog({ teamId, mode: { kind: 'accept', kpi } })
       else useToastStore.getState().addToast({ type: 'info', message: 'That suggestion is gone.' })
     } catch {
+      if (ask !== suggestionAsk.current) return
       useToastStore
         .getState()
         .addToast({ type: 'error', message: 'Couldn’t read the suggestion. Please try again.' })
@@ -191,11 +207,11 @@ export function HomePanel() {
         dismissKpiSuggestion(teamId, kpiId),
       )
       if (done) {
-        setKpiDialog(null)
+        closeKpiDialog()
         afterWrite(teamId)
       }
     },
-    [afterWrite],
+    [afterWrite, closeKpiDialog],
   )
 
   const actions: TeamHomeActions = {
@@ -204,7 +220,7 @@ export function HomePanel() {
     openKpi: setKpiDetail,
     openPage: (pageId) => setPageTarget({ pageId }),
     addGoal: () => setGoalDialog({ editing: null, parentId: null }),
-    addKpi: () => team && setKpiDialog({ teamId: team.id, mode: { kind: 'new' } }),
+    addKpi: () => team && openKpiDialog({ teamId: team.id, mode: { kind: 'new' } }),
     addPage: () => setPageTarget({ newPage: true }),
     reviewSuggestion: (kpiId, teamId) => void reviewSuggestion(kpiId, teamId),
     dismissSuggestion: (kpiId, teamId) => void dismissSuggestion(kpiId, teamId),
@@ -312,7 +328,7 @@ export function HomePanel() {
           openKpi: setKpiDetail,
           openPage: (pageId) => setPageTarget({ pageId }),
           addPage: (id) => setPageTarget({ newPage: true, goalId: id }),
-          addKpi: (id) => setKpiDialog({ teamId: team.id, mode: { kind: 'new', goalId: id } }),
+          addKpi: (id) => openKpiDialog({ teamId: team.id, mode: { kind: 'new', goalId: id } }),
           addChildGoal: (parentId, context) => setGoalDialog({ editing: null, parentId, context }),
           editGoal: (goal, context) => setGoalDialog({ editing: goal, parentId: null, context }),
           changed: () => afterWrite(team.id),
@@ -327,6 +343,10 @@ export function HomePanel() {
         names={names}
         actions={actions}
         closedGoals={closedGoals}
+        closedOpen={closedOpenFor === teamHome.team.id}
+        onToggleClosed={() =>
+          setClosedOpenFor((id) => (id === teamHome.team.id ? null : teamHome.team.id))
+        }
       />
     )
   } else if (allHome) {
@@ -378,7 +398,7 @@ export function HomePanel() {
               label: 'KPI',
               icon: <Lightbulb size={14} aria-hidden />,
               onSelect: () =>
-                setKpiDialog({
+                openKpiDialog({
                   teamId: team.id,
                   mode: { kind: 'new', goalId: goalId ?? null },
                 }),
@@ -416,7 +436,7 @@ export function HomePanel() {
             names={names}
             onEdit={(kpi) => {
               setKpiDetail(null)
-              setKpiDialog({ teamId: team.id, mode: { kind: 'edit', kpi } })
+              openKpiDialog({ teamId: team.id, mode: { kind: 'edit', kpi } })
             }}
             onChanged={() => afterWrite(team.id)}
             onOpenTask={(id) => {
@@ -464,7 +484,7 @@ export function HomePanel() {
 
       <KpiDialog
         mode={kpiDialog?.mode ?? null}
-        onClose={() => setKpiDialog(null)}
+        onClose={closeKpiDialog}
         teamId={kpiDialog?.teamId ?? team?.id ?? ''}
         goals={kpiDialog && kpiDialog.teamId === team?.id ? goals : []}
         onSaved={() => afterWrite(kpiDialog?.teamId ?? null)}

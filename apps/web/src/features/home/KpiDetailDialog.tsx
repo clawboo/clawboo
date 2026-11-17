@@ -3,7 +3,7 @@
 // from, and a source link), a form to type a new value when a person is its
 // source, and Edit and Archive.
 
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Archive, ExternalLink, Pencil } from 'lucide-react'
 
 import {
@@ -111,13 +111,19 @@ function KpiDetailBody({
   const [readFailed, setReadFailed] = useState(false)
   const stored = kpi.source !== 'computed'
 
+  // Only the newest read lands: the first read can answer after the one a new value
+  // started, and must not put back the history without that value.
+  const historyRead = useRef(0)
   const read = useCallback(async () => {
     if (!stored) return
+    const id = ++historyRead.current
     try {
-      setValues(await listKpiValues(teamId, kpi.id, { limit: 50 }))
+      const got = await listKpiValues(teamId, kpi.id, { limit: 50 })
+      if (id !== historyRead.current) return
+      setValues(got)
       setReadFailed(false)
     } catch {
-      setReadFailed(true)
+      if (id === historyRead.current) setReadFailed(true)
     }
   }, [stored, teamId, kpi.id])
 

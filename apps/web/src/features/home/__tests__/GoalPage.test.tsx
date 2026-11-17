@@ -1,8 +1,9 @@
 // A goal's page: an agent's draft update is published (as is, or edited first) or
 // discarded by a person, a person sets health, linked tasks open the board
-// drawer, and cost says when it includes estimates.
+// drawer, and cost says when it includes estimates. Only the newest read of the
+// goal lands.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -310,5 +311,39 @@ describe('a goal page', () => {
     )
     renderPage()
     expect(await screen.findByText(/not on Launch any more/, {}, T)).toBeInTheDocument()
+  })
+})
+
+describe('reads of a goal', () => {
+  it('keeps the newest read when an older one lands after it', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let reads = 0
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', async () => {
+        reads += 1
+        if (reads === 1) {
+          await gate
+          return HttpResponse.json({ goal: detail() })
+        }
+        const newer = detail()
+        newer.summary.goal.title = 'Launch the beta to 100 people'
+        return HttpResponse.json({ goal: newer })
+      }),
+    )
+    const a = actions()
+    const { rerender } = render(page(a, 0))
+    // A write on Home: the page reads again while its first read is still out.
+    rerender(page(a, 1))
+    expect(await screen.findByTestId('goal-title-heading', {}, T)).toHaveTextContent(
+      'Launch the beta to 100 people',
+    )
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(screen.getByTestId('goal-title-heading')).toHaveTextContent(
+      'Launch the beta to 100 people',
+    )
   })
 })

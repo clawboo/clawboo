@@ -1,12 +1,13 @@
 // The goal dialog never moves a goal by accident: a parent the person did not
 // change is kept, even when that parent is done, dropped or not loaded yet (the
 // dialog's goal list holds active goals only, and is empty until the team's Home
-// has loaded). A changed parent is sent.
+// has loaded). A changed parent is sent. The owner is kept the same way, even when
+// it is another person, and a save in flight cannot be closed out from under.
 
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { makeGoal, makeGoalSummary } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
@@ -137,5 +138,89 @@ describe('a new goal under another', () => {
       () => expect(posted).toMatchObject({ title: 'Record the demo', parentGoalId: 'g-done' }),
       T,
     )
+  })
+})
+
+describe("a goal's owner", () => {
+  const alices = makeGoal({
+    id: 'g-child',
+    title: 'Write the posts',
+    owner: { kind: 'person', id: 'alice', name: 'Alice' },
+  })
+
+  it('keeps another person as owner when only the title changes', async () => {
+    const user = userEvent.setup()
+    render(
+      <GoalDialog
+        open
+        onClose={() => {}}
+        teamId="t1"
+        goals={[]}
+        editing={alices}
+        onSaved={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('goal-dialog', {}, T)
+    expect(within(dialog).getByRole('button', { name: 'Owner' })).toHaveTextContent('Alice')
+    const title = within(dialog).getByTestId('goal-title')
+    await user.clear(title)
+    await user.type(title, 'Write the launch posts')
+    await user.click(within(dialog).getByTestId('goal-save'))
+    await waitFor(() => expect(patched).not.toBeNull(), T)
+    expect(patched).toMatchObject({ title: 'Write the launch posts' })
+    expect(patched).not.toHaveProperty('owner')
+  })
+
+  it('sends the owner the person picked', async () => {
+    const user = userEvent.setup()
+    render(
+      <GoalDialog
+        open
+        onClose={() => {}}
+        teamId="t1"
+        goals={[]}
+        editing={alices}
+        onSaved={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('goal-dialog', {}, T)
+    await user.click(within(dialog).getByRole('button', { name: 'Owner' }))
+    await user.click(await screen.findByRole('option', { name: 'You' }))
+    await user.click(within(dialog).getByTestId('goal-save'))
+    await waitFor(
+      () => expect(patched).toMatchObject({ owner: { kind: 'person', id: 'local' } }),
+      T,
+    )
+  })
+})
+
+describe('a save in flight', () => {
+  it('keeps the dialog open on Escape until the save lands', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.patch('/api/home/teams/:teamId/goals/:goalId', async () => {
+        await gate
+        return HttpResponse.json({ goal: makeGoal({ id: 'g-child' }) })
+      }),
+    )
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <GoalDialog
+        open
+        onClose={onClose}
+        teamId="t1"
+        goals={[]}
+        editing={child}
+        onSaved={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('goal-dialog', {}, T)
+    await user.click(within(dialog).getByTestId('goal-save'))
+    await user.keyboard('{Escape}')
+    expect(onClose).not.toHaveBeenCalled()
+    release()
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), T)
   })
 })

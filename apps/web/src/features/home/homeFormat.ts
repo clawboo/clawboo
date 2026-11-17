@@ -240,8 +240,22 @@ export function provenanceWords(
 }
 
 /** Why a value is stale, or null when it is not. */
+/** Whether a KPI's value is stale now: as the server said when it was read, or because
+ *  the clock has since passed the KPI's stale threshold (a tile or dialog left open
+ *  turns stale without a new read). The server's rule: older than `staleAfterHours`. */
+export function isStale(tile: KpiTile, now: number): boolean {
+  const { reading, kpi } = tile
+  if (reading.freshness === 'stale') return true
+  if (reading.freshness !== 'ok' || kpi.source === 'computed') return false
+  return (
+    reading.asOf !== null &&
+    kpi.staleAfterHours !== null &&
+    now - reading.asOf > kpi.staleAfterHours * 60 * 60 * 1000
+  )
+}
+
 export function staleWords(tile: KpiTile, now: number): string | null {
-  if (tile.reading.freshness !== 'stale') return null
+  if (!isStale(tile, now)) return null
   const hours = tile.kpi.staleAfterHours
   const asOf = tile.reading.asOf
   if (asOf === null) return 'Stale'

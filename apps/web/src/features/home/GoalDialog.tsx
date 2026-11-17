@@ -34,6 +34,13 @@ const NO_PARENT = ''
 const NO_OWNER = ''
 const ME = 'person'
 
+/** The owner picker's value for an actor: `ME` for you, else the actor's kind and id. */
+function ownerValue(owner: HomeActor | null | undefined, meId: string): string {
+  if (!owner) return NO_OWNER
+  if (owner.kind === 'person' && owner.id === meId) return ME
+  return `${owner.kind}:${owner.id}`
+}
+
 /** What the goal page knows that `goals` may not: `goals` holds active goals only, and
  *  is empty until the team's Home has loaded (a goal opened from All teams). */
 export interface GoalDialogContext {
@@ -65,10 +72,14 @@ export function GoalDialog({
   context?: GoalDialogContext | null
   onSaved: (goal: TeamGoal) => void
 }) {
+  // Held here so Escape and outside presses cannot close the dialog mid-save: a save
+  // that lands later would otherwise close whatever dialog opened next.
+  const [busy, setBusy] = useState(false)
   return (
     <Modal
       open={open}
       onClose={onClose}
+      dismissible={!busy}
       label={editing ? 'Edit goal' : 'New goal'}
       data-testid="goal-dialog"
       panelClassName={DIALOG_PANEL}
@@ -82,6 +93,8 @@ export function GoalDialog({
         defaultParentId={defaultParentId}
         context={context}
         onSaved={onSaved}
+        busy={busy}
+        setBusy={setBusy}
       />
     </Modal>
   )
@@ -95,6 +108,8 @@ function GoalForm({
   defaultParentId,
   context,
   onSaved,
+  busy,
+  setBusy,
 }: {
   onClose: () => void
   teamId: string
@@ -103,6 +118,8 @@ function GoalForm({
   defaultParentId: string | null
   context: GoalDialogContext | null
   onSaved: (goal: TeamGoal) => void
+  busy: boolean
+  setBusy: (busy: boolean) => void
 }) {
   const ids = {
     heading: useId(),
@@ -121,16 +138,12 @@ function GoalForm({
   const [title, setTitle] = useState(editing?.title ?? '')
   const [description, setDescription] = useState(editing?.description ?? '')
   const [parentId, setParentId] = useState(editing?.parentGoalId ?? defaultParentId ?? NO_PARENT)
-  const [owner, setOwner] = useState(
-    editing?.owner
-      ? editing.owner.kind === 'person'
-        ? ME
-        : `agent:${editing.owner.id}`
-      : NO_OWNER,
-  )
+  // Null until the person picks an owner: until then the goal keeps the owner it has
+  // (another person stays that person), and an edit leaves the owner out entirely.
+  const [pickedOwner, setPickedOwner] = useState<string | null>(null)
+  const owner = pickedOwner ?? ownerValue(editing?.owner, me.id)
   const [targetDate, setTargetDate] = useState(toDateInput(editing?.targetDate ?? null))
   const [cadence, setCadence] = useState(String(editing?.updateCadenceDays ?? 7))
-  const [busy, setBusy] = useState(false)
 
   // A goal with goals under it stays on top: one level only.
   const hasChildren = editing
@@ -153,8 +166,25 @@ function GoalForm({
   const cadenceOk = Number.isInteger(cadenceDays) && cadenceDays >= 1 && cadenceDays <= 90
   const canSave = title.trim().length > 0 && cadenceOk && !busy
 
+  // The owner the goal has is always offered, even when it is another person or an
+  // agent no longer on the team, so the picker never shows an owner it cannot name.
+  const startOwner = editing?.owner ?? null
+  const ownerOptions = [
+    { value: NO_OWNER, label: 'Nobody' },
+    { value: ME, label: me.name && me.name !== 'You' ? `${me.name} (you)` : 'You' },
+    ...teamAgents.map((a) => ({ value: `agent:${a.id}`, label: a.name })),
+  ]
+  const startValue = ownerValue(startOwner, me.id)
+  if (startOwner && !ownerOptions.some((o) => o.value === startValue)) {
+    ownerOptions.splice(2, 0, {
+      value: startValue,
+      label: startOwner.name ?? (startOwner.kind === 'person' ? 'Another person' : 'An agent'),
+    })
+  }
+
   const ownerActor = (): HomeActor | null => {
     if (owner === ME) return { kind: 'person', id: me.id, name: me.name }
+    if (startOwner && owner === startValue) return startOwner
     if (owner.startsWith('agent:')) {
       const id = owner.slice('agent:'.length)
       return { kind: 'agent', id, name: teamAgents.find((a) => a.id === id)?.name ?? null }
@@ -173,7 +203,8 @@ function GoalForm({
       ...(hasChildren || (editing && parentGoalId === editing.parentGoalId)
         ? {}
         : { parentGoalId }),
-      owner: ownerActor(),
+      // Sent only when the person picked one: an edit never changes the owner by accident.
+      ...(editing && pickedOwner === null ? {} : { owner: ownerActor() }),
       targetDate: fromDateInput(targetDate),
       updateCadenceDays: cadenceDays,
     }
@@ -257,13 +288,9 @@ function GoalForm({
               style={FULL_WIDTH}
               aria-label="Owner"
               value={owner}
-              onChange={setOwner}
+              onChange={setPickedOwner}
               disabled={busy}
-              options={[
-                { value: NO_OWNER, label: 'Nobody' },
-                { value: ME, label: me.name && me.name !== 'You' ? `${me.name} (you)` : 'You' },
-                ...teamAgents.map((a) => ({ value: `agent:${a.id}`, label: a.name })),
-              ]}
+              options={ownerOptions}
             />
           </div>
           <div>

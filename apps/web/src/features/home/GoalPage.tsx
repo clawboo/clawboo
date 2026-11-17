@@ -110,16 +110,21 @@ export function GoalPage({
   const [readFailed, setReadFailed] = useState(false)
   const [retrying, setRetrying] = useState(false)
 
+  // Only the newest read lands: one started before a write must not paint the goal as
+  // it was over the read that followed the write.
+  const reading = useRef(0)
   const read = useCallback(async () => {
+    const id = ++reading.current
     try {
       const got = await getGoal(teamId, goalId)
+      if (id !== reading.current) return
       if (got) {
         setDetail(got)
         setMissing(false)
       } else setMissing(true)
       setReadFailed(false)
     } catch {
-      setReadFailed(true)
+      if (id === reading.current) setReadFailed(true)
     }
   }, [teamId, goalId])
 

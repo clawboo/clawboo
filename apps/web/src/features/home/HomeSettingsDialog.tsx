@@ -2,7 +2,7 @@
 // lead to draft an update for each active goal), and the lead-written status line
 // (off by default, because it costs model calls).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 
 import {
@@ -34,17 +34,24 @@ export function HomeSettingsDialog({
   settings: TeamHomeSettings
   onChanged: (settings: TeamHomeSettings) => void
 }) {
+  // One write at a time: each answer is the whole settings, so two in flight would
+  // let the later answer put back what the earlier one changed. The ref turns a
+  // second press away before the controls have re-rendered as disabled.
   const [busy, setBusy] = useState<'lead' | 'weekly' | null>(null)
+  const pending = useRef(false)
   // What the server last said. A save shows at once, not when Home's next read lands
   // (and still shows if that read fails); a newer read replaces it.
   const [current, setCurrent] = useState(settings)
   useEffect(() => setCurrent(settings), [settings])
 
   async function setLeadWrites(next: boolean) {
+    if (pending.current) return
+    pending.current = true
     setBusy('lead')
     const saved = await homeWrite('save the setting', () =>
       updateTeamHomeSettings(teamId, { leadWritesStatus: next }),
     )
+    pending.current = false
     setBusy(null)
     if (saved) {
       setCurrent(saved)
@@ -53,10 +60,13 @@ export function HomeSettingsDialog({
   }
 
   async function weekly() {
+    if (pending.current) return
+    pending.current = true
     setBusy('weekly')
     const result = await homeWrite('turn on weekly updates', () => turnOnWeeklyUpdates(teamId), {
       success: 'Weekly updates are on. The lead drafts them; you publish them.',
     })
+    pending.current = false
     setBusy(null)
     if (result) {
       setCurrent(result.settings)
@@ -104,6 +114,7 @@ export function HomeSettingsDialog({
               size="sm"
               variant="primary"
               loading={busy === 'weekly'}
+              disabled={busy !== null}
               data-testid="home-weekly-on"
               onClick={() => void weekly()}
             >
@@ -136,7 +147,7 @@ export function HomeSettingsDialog({
             checked={current.leadWritesStatus}
             // A lead that cannot write the line is never offered it: turning it on would
             // be refused, so the switch says why instead. One already on can be turned off.
-            disabled={busy === 'lead' || (!current.leadCanWriteStatus && !current.leadWritesStatus)}
+            disabled={busy !== null || (!current.leadCanWriteStatus && !current.leadWritesStatus)}
             onChange={(next) => void setLeadWrites(next)}
             label="The lead writes the status line"
           />

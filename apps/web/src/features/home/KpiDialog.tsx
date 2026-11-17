@@ -67,12 +67,16 @@ export function KpiDialog({
   /** Accept mode's other answer. */
   onDismissSuggestion?: (kpi: TeamKpi) => void
 }) {
+  // Held here so Escape and outside presses cannot close the dialog mid-save: a save
+  // that lands later would otherwise close whatever dialog opened next.
+  const [busy, setBusy] = useState(false)
   const title =
     mode?.kind === 'edit' ? 'Edit KPI' : mode?.kind === 'accept' ? 'Suggested KPI' : 'New KPI'
   return (
     <Modal
       open={mode !== null}
       onClose={onClose}
+      dismissible={!busy}
       label={title}
       data-testid="kpi-dialog"
       panelClassName={DIALOG_PANEL}
@@ -87,6 +91,8 @@ export function KpiDialog({
           goals={goals}
           onSaved={onSaved}
           onDismissSuggestion={onDismissSuggestion}
+          busy={busy}
+          setBusy={setBusy}
         />
       ) : null}
     </Modal>
@@ -101,6 +107,8 @@ function KpiForm({
   goals,
   onSaved,
   onDismissSuggestion,
+  busy,
+  setBusy,
 }: {
   mode: KpiDialogMode
   title: string
@@ -109,6 +117,8 @@ function KpiForm({
   goals: GoalSummary[]
   onSaved: (tile: KpiTile) => void
   onDismissSuggestion?: (kpi: TeamKpi) => void
+  busy: boolean
+  setBusy: (busy: boolean) => void
 }) {
   const ids = { name: useId(), unit: useId(), target: useId(), stale: useId() }
   const base = mode.kind === 'new' ? null : mode.kpi
@@ -134,7 +144,6 @@ function KpiForm({
   const [goalId, setGoalId] = useState(
     base?.goalId ?? (mode.kind === 'new' ? (mode.goalId ?? NO_GOAL) : NO_GOAL),
   )
-  const [busy, setBusy] = useState(false)
 
   const computed = source === 'computed'
   const pointInTime = computed && isPointInTime(metric)

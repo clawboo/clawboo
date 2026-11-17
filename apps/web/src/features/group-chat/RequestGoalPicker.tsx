@@ -3,6 +3,7 @@
 // reaches the server with each message; only a message that makes a request (a
 // main task) uses it.
 
+import { useEffect } from 'react'
 import { Target } from 'lucide-react'
 
 import { useTeamGoals } from '@/features/board/TaskGoal'
@@ -18,6 +19,13 @@ export function RequestGoalPicker({
   onChange: (goalId: string | null) => void
 }) {
   const goals = useTeamGoals(teamId)
+  // A picked goal that is no longer among the team's active goals (done, dropped, or
+  // on another team) is cleared, so a request never carries a goal the picker does not
+  // show. Only once the list is read: while it loads, nothing is known to be gone.
+  const gone = goals !== null && goalId !== null && !goals.some((g) => g.id === goalId)
+  useEffect(() => {
+    if (gone) onChange(null)
+  }, [gone, onChange])
   if (!goals || goals.length === 0) return null
   const shown = goals.some((g) => g.id === goalId) ? goalId : null
   return (

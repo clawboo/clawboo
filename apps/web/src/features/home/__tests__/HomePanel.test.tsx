@@ -1,7 +1,9 @@
 // Home: the team picker starts on the sidebar's team, a team's sections come in
 // the spec's order and hide when empty, a team with nothing yet gets first-run
 // prompts, every KPI says where its value came from, All teams switches the
-// picker, and the rail and goal chips reach it through the view store.
+// picker, and the rail and goal chips reach it through the view store. Done and
+// dropped goals stay folded or open across a goal page, and only the newest
+// suggestion asked for opens.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -459,11 +461,69 @@ describe('done and dropped goals', () => {
     expect(await screen.findByTestId('goal-title-heading', {}, T)).toHaveTextContent('Pick a name')
   })
 
+  it('stays open on the way back from a goal, with focus on its row', async () => {
+    serveHome((id) => fullHome(id))
+    server.use(
+      http.get('/api/home/teams/:teamId/goals', () =>
+        HttpResponse.json({
+          goals: [
+            makeGoalSummary({ id: 'g9', teamId: 't1', title: 'Pick a name', status: 'done' }),
+          ],
+        }),
+      ),
+      http.get('/api/home/teams/:teamId/goals/:goalId', ({ params }) =>
+        HttpResponse.json({
+          goal: {
+            summary: makeGoalSummary({
+              id: String(params.goalId),
+              teamId: 't1',
+              title: 'Pick a name',
+              status: 'done',
+            }),
+            parent: null,
+            children: [],
+            healthHistory: [],
+            tasks: [],
+            kpis: [],
+            updates: [],
+            pages: [],
+          },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<HomePanel />)
+    await user.click(await screen.findByTestId('home-closed-goals-toggle', {}, T))
+    const list = screen.getByTestId('home-closed-goals')
+    await user.click(within(list).getByTestId('home-goal-row'))
+    await screen.findByTestId('goal-title-heading', {}, T)
+    await user.click(screen.getByTestId('goal-back'))
+    expect(await screen.findByTestId('home-closed-goals-toggle', {}, T)).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    await waitFor(() => expect(document.activeElement).toHaveAttribute('data-goal-id', 'g9'), T)
+  })
+
   it('shows no list when every goal is active', async () => {
     serveHome((id) => fullHome(id))
+    let listed = false
+    server.use(
+      http.get('/api/home/teams/:teamId/goals', () => {
+        listed = true
+        return HttpResponse.json({
+          goals: [makeGoalSummary({ id: 'g1', teamId: 't1', title: 'Launch the beta' })],
+        })
+      }),
+    )
     render(<HomePanel />)
     await screen.findByTestId('team-home', {}, T)
-    await waitFor(() => expect(screen.queryByTestId('home-closed-goals')).toBeNull(), T)
+    await waitFor(() => expect(listed).toBe(true), T)
+    // Let the answer land before saying the list is absent.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(screen.queryByTestId('home-closed-goals-toggle')).toBeNull()
   })
 })
 
@@ -546,5 +606,66 @@ describe('when Home cannot be read', () => {
     )
     render(<HomePanel />)
     expect(await screen.findByText('Home is not available here', {}, T)).toBeInTheDocument()
+  })
+})
+
+describe('reviewing a suggested KPI', () => {
+  it('opens the suggestion picked last, even when the first answers later', async () => {
+    useTeamStore.setState({ selectedTeamId: null })
+    const all = emptyAllTeamsHome()
+    const suggestion = (kpiId: string, name: string, teamId: string) => ({
+      kpiId,
+      name,
+      teamId,
+      goalId: null,
+      suggestedBy: { kind: 'agent' as const, id: 'a1', name: 'Iris' },
+      note: null,
+      createdAt: HOME_FIXTURE_NOW,
+    })
+    all.teams = teams.map((t) => ({
+      team: { id: t.id, name: t.name, icon: t.icon, color: null, leaderAgentId: null },
+      status: computedStatus('Nothing in flight.'),
+      goals: [],
+      kpis: [],
+      needsYouCount: 1,
+      spend: emptyTeamHome(t.id).spend,
+    }))
+    all.needsYou = {
+      ...emptyNeedsYou(),
+      total: 2,
+      suggestedKpis: [suggestion('kA', 'Reply time', 't1'), suggestion('kB', 'Open rate', 't2')],
+    }
+    serveHome((id) => emptyTeamHome(id, 'Launch'), all)
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/home/teams/:teamId/kpis', async ({ params }) => {
+        if (params.teamId === 't1') {
+          await gate
+          return HttpResponse.json({
+            kpis: [
+              makeKpiTile({ id: 'kA', teamId: 't1', name: 'Reply time', status: 'suggested' }),
+            ],
+          })
+        }
+        return HttpResponse.json({
+          kpis: [makeKpiTile({ id: 'kB', teamId: 't2', name: 'Open rate', status: 'suggested' })],
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<HomePanel />)
+    const rows = await screen.findAllByTestId('home-needs-suggestion', {}, T)
+    await user.click(within(rows[0]!).getByRole('button', { name: 'Review' }))
+    await user.click(within(rows[1]!).getByRole('button', { name: 'Review' }))
+    const dialog = await screen.findByTestId('kpi-dialog', {}, T)
+    await waitFor(() => expect(within(dialog).getByTestId('kpi-name')).toHaveValue('Open rate'), T)
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(within(screen.getByTestId('kpi-dialog')).getByTestId('kpi-name')).toHaveValue(
+      'Open rate',
+    )
   })
 })

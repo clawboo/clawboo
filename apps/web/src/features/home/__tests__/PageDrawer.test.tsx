@@ -1,8 +1,9 @@
 // A team page: its markdown read with who wrote the revision, an edit that makes
 // a new revision, the history naming each revision's author (a person, or an
-// agent in a run), restore as a new revision, pin, and a new page.
+// agent in a run), restore as a new revision, pin, and a new page. A late pin
+// answer changes only the pin, never an edit saved while it was on its way.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -297,5 +298,43 @@ describe('a team page', () => {
       T,
     )
     expect(await screen.findByTestId('page-byline', {}, T)).toHaveTextContent('Revision 1')
+  })
+})
+
+describe('a pin that answers late', () => {
+  it('keeps a revision saved while the pin was on its way', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/home/teams/:teamId/pages/:pageId', () => HttpResponse.json({ page: page() })),
+      http.post('/api/home/teams/:teamId/pages/:pageId/pin', async () => {
+        await gate
+        return HttpResponse.json({ page: makePage({ id: 'p1', revision: 2, pinned: false }) })
+      }),
+      http.patch('/api/home/teams/:teamId/pages/:pageId', () =>
+        HttpResponse.json({ page: page({ revision: 3, updatedBy: ME, body: 'New body' }) }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderDrawer()
+    await user.click(await screen.findByTestId('page-pin', {}, T))
+    await user.click(screen.getByTestId('page-edit'))
+    const text = screen.getByTestId('page-body-input')
+    await user.clear(text)
+    await user.type(text, 'New body')
+    await user.click(screen.getByTestId('page-save'))
+    expect(await screen.findByTestId('page-byline', {}, T)).toHaveTextContent(
+      'Revision 3, written by you',
+    )
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    await waitFor(
+      () => expect(screen.getByTestId('page-pin')).toHaveAttribute('aria-pressed', 'false'),
+      T,
+    )
+    expect(screen.getByTestId('page-byline')).toHaveTextContent('Revision 3, written by you')
+    expect(screen.getByTestId('page-body')).toHaveTextContent('New body')
   })
 })

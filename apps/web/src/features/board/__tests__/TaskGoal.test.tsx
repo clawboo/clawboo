@@ -93,7 +93,11 @@ describe("the drawer's goal picker", () => {
     const options = (await screen.findAllByRole('option')).map((o) => o.textContent)
     expect(options).toEqual(['No goal', 'Launch the beta', 'Grow the list'])
     await user.click(screen.getByRole('option', { name: 'Grow the list' }))
-    expect(onChange).toHaveBeenCalledWith('g2')
+    expect(onChange).toHaveBeenCalledWith({
+      goalId: 'g2',
+      effectiveGoalId: 'g2',
+      goalLinkedVia: 'own',
+    })
     await waitFor(() => expect(body).toEqual({ goalId: 'g2' }), T)
     await waitFor(() => expect(onSaved).toHaveBeenCalled(), T)
 
@@ -127,7 +131,11 @@ describe("the drawer's goal picker", () => {
     await user.click(select)
     await user.click(await screen.findByRole('option', { name: 'No goal' }))
     await waitFor(() => expect(body).toEqual({ goalId: null }), T)
-    expect(onChange).toHaveBeenCalledWith(null)
+    expect(onChange).toHaveBeenCalledWith({
+      goalId: null,
+      effectiveGoalId: null,
+      goalLinkedVia: null,
+    })
   })
 
   it('puts the old goal back when the save fails', async () => {
@@ -139,7 +147,15 @@ describe("the drawer's goal picker", () => {
     render(<TaskGoalSelect taskId="task-1" teamId="t1" goalId="g1" onChange={onChange} />)
     await user.click(await screen.findByTestId('task-goal-select', {}, T))
     await user.click(await screen.findByRole('option', { name: 'No goal' }))
-    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith('g1'), T)
+    await waitFor(
+      () =>
+        expect(onChange).toHaveBeenLastCalledWith({
+          goalId: 'g1',
+          effectiveGoalId: 'g1',
+          goalLinkedVia: 'own',
+        }),
+      T,
+    )
     expect(useToastStore.getState().toasts[0]?.message).toMatch(/Couldn’t change the goal/)
   })
 

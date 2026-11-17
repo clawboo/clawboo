@@ -1066,21 +1066,9 @@ export function TaskDetailDrawer({
                             ? { goalId: effective, via }
                             : null
                         })()}
-                        onChange={(goalId) =>
-                          // A goal of its own is what it counts toward; none takes it off
-                          // an inherited one too.
+                        onChange={(link) =>
                           setDetail((d) =>
-                            d && d.task.id === taskId
-                              ? {
-                                  ...d,
-                                  task: {
-                                    ...d.task,
-                                    goalId,
-                                    effectiveGoalId: goalId,
-                                    goalLinkedVia: goalId ? 'own' : null,
-                                  },
-                                }
-                              : d,
+                            d && d.task.id === taskId ? { ...d, task: { ...d.task, ...link } } : d,
                           )
                         }
                         // Saved: the board reloads, so the card's chip does not lag.

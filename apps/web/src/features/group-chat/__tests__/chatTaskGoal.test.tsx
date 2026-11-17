@@ -1,9 +1,10 @@
 // A task linked to a goal shows the goal's chip in team chat too: on its row in the
-// chat's Tasks card and on its inline card in the conversation.
+// chat's Tasks card and on its inline card in the conversation. The goal picked for
+// new requests is cleared once the team's goals are read without it.
 
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { makeGoalSummary } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
@@ -12,6 +13,7 @@ import { useBoardStore, type BoardTaskView } from '@/stores/board'
 import { resetGoalsStore } from '@/stores/goals'
 
 import { BoardTaskCard } from '../BoardTaskCard'
+import { RequestGoalPicker } from '../RequestGoalPicker'
 import { TeamTasksCard } from '../TeamTasksCard'
 
 const T = { timeout: 4000 }
@@ -101,5 +103,36 @@ describe("a task's goal in team chat", () => {
     )
     await screen.findByText('Write the landing page', {}, T)
     expect(screen.queryByTestId('task-goal-chip')).toBeNull()
+  })
+})
+
+describe('the goal for new requests', () => {
+  it('clears a picked goal the read list no longer has, but not while it loads', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.get('/api/home/teams/:teamId/goals', async () => {
+        await gate
+        return HttpResponse.json({
+          goals: [makeGoalSummary({ id: 'g1', teamId: 'T', title: 'Launch the beta' })],
+        })
+      }),
+    )
+    const onChange = vi.fn()
+    render(<RequestGoalPicker teamId="T" goalId="g-done" onChange={onChange} />)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(onChange).not.toHaveBeenCalled()
+    release()
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(null), T)
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a picked goal the team still has', async () => {
+    const onChange = vi.fn()
+    render(<RequestGoalPicker teamId="T" goalId="g1" onChange={onChange} />)
+    expect(await screen.findByTestId('request-goal-picker', {}, T)).toHaveTextContent(
+      'Launch the beta',
+    )
+    expect(onChange).not.toHaveBeenCalled()
   })
 })
