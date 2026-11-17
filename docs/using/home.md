@@ -104,7 +104,7 @@ Click a goal to open its page. It has:
 - **Linked tasks**, each with its status, how it reaches the goal (linked itself, through its request, or through its parent task), whether its check passed, and its cost. Click one to open it;
 - the goal's **KPIs**, the **Goals under it** and its **Pages**.
 
-**Mark done**, **Drop** and **Archive** are in the goal's header. An archived goal leaves Home; its tasks keep their link.
+**Mark done**, **Drop** and **Archive** are in the goal's header. A done or dropped goal leaves the Goals list for **Done and dropped**, a folded list under it: open it to reach those goals, and **Reopen** one from its page. An archived goal leaves Home; its tasks keep their link.
 
 ## KPIs
 
@@ -144,7 +144,7 @@ An agent can suggest a KPI, with why. It cannot define one or change a target. A
 
 A page is a markdown note the team keeps, such as a launch checklist or a brand voice. Agents can write pages too, with their `write_page` tool.
 
-Every change to a page's title or text makes a new revision, so nothing is overwritten; moving a page to another goal makes none. Open a page and click **History** to see each revision with who wrote it (you, a person, or an agent in a run) and when. Pick one to read it, and **Restore this revision** to make a new revision that copies it. The pin in a page's header pins it to Home or unpins it, and **Archive** takes it off Home.
+Every change to a page's title or text makes a new revision, so nothing is overwritten; moving a page to another goal makes none. Open a page and click **History** to see each revision, newest first, with who wrote it (you, a person, or an agent in a run), when, and how long it is. A long history shows **Show older revisions** at the end. Pick one to read it, and **Restore this revision** to make a new revision that copies it. The pin in a page's header pins it to Home or unpins it, and **Archive** takes it off Home.
 
 A page can belong to a goal; it then shows on that goal's page.
 
@@ -159,13 +159,13 @@ You can have the team lead write it instead, in [Home settings](#home-settings).
 Open a team's Home and click the gear in the header.
 
 - **Weekly goal updates**: **Turn on** makes a normal team routine that asks the lead, once a week, to draft an update for each active goal. The drafts wait in **Needs you** for you to publish. Change its time or turn it off in [Routines](/using/routines).
-- **The lead writes the status line**: off by default, because it costs model calls. See [The status line](#the-status-line).
+- **The lead writes the status line**: off by default, because it costs model calls. See [The status line](#the-status-line). It cannot be turned on for a team whose lead is an OpenClaw agent, which has no way to write it, or for a team with no lead; the switch says so.
 
 ## On the Board
 
-- A task linked to a goal shows the goal's name on its card.
-- The task drawer has a **Goal** row: pick a goal of the task's team, or **No goal**. **Open** goes to the goal's page on Home.
-- **Filter** lists the goals on the tasks in view, plus **No goal**.
+- A task shows the goal it counts toward on its card: its own goal, or its request's or parent task's, which a dashed edge marks (hover for "through its request"). Team chat's task cards show it too.
+- The task drawer has a **Goal** row: pick a goal of the task's team, or **No goal**. A task that counts toward its request's goal shows that goal first, with how it is linked; **No goal** takes it off that goal too. **Open** goes to the goal's page on Home.
+- **Filter** lists the goals on the tasks in view, plus **No goal**, which leaves only work that counts toward no goal at all.
 
 ## On a phone
 
