@@ -33,6 +33,8 @@ export interface SendServerTeamMessageParams {
    *  user entry is stored under. The render derives "You → name" from this key. */
   targetSessionKey: string
   message: string
+  /** A goal on the team that a request this message makes counts toward. */
+  goalId?: string | null
 }
 
 /** Optimistically show the user's message, then POST it to the server orchestrator.
@@ -49,7 +51,7 @@ export interface SendServerTeamMessageParams {
  * stuck looking at a dead button.
  */
 export async function sendServerTeamMessage(params: SendServerTeamMessageParams): Promise<boolean> {
-  const { teamId, roomId, targetAgentId, targetSessionKey, message } = params
+  const { teamId, roomId, targetAgentId, targetSessionKey, message, goalId } = params
   const entryId = crypto.randomUUID()
 
   const optimistic: TranscriptEntry = {
@@ -76,6 +78,7 @@ export async function sendServerTeamMessage(params: SendServerTeamMessageParams)
         targetAgentId,
         entryId,
         ...(roomId ? { roomId } : {}),
+        ...(goalId ? { goalId } : {}),
       }),
     })
     if (!res.ok) {

@@ -70,6 +70,8 @@ import { useBoardPerson } from './useBoardPerson'
 import { PrioritySelect } from './PrioritySelect'
 import { StatusSelect } from './StatusSelect'
 import { TaskLabelsSelect } from './TaskLabelsSelect'
+import { TaskGoalSelect } from './TaskGoal'
+import { goalIdOf } from '@/stores/goals'
 import type { StatusCommit } from './useStatusMutation'
 import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
 import { ReplyReceipt } from './ReplyReceipt'
@@ -1048,6 +1050,22 @@ export function TaskDetailDrawer({
                           )
                           onChanged?.()
                         }}
+                      />
+                    </PropRow>
+                  ) : null}
+                  {teamId ? (
+                    <PropRow label="Goal">
+                      <TaskGoalSelect
+                        taskId={task.id}
+                        teamId={teamId}
+                        goalId={goalIdOf(task)}
+                        onChange={(goalId) =>
+                          setDetail((d) =>
+                            d && d.task.id === taskId ? { ...d, task: { ...d.task, goalId } } : d,
+                          )
+                        }
+                        // Saved: the board reloads, so the card's chip does not lag.
+                        onSaved={() => onChanged?.()}
                       />
                     </PropRow>
                   ) : null}

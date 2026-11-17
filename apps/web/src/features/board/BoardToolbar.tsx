@@ -212,7 +212,12 @@ export interface BoardFilter {
   mine: boolean
   /** Label names, compared without case: under All teams, two teams' "Bug" are one. */
   labels: ReadonlySet<string>
+  /** Goal ids, and `NO_GOAL_KEY` for the tasks with no goal. */
+  goals: ReadonlySet<string>
 }
+
+/** The goal filter's key for "No goal". */
+export const NO_GOAL_KEY = 'none'
 
 export const NO_FILTER: BoardFilter = {
   agents: new Set(),
@@ -220,25 +225,34 @@ export const NO_FILTER: BoardFilter = {
   running: false,
   labels: new Set(),
   mine: false,
+  goals: new Set(),
 }
 
 export function filterCount(f: BoardFilter): number {
   return (
-    f.agents.size + (f.unowned ? 1 : 0) + (f.running ? 1 : 0) + (f.mine ? 1 : 0) + f.labels.size
+    f.agents.size +
+    (f.unowned ? 1 : 0) +
+    (f.running ? 1 : 0) +
+    (f.mine ? 1 : 0) +
+    f.labels.size +
+    f.goals.size
   )
 }
 
 /** Filter: the agents in scope, the tasks with no agent, the running work, and the
- *  labels on the board's tasks. */
+ *  labels and goals on the board's tasks. */
 export function FilterMenuButton({
   agents,
   labels = [],
+  goals = [],
   filter,
   onChange,
 }: {
   agents: { id: string; name: string }[]
   /** The label names on the tasks in view. */
   labels?: readonly string[]
+  /** The goals on the tasks in view. */
+  goals?: readonly { id: string; title: string }[]
   filter: BoardFilter
   onChange: (next: BoardFilter) => void
 }) {
@@ -249,6 +263,12 @@ export function FilterMenuButton({
     if (agentsNext.has(id)) agentsNext.delete(id)
     else agentsNext.add(id)
     onChange({ ...filter, agents: agentsNext })
+  }
+  const toggleGoal = (id: string) => {
+    const goalsNext = new Set(filter.goals)
+    if (goalsNext.has(id)) goalsNext.delete(id)
+    else goalsNext.add(id)
+    onChange({ ...filter, goals: goalsNext })
   }
   const toggleLabel = (name: string) => {
     const key = name.toLowerCase()
@@ -294,6 +314,23 @@ export function FilterMenuButton({
       checked: filter.labels.has(name.toLowerCase()),
       onSelect: () => toggleLabel(name),
     })),
+    ...(goals.length > 0
+      ? [
+          ...goals.map((g, i) => ({
+            key: `goal:${g.id}`,
+            label: g.title,
+            group: i === 0 ? 'Goals' : undefined,
+            checked: filter.goals.has(g.id),
+            onSelect: () => toggleGoal(g.id),
+          })),
+          {
+            key: `goal:${NO_GOAL_KEY}`,
+            label: 'No goal',
+            checked: filter.goals.has(NO_GOAL_KEY),
+            onSelect: () => toggleGoal(NO_GOAL_KEY),
+          },
+        ]
+      : []),
     ...(count > 0
       ? [
           {
