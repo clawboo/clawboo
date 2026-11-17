@@ -63,6 +63,7 @@ import {
   type TaskSectionId,
 } from './teamTasks'
 import { GoalChip } from '@/features/board/TaskGoal'
+import { viewGoalOf } from '@/stores/goals'
 
 const EMPTY_TASKS = new Map<string, BoardTaskView>()
 
@@ -147,7 +148,13 @@ function TaskRow({
             {request && !nested ? `${requestLabel(request)} · ` : ''}
             {progress ?? subtitleOf(task, assigneeName, me)}
           </span>
-          {task.goalId ? <GoalChip goalId={task.goalId} teamId={task.teamId ?? teamId} /> : null}
+          {viewGoalOf(task) ? (
+            <GoalChip
+              goalId={viewGoalOf(task)!}
+              teamId={task.teamId ?? teamId}
+              linkedVia={task.goalLinkedVia ?? null}
+            />
+          ) : null}
         </span>
       </span>
       {task.assigneeAgentId && <AgentBooAvatar agentId={task.assigneeAgentId} size={20} />}

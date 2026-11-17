@@ -6,7 +6,7 @@
 // list, so the Board shows no goal parts rather than an error.
 
 import { create } from 'zustand'
-import { listGoals, type GoalHealth } from '@clawboo/control-client'
+import { listGoals, type GoalHealth, type GoalLinkVia } from '@clawboo/control-client'
 
 export interface GoalOption {
   id: string
@@ -79,8 +79,33 @@ export function resetGoalsStore(): void {
   useGoalsStore.setState({ byTeam: {} })
 }
 
-/** A task's goal id, read off a board row (rows carry `goalId`). */
+/** The goal a task itself names, read off a board row (`goalId`). Null for none of
+ *  its own, even when it counts toward its request's goal. */
 export function goalIdOf(task: { [k: string]: unknown }): string | null {
   const id = task['goalId']
   return typeof id === 'string' && id ? id : null
+}
+
+/** The goal a task counts toward: its own, else its request's or a parent's
+ *  (`effectiveGoalId`, which the goal page's progress also counts). A row from a
+ *  server that does not send it falls back to the task's own goal. */
+export function effectiveGoalIdOf(task: { [k: string]: unknown }): string | null {
+  if (!('effectiveGoalId' in task)) return goalIdOf(task)
+  const id = task['effectiveGoalId']
+  return typeof id === 'string' && id ? id : null
+}
+
+/** The goal a chat card's task counts toward (`effectiveGoalId`), falling back to its
+ *  own goal for a frame from a server that does not send it. */
+export function viewGoalOf(task: {
+  goalId?: string | null
+  effectiveGoalId?: string | null
+}): string | null {
+  return task.effectiveGoalId !== undefined ? task.effectiveGoalId : (task.goalId ?? null)
+}
+
+/** How the task reaches the goal it counts toward, when the row says. */
+export function goalLinkOf(task: { [k: string]: unknown }): GoalLinkVia | null {
+  const via = task['goalLinkedVia']
+  return via === 'own' || via === 'request' || via === 'parent' ? via : null
 }

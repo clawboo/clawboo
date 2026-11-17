@@ -71,7 +71,7 @@ import { PrioritySelect } from './PrioritySelect'
 import { StatusSelect } from './StatusSelect'
 import { TaskLabelsSelect } from './TaskLabelsSelect'
 import { TaskGoalSelect } from './TaskGoal'
-import { goalIdOf } from '@/stores/goals'
+import { effectiveGoalIdOf, goalIdOf, goalLinkOf } from '@/stores/goals'
 import type { StatusCommit } from './useStatusMutation'
 import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
 import { ReplyReceipt } from './ReplyReceipt'
@@ -1059,9 +1059,28 @@ export function TaskDetailDrawer({
                         taskId={task.id}
                         teamId={teamId}
                         goalId={goalIdOf(task)}
+                        inherited={(() => {
+                          const effective = effectiveGoalIdOf(task)
+                          const via = goalLinkOf(task)
+                          return !goalIdOf(task) && effective && via && via !== 'own'
+                            ? { goalId: effective, via }
+                            : null
+                        })()}
                         onChange={(goalId) =>
+                          // A goal of its own is what it counts toward; none takes it off
+                          // an inherited one too.
                           setDetail((d) =>
-                            d && d.task.id === taskId ? { ...d, task: { ...d.task, goalId } } : d,
+                            d && d.task.id === taskId
+                              ? {
+                                  ...d,
+                                  task: {
+                                    ...d.task,
+                                    goalId,
+                                    effectiveGoalId: goalId,
+                                    goalLinkedVia: goalId ? 'own' : null,
+                                  },
+                                }
+                              : d,
                           )
                         }
                         // Saved: the board reloads, so the card's chip does not lag.

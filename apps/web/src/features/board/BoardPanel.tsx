@@ -22,7 +22,7 @@ import { useViewStore } from '@/stores/view'
 import { useEditorStore } from '@/stores/editor'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useFleetStore } from '@/stores/fleet'
-import { goalIdOf, useGoalsStore } from '@/stores/goals'
+import { effectiveGoalIdOf, useGoalsStore } from '@/stores/goals'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
 import { labelsOfTask } from '@/lib/teamLabels'
 import {
@@ -343,7 +343,9 @@ function isRunning(task: BoardTask): boolean {
 function matchesFilter(task: BoardTask, filter: BoardFilter, me: { id: string }): boolean {
   if (filter.running && !isRunning(task)) return false
   if (filter.goals.size > 0) {
-    const goal = goalIdOf(task)
+    // The goal it counts toward: inherited work is under its request's goal, and "No
+    // goal" means no goal at all.
+    const goal = effectiveGoalIdOf(task)
     if (!(goal ? filter.goals.has(goal) : filter.goals.has(NO_GOAL_KEY))) return false
   }
   if (filter.mine && !isMyTask(task, me)) return false
@@ -1047,7 +1049,8 @@ export function BoardPanel() {
   // goals are read once (the card chips read the same list).
   const goalTeams = useMemo(() => {
     const ids = new Set<string>()
-    for (const task of effectiveTasks) if (goalIdOf(task) && task.teamId) ids.add(task.teamId)
+    for (const task of effectiveTasks)
+      if (effectiveGoalIdOf(task) && task.teamId) ids.add(task.teamId)
     return [...ids].sort()
   }, [effectiveTasks])
   const goalsByTeam = useGoalsStore((s) => s.byTeam)
@@ -1059,7 +1062,7 @@ export function BoardPanel() {
   const filterGoals = useMemo(() => {
     const used = new Set<string>()
     for (const task of effectiveTasks) {
-      const goal = goalIdOf(task)
+      const goal = effectiveGoalIdOf(task)
       if (goal) used.add(goal)
     }
     return goalTeams

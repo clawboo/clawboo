@@ -43,7 +43,7 @@ import { sitsOnOtherDay } from './finishMove'
 import { StatusGlyph } from './StatusGlyph'
 import { LabelChip } from './TaskLabelsSelect'
 import { GoalChip } from './TaskGoal'
-import { goalIdOf } from '@/stores/goals'
+import { effectiveGoalIdOf, goalLinkOf } from '@/stores/goals'
 import {
   isMainTask,
   progressLabel,
@@ -296,7 +296,9 @@ function ChipMeta({
   const me = useBoardPerson(person !== null)
   const personName = isMyTask(task, me) ? 'you' : (person?.name ?? 'a person')
   const labels = labelsOfTask(task)
-  const goalId = goalIdOf(task)
+  // The goal it counts toward, its own or one it inherits from its request.
+  const goalId = effectiveGoalIdOf(task)
+  const goalVia = goalLinkOf(task)
   return (
     <div className="flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-1">
       <TaskIdentifier task={task} testId="board-card-identifier" />
@@ -344,7 +346,9 @@ function ChipMeta({
           <CornerDownRight size={12} strokeWidth={2} aria-hidden />
         </IconMark>
       ) : null}
-      {goalId ? <GoalChip goalId={goalId} teamId={task.teamId ?? null} /> : null}
+      {goalId ? (
+        <GoalChip goalId={goalId} teamId={task.teamId ?? null} linkedVia={goalVia} />
+      ) : null}
       {labels.slice(0, MAX_CARD_LABELS).map((label) => (
         <LabelChip key={label.id} name={label.name} />
       ))}

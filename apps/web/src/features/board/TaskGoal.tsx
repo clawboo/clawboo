@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import { Target } from 'lucide-react'
 
-import { setTaskGoal } from '@clawboo/control-client'
+import { setTaskGoal, type GoalLinkVia } from '@clawboo/control-client'
 
 import { Select } from '@/features/shared/Select'
 import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
@@ -15,6 +15,8 @@ import { useToastStore } from '@/stores/toast'
 import { useViewStore } from '@/stores/view'
 
 const NO_GOAL = ''
+/** The picker's value for a goal the task inherits rather than names. */
+const INHERITED = 'inherited'
 
 /** A team's active goals, read on first use. Null while they are being read. */
 export function useTeamGoals(
@@ -30,19 +32,43 @@ export function useTeamGoals(
 
 /** The goal a task counts toward, as a small chip on its card. Nothing while the
  *  team's goals are unread or the goal is no longer active. */
-export function GoalChip({ goalId, teamId }: { goalId: string; teamId: string | null }) {
+/** How a task reaches its goal, in words, for one it inherits. */
+export const GOAL_LINK_WORDS: Record<GoalLinkVia, string | null> = {
+  own: null,
+  request: 'through its request',
+  parent: 'through its parent task',
+}
+
+/** The goal a task counts toward, as a chip: its own goal, or one it inherits from
+ *  its request or a parent task (drawn with a dashed edge, and said in words). */
+export function GoalChip({
+  goalId,
+  teamId,
+  linkedVia = null,
+}: {
+  goalId: string
+  teamId: string | null
+  /** How the task reaches the goal; `request` or `parent` mark an inherited one. */
+  linkedVia?: GoalLinkVia | null
+}) {
   const goals = useTeamGoals(teamId)
   const goal = goals?.find((g) => g.id === goalId)
   if (!goal) return null
+  const via = linkedVia ? GOAL_LINK_WORDS[linkedVia] : null
+  const words = via ? `Goal: ${goal.title}, ${via}` : `Goal: ${goal.title}`
   return (
     <span
       data-testid="task-goal-chip"
-      title={`Goal: ${goal.title}`}
-      className="inline-flex max-w-[160px] shrink-0 items-center gap-1 truncate rounded-md border border-border px-1.5 font-sans text-xs normal-case tracking-normal text-muted-foreground"
+      data-linked-via={linkedVia ?? undefined}
+      title={words}
+      className={[
+        'inline-flex max-w-[160px] shrink-0 items-center gap-1 truncate rounded-md border border-border px-1.5 font-sans text-xs normal-case tracking-normal text-muted-foreground',
+        via ? 'border-dashed' : '',
+      ].join(' ')}
     >
       <Target size={11} strokeWidth={2} aria-hidden className="shrink-0" />
       <span className="truncate">{goal.title}</span>
-      <span className="sr-only">{` (goal)`}</span>
+      <span className="sr-only">{via ? ` (goal, ${via})` : ' (goal)'}</span>
     </span>
   )
 }
@@ -53,12 +79,16 @@ export function TaskGoalSelect({
   taskId,
   teamId,
   goalId,
+  inherited = null,
   onChange,
   onSaved,
 }: {
   taskId: string
   teamId: string
+  /** The goal the task itself names. */
   goalId: string | null
+  /** The goal it counts toward through its request or a parent, when it names none. */
+  inherited?: { goalId: string; via: GoalLinkVia } | null
   /** The goal shown: called at once, and again with the old one if the save fails. */
   onChange: (goalId: string | null) => void
   /** The server took the change. */
@@ -67,11 +97,18 @@ export function TaskGoalSelect({
   const goals = useTeamGoals(teamId)
   const [saving, setSaving] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
-  const current = goals?.find((g) => g.id === goalId) ?? null
+  const own = goals?.find((g) => g.id === goalId) ?? null
+  const fromAbove =
+    !goalId && inherited ? (goals?.find((g) => g.id === inherited.goalId) ?? null) : null
+  const via = inherited ? GOAL_LINK_WORDS[inherited.via] : null
+  const current = own ?? fromAbove
 
   async function pick(value: string) {
+    // The inherited choice is what the task has already.
+    if (value === INHERITED) return
     const next = value || null
-    if (next === goalId) return
+    // "No goal" on a task that inherits one takes it off that goal too.
+    if (next === goalId && !(next === null && fromAbove)) return
     const previous = goalId
     onChange(next)
     setSaving(true)
@@ -88,7 +125,7 @@ export function TaskGoalSelect({
     }
   }
 
-  if (goals !== null && goals.length === 0 && !goalId) {
+  if (goals !== null && goals.length === 0 && !goalId && !fromAbove) {
     return (
       <span className="text-xs text-muted-foreground" data-testid="task-goal-none">
         No goals on this team yet
@@ -102,11 +139,12 @@ export function TaskGoalSelect({
         size="sm"
         aria-label="Goal"
         data-testid="task-goal-select"
-        value={goalId ?? NO_GOAL}
+        value={goalId ?? (fromAbove ? INHERITED : NO_GOAL)}
         disabled={saving || goals === null}
         onChange={(v) => void pick(v)}
-        placeholder={goalId && !current ? 'A goal no longer active' : undefined}
+        placeholder={goalId && !own ? 'A goal no longer active' : undefined}
         options={[
+          ...(fromAbove && via ? [{ value: INHERITED, label: `${fromAbove.title}, ${via}` }] : []),
           { value: NO_GOAL, label: 'No goal' },
           ...(goals ?? []).map((g) => ({ value: g.id, label: g.title })),
         ]}

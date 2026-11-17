@@ -79,6 +79,20 @@ describe("a task's goal in team chat", () => {
     expect(await screen.findByTestId('task-goal-chip', {}, T)).toHaveTextContent('Launch the beta')
   })
 
+  it('shows the goal a task inherits from its request, marked as inherited', async () => {
+    render(
+      <ThemeProvider>
+        <BoardTaskCard
+          task={task({ goalId: null, effectiveGoalId: 'g1', goalLinkedVia: 'request' })}
+          teamId="T"
+        />
+      </ThemeProvider>,
+    )
+    const chip = await screen.findByTestId('task-goal-chip', {}, T)
+    expect(chip).toHaveTextContent('Launch the beta')
+    expect(chip).toHaveAttribute('data-linked-via', 'request')
+  })
+
   it('shows nothing for a task with no goal', async () => {
     render(
       <ThemeProvider>

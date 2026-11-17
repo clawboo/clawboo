@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { makeGoalSummary } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
-import { goalIdOf, resetGoalsStore } from '@/stores/goals'
+import { effectiveGoalIdOf, goalIdOf, goalLinkOf, resetGoalsStore } from '@/stores/goals'
 import { useToastStore } from '@/stores/toast'
 import { useViewStore } from '@/stores/view'
 
@@ -47,10 +47,24 @@ describe('the goal chip', () => {
     await waitFor(() => expect(screen.queryByTestId('task-goal-chip')).toBeNull(), T)
   })
 
+  it('marks a goal the task inherits, and says how', async () => {
+    render(<GoalChip goalId="g1" teamId="t1" linkedVia="request" />)
+    const chip = await screen.findByTestId('task-goal-chip', {}, T)
+    expect(chip).toHaveAttribute('title', 'Goal: Launch the beta, through its request')
+    expect(chip.className).toContain('border-dashed')
+    expect(chip).toHaveTextContent('(goal, through its request)')
+  })
+
   it('reads a goal id off a board row', () => {
     expect(goalIdOf({ id: 'x', goalId: 'g1' })).toBe('g1')
     expect(goalIdOf({ id: 'x', goalId: null })).toBeNull()
     expect(goalIdOf({ id: 'x' })).toBeNull()
+    // The goal it counts toward, falling back to its own on an older server's row.
+    expect(effectiveGoalIdOf({ id: 'x', goalId: null, effectiveGoalId: 'g1' })).toBe('g1')
+    expect(effectiveGoalIdOf({ id: 'x', goalId: 'g2' })).toBe('g2')
+    expect(effectiveGoalIdOf({ id: 'x', goalId: 'g2', effectiveGoalId: null })).toBeNull()
+    expect(goalLinkOf({ goalLinkedVia: 'parent' })).toBe('parent')
+    expect(goalLinkOf({ goalLinkedVia: 'direct' })).toBeNull()
   })
 })
 
@@ -87,6 +101,33 @@ describe("the drawer's goal picker", () => {
     await user.click(screen.getByRole('button', { name: 'Open' }))
     expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'home' })
     expect(useViewStore.getState().homeFocus).toMatchObject({ teamId: 't1', goalId: 'g2' })
+  })
+
+  it("shows the request's goal first for a task that inherits it, and No goal takes it off", async () => {
+    let body: unknown = null
+    server.use(
+      http.patch('/api/board/:taskId', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <TaskGoalSelect
+        taskId="task-1"
+        teamId="t1"
+        goalId={null}
+        inherited={{ goalId: 'g1', via: 'request' }}
+        onChange={onChange}
+      />,
+    )
+    const select = await screen.findByTestId('task-goal-select', {}, T)
+    await waitFor(() => expect(select).toHaveTextContent('Launch the beta, through its request'), T)
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'No goal' }))
+    await waitFor(() => expect(body).toEqual({ goalId: null }), T)
+    expect(onChange).toHaveBeenCalledWith(null)
   })
 
   it('puts the old goal back when the save fails', async () => {
