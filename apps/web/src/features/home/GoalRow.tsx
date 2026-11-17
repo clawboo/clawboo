@@ -44,6 +44,14 @@ export function GoalRow({
             {draftCount === 1 ? '1 draft' : `${draftCount} drafts`}
           </span>
         ) : null}
+        {goal.status !== 'active' ? (
+          <span
+            data-testid="goal-status"
+            className="shrink-0 text-micro font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            {goal.status === 'done' ? 'Done' : 'Dropped'}
+          </span>
+        ) : null}
         {updateMissing ? (
           <span
             data-testid="goal-update-missing"

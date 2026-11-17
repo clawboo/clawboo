@@ -410,6 +410,63 @@ describe("a team's Home", () => {
   })
 })
 
+describe('done and dropped goals', () => {
+  it('keeps them reachable in a folded list, and opens one', async () => {
+    serveHome((id) => fullHome(id))
+    server.use(
+      http.get('/api/home/teams/:teamId/goals', () =>
+        HttpResponse.json({
+          goals: [
+            makeGoalSummary({ id: 'g1', teamId: 't1', title: 'Launch the beta' }),
+            makeGoalSummary({ id: 'g9', teamId: 't1', title: 'Pick a name', status: 'done' }),
+            makeGoalSummary({ id: 'g8', teamId: 't1', title: 'Run ads', status: 'dropped' }),
+          ],
+        }),
+      ),
+      http.get('/api/home/teams/:teamId/goals/:goalId', ({ params }) =>
+        HttpResponse.json({
+          goal: {
+            summary: makeGoalSummary({
+              id: String(params.goalId),
+              teamId: 't1',
+              title: 'Pick a name',
+              status: 'done',
+            }),
+            parent: null,
+            children: [],
+            healthHistory: [],
+            tasks: [],
+            kpis: [],
+            updates: [],
+            pages: [],
+          },
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<HomePanel />)
+    const toggle = await screen.findByTestId('home-closed-goals-toggle', {}, T)
+    expect(toggle).toHaveTextContent('Done and dropped2')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(toggle)
+    const list = screen.getByTestId('home-closed-goals')
+    const rows = within(list).getAllByTestId('home-goal-row')
+    expect(rows.map((r) => within(r).getByTestId('goal-status').textContent)).toEqual([
+      'Done',
+      'Dropped',
+    ])
+    await user.click(rows[0]!)
+    expect(await screen.findByTestId('goal-title-heading', {}, T)).toHaveTextContent('Pick a name')
+  })
+
+  it('shows no list when every goal is active', async () => {
+    serveHome((id) => fullHome(id))
+    render(<HomePanel />)
+    await screen.findByTestId('team-home', {}, T)
+    await waitFor(() => expect(screen.queryByTestId('home-closed-goals')).toBeNull(), T)
+  })
+})
+
 describe('when the team goes away', () => {
   it('falls back to All teams when the last team was deleted', async () => {
     useTeamStore.setState({ teams: [], selectedTeamId: null, hydrated: true })

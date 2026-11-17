@@ -4,7 +4,7 @@
 // when it is empty; a team with no goals, KPIs or pages yet gets first-run
 // prompts in their place.
 
-import type { ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import {
   Bot,
   Calculator,
@@ -19,7 +19,13 @@ import {
   Target,
 } from 'lucide-react'
 
-import type { HomeNeedsYou, KpiTile, TeamHome, TeamPage } from '@clawboo/control-client'
+import type {
+  GoalSummary,
+  HomeNeedsYou,
+  KpiTile,
+  TeamHome,
+  TeamPage,
+} from '@clawboo/control-client'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { Button } from '@/features/shared/Button'
@@ -58,11 +64,14 @@ export function TeamHomeView({
   now,
   names,
   actions,
+  closedGoals = [],
 }: {
   home: TeamHome
   now: number
   names: HomeNames
   actions: TeamHomeActions
+  /** The team's done and dropped goals, for the folded list under Goals. */
+  closedGoals?: GoalSummary[]
 }) {
   const firstRun =
     home.goals.length === 0 && home.kpis.length === 0 && home.pinnedPages.length === 0
@@ -110,6 +119,10 @@ export function TeamHomeView({
             ))}
           </div>
         </HomeSection>
+      ) : null}
+
+      {closedGoals.length > 0 ? (
+        <ClosedGoals goals={closedGoals} now={now} onOpen={actions.openGoal} />
       ) : null}
 
       {home.kpis.length > 0 ? (
@@ -262,6 +275,49 @@ export function TeamHomeView({
         </HomeSection>
       ) : null}
     </div>
+  )
+}
+
+// ─── Done and dropped ────────────────────────────────────────────────────────
+
+/** The team's done and dropped goals, folded away under Goals until asked for. */
+function ClosedGoals({
+  goals,
+  now,
+  onOpen,
+}: {
+  goals: GoalSummary[]
+  now: number
+  onOpen: (goalId: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const listId = useId()
+  return (
+    <section aria-label="Done and dropped goals" data-testid="home-closed-goals" className="-mt-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((o) => !o)}
+        className={HEADING_ACTION}
+        data-testid="home-closed-goals-toggle"
+      >
+        <ChevronRight
+          size={13}
+          aria-hidden
+          className={`transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+        />
+        Done and dropped
+        <span className="tabular-nums">{goals.length}</span>
+      </button>
+      {open ? (
+        <div id={listId} className={`${HOME_CARD} mt-2 divide-y divide-border overflow-hidden`}>
+          {goals.map((g) => (
+            <GoalRow key={g.goal.id} summary={g} now={now} onOpen={onOpen} />
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
 

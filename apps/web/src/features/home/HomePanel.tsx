@@ -47,6 +47,7 @@ import { KpiDetailDialog } from './KpiDetailDialog'
 import { KpiDialog, type KpiDialogMode } from './KpiDialog'
 import { PageDrawer, type PageTarget } from './PageDrawer'
 import { PageCards, TeamHomeView, type TeamHomeActions } from './TeamHomeView'
+import { useClosedGoals } from './useClosedGoals'
 import { useHome } from './useHome'
 import { useHomeNames } from './useHomeNames'
 import { homeWrite } from './homeWrite'
@@ -143,6 +144,7 @@ export function HomePanel() {
       ? load.data.home
       : null
   const goals: GoalSummary[] = teamHome?.goals ?? []
+  const closedGoals = useClosedGoals(team?.id ?? null, goalReload)
 
   useEffect(() => {
     const id = returnToGoal.current
@@ -318,7 +320,15 @@ export function HomePanel() {
       />
     )
   } else if (teamHome) {
-    body = <TeamHomeView home={teamHome} now={now} names={names} actions={actions} />
+    body = (
+      <TeamHomeView
+        home={teamHome}
+        now={now}
+        names={names}
+        actions={actions}
+        closedGoals={closedGoals}
+      />
+    )
   } else if (allHome) {
     body = (
       <AllTeamsView
