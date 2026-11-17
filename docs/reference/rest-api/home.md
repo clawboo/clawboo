@@ -187,7 +187,7 @@ GoalSummary {
 
 A task's goal is its own `goalId`, else the nearest goal up its parent chain, which is its request's when nothing between names another. Every create copies the parent's goal down when the task is made, and work filed before its request had a goal is read as its request's. A task only serves a goal of its own team: a goal of another team counts as none.
 
-- `GET .../goals` lists the team's goals that are not archived (`?includeArchived=true` for those too) as `{ "goals": GoalSummary[] }`.
+- `GET .../goals` lists the team's goals that are not archived, whatever their status (active, done and dropped), as `{ "goals": GoalSummary[] }`; `?includeArchived=true` adds archived ones. The team's Home (`GET /api/home`) shows only the active ones.
 - `POST .../goals` takes `{ title, description?, parentGoalId?, owner?, targetDate?, updateCadenceDays? }` and answers `{ "goal": TeamGoal }`.
 - `PATCH .../goals/:goalId` takes any of those fields and `status`. A parent must be a goal of the same team that is not archived and has no parent itself; a goal with child goals cannot take a parent.
 - `DELETE .../goals/:goalId` archives the goal. Its tasks keep their link; its child goals lose their parent.
@@ -213,7 +213,7 @@ GoalDetail {
 
 ### Linking tasks to goals
 
-`POST /api/board` and `PATCH /api/board/:taskId` take `goalId`: a goal of the task's own team, or `null` for none. Another team's goal answers `400` with `"error": "goal_other_team"`. Changing a task's goal is a person's write (on `POST`, a `goalId` from a caller that is not a person is ignored and the task takes its parent's goal). `null` takes the task off every goal, its request's included, and the work under it with it. When a task's goal changes, the work under it that still carried the old goal moves to the new one; work a person put on another goal stays there. A person's team chat message (`POST /api/teams/:id/chat`) can carry `goalId` too: the request's main task, and the work filed under it, serve that goal. Board task rows carry `goalId`.
+`POST /api/board` and `PATCH /api/board/:taskId` take `goalId`: a goal of the task's own team, or `null` for none. Another team's goal answers `400` with `"error": "goal_other_team"`. Changing a task's goal is a person's write (on `POST`, a `goalId` from a caller that is not a person is ignored and the task takes its parent's goal). `null` takes the task off every goal, its request's included, and the work under it with it. When a task's goal changes, the work under it that still carried the old goal moves to the new one; work a person put on another goal stays there. A person's team chat message (`POST /api/teams/:id/chat`) can carry `goalId` too: the request's main task, and the work filed under it, serve that goal. Board task rows (`GET /api/board`, `GET /api/board/:taskId`, and the task a create or patch returns) and board change frames carry the stored `goalId` and the goal the task counts toward: `effectiveGoalId`, with `goalLinkedVia` `own`, `request` or `parent` (the goal page's `linkedVia`). A subtask or hand-off that inherits its request's goal has a null `goalId` and a set `effectiveGoalId`, so a goal chip and a "No goal" filter read `effectiveGoalId`.
 
 ## Goal updates
 

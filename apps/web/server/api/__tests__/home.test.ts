@@ -11,6 +11,7 @@ import * as client from '@clawboo/control-client'
 import * as homeDb from '@clawboo/db'
 import {
   agents,
+  archiveTeamGoal,
   createSubtask,
   createTask,
   createTeamGoal,
@@ -25,6 +26,7 @@ import {
   tasks,
   teamHomeSettingKey,
   teams,
+  updateTeamGoal,
 } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
@@ -37,7 +39,7 @@ vi.mock('../../lib/teamChat/boardDispatch', () => ({
 
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const home = await import('../home')
-const { boardCreatePOST, boardUpdatePATCH } = await import('../board')
+const { boardCreatePOST, boardGetGET, boardListGET, boardUpdatePATCH } = await import('../board')
 const { askLeadsForStatus, STATUS_ASK_ROUTINE_NAME } = await import('../../lib/home/statusAsks')
 
 interface Body {
@@ -444,6 +446,59 @@ describe('Home routes', () => {
     expect(getTeamGoal(db, 'U', g)).toBeNull()
   })
 
+  it('names the goal each board task counts toward, on the list and the detail', async () => {
+    const db = getDb()
+    const g = goalOn('T')
+    const main = createTask(db, { title: 'Request', teamId: 'T', goalId: g })
+    db.update(tasks).set({ isMainTask: 1 }).where(eq(tasks.id, main.id)).run()
+    // Work filed before the request had its goal: nothing stored, still counts.
+    const legacy = createTask(db, { title: 'Earlier hand-off', teamId: 'T', parentTaskId: main.id })
+    db.update(tasks).set({ goalId: null }).where(eq(tasks.id, legacy.id)).run()
+    const off = createSubtask(db, main.id, { title: 'Off the goal', goalId: null })
+    const list = await call(boardListGET as Handler, req({ query: { teamId: 'T' } }))
+    const rows = list.body['tasks'] as Array<Record<string, unknown>>
+    const row = (id: string) => rows.find((r) => r['id'] === id)
+    expect(row(main.id)).toMatchObject({ goalId: g, effectiveGoalId: g, goalLinkedVia: 'own' })
+    expect(row(legacy.id)).toMatchObject({
+      goalId: null,
+      effectiveGoalId: g,
+      goalLinkedVia: 'request',
+    })
+    expect(row(off.id)).toMatchObject({ effectiveGoalId: null, goalLinkedVia: null })
+    const detail = await call(boardGetGET as Handler, req({ params: { taskId: legacy.id } }))
+    expect(detail.body['task']).toMatchObject({ effectiveGoalId: g, goalLinkedVia: 'request' })
+    const patched = await call(
+      boardUpdatePATCH as Handler,
+      asPerson({ params: { taskId: legacy.id }, body: { goalId: null } }),
+    )
+    expect(patched.body['task']).toMatchObject({ effectiveGoalId: null, goalLinkedVia: null })
+  })
+
+  it("lists a team's done and dropped goals with its active ones; archived only when asked", async () => {
+    const db = getDb()
+    const active = goalOn('T', 'Active')
+    const done = goalOn('T', 'Done')
+    const dropped = goalOn('T', 'Dropped')
+    const archived = goalOn('T', 'Archived')
+    updateTeamGoal(db, 'T', done, { status: 'done' })
+    updateTeamGoal(db, 'T', dropped, { status: 'dropped' })
+    archiveTeamGoal(db, 'T', archived)
+    const ids = (out: { body: Body }) =>
+      (out.body['goals'] as Array<{ goal: { id: string } }>).map((s) => s.goal.id).sort()
+    const listed = await call(home.homeGoalsGET, req({ params: { teamId: 'T' } }))
+    expect(ids(listed)).toEqual([active, done, dropped].sort())
+    const all = await call(
+      home.homeGoalsGET,
+      req({ params: { teamId: 'T' }, query: { includeArchived: 'true' } }),
+    )
+    expect(ids(all)).toEqual([active, archived, done, dropped].sort())
+    // Home itself shows the active ones.
+    const team = await call(home.homeGET, req({ query: { teamId: 'T' } }))
+    expect(
+      (team.body['home'] as { goals: Array<{ goal: { id: string } }> }).goals.map((s) => s.goal.id),
+    ).toEqual([active])
+  })
+
   it('maps refusals to statuses', () => {
     expect(home.refusalStatus('goal_not_found')).toBe(404)
     expect(home.refusalStatus('not_draft')).toBe(409)
@@ -505,8 +560,23 @@ describe("a board change frame names the task's goal", () => {
     const stop = subscribeBoardChange('T', (c) =>
       frames.push(c as unknown as Record<string, unknown>),
     )
+    const main = createTask(db, { title: 'Request', teamId: 'T', goalId: g.value.id })
+    db.update(tasks).set({ isMainTask: 1 }).where(eq(tasks.id, main.id)).run()
+    const child = createSubtask(db, main.id, { title: 'Hand-off', goalId: null })
+    db.update(tasks).set({ goalId: null, goalCleared: 0 }).where(eq(tasks.id, child.id)).run()
     publishBoardChangeWithAttention(db, 'T', { id: t.id, title: t.title })
+    publishBoardChangeWithAttention(db, 'T', { id: child.id, title: child.title })
     stop()
-    expect(frames[0]?.['goalId']).toBe(g.value.id)
+    expect(frames[0]).toMatchObject({
+      goalId: g.value.id,
+      effectiveGoalId: g.value.id,
+      goalLinkedVia: 'own',
+    })
+    // Stored nothing, counts toward its request's goal.
+    expect(frames[1]).toMatchObject({
+      goalId: null,
+      effectiveGoalId: g.value.id,
+      goalLinkedVia: 'request',
+    })
   })
 })

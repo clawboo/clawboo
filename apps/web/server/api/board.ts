@@ -20,6 +20,7 @@ import {
   agents,
   appendAudit,
   assignTaskDelegation,
+  goalFieldsForTasks,
   goalIsOnTeam,
   setTaskGoal,
   attentionForTask,
@@ -72,6 +73,7 @@ import {
   waitingOnDetailOf,
   wakeCommentIds,
   type DbTask,
+  type TaskGoalFields,
   type DbTaskQuestion,
   type TaskLabel,
   type TaskRunCost,
@@ -140,11 +142,11 @@ export function boardListGET(req: Request, res: Response): void {
     const db = getDb()
     const teamId = typeof req.query['teamId'] === 'string' ? req.query['teamId'] : undefined
     if (req.query['ready'] === 'true') {
-      res.json({
-        tasks: getReadyTasks(db, teamId ? { teamId } : {}).filter((t) =>
-          inRoleScope(req, t.teamId),
-        ),
-      })
+      const ready = getReadyTasks(db, teamId ? { teamId } : {}).filter((t) =>
+        inRoleScope(req, t.teamId),
+      )
+      const goals = goalFieldsForTasks(db, ready)
+      res.json({ tasks: ready.map((t) => ({ ...t, ...(goals.get(t.id) ?? NO_GOAL) })) })
       return
     }
     const status =
@@ -206,6 +208,7 @@ export function boardGetGET(req: Request, res: Response): void {
       task: {
         ...withReadState(states, [withWaiting!])[0]!,
         attention: attentionForTask(db, taskId),
+        ...goalFieldsOf(db, task),
         jobStopped: jobStoppedTaskIds(db, [task]).has(taskId),
         pause: pauseViewOfTask(db, task),
         runCost: runCostOf(db, task),
@@ -272,10 +275,27 @@ function pendingWakeOf(
 }
 
 /** Each task with why it needs a person (`attention`, null when it does not), so
- *  the board can route it into its needs-you column without a request per card. */
-function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attention: unknown }> {
+ *  the board can route it into its needs-you column without a request per card. Each
+ *  also says the goal it counts toward (`effectiveGoalId`, `goalLinkedVia`), which a
+ *  subtask or hand-off inherits from its request without storing it. */
+function withAttention(
+  db: ClawbooDb,
+  rows: DbTask[],
+): Array<DbTask & { attention: unknown } & TaskGoalFields> {
   const byId = attentionForTasks(db, rows)
-  return rows.map((t) => ({ ...t, attention: byId.get(t.id) ?? null }))
+  const goals = goalFieldsForTasks(db, rows)
+  return rows.map((t) => ({
+    ...t,
+    attention: byId.get(t.id) ?? null,
+    ...(goals.get(t.id) ?? NO_GOAL),
+  }))
+}
+
+const NO_GOAL: TaskGoalFields = { effectiveGoalId: null, goalLinkedVia: null }
+
+/** One task's resolved goal, for a single-task answer. */
+function goalFieldsOf(db: ClawbooDb, task: DbTask): TaskGoalFields {
+  return goalFieldsForTasks(db, [task]).get(task.id) ?? NO_GOAL
 }
 
 /** Each task with whether a person stopped its job on the job's card, so a card waiting
@@ -486,7 +506,12 @@ export function boardCreatePOST(req: Request, res: Response): void {
     // A retried draft: it was logged and started the first time.
     if (task.deduplicated) {
       res.json({
-        task: { ...task, attention: attentionForTask(db, task.id), runCost: runCostOf(db, task) },
+        task: {
+          ...task,
+          attention: attentionForTask(db, task.id),
+          ...goalFieldsOf(db, task),
+          runCost: runCostOf(db, task),
+        },
         deduplicated: true,
       })
       return
@@ -508,7 +533,12 @@ export function boardCreatePOST(req: Request, res: Response): void {
       requestTaskDispatch(task.teamId, task.id, loopbackMcpBaseUrl(req))
     }
     res.json({
-      task: { ...task, attention: attentionForTask(db, task.id), runCost: runCostOf(db, task) },
+      task: {
+        ...task,
+        attention: attentionForTask(db, task.id),
+        ...goalFieldsOf(db, task),
+        runCost: runCostOf(db, task),
+      },
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -995,7 +1025,7 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     res.json({
       ok: true,
-      task,
+      task: { ...task, ...goalFieldsOf(db, task) },
       ...(status === 'cancelled' || closedWithRequest.length > 0 ? { cancelledDependents } : {}),
       // Told so the dashboard can say so, if this was a person it could not recognise.
       ...(status && !byPerson ? { byPerson: false } : {}),

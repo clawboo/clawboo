@@ -209,6 +209,24 @@ export function goalForNewTaskTx(
   return link?.goalId ?? null
 }
 
+/** What board rows and frames carry about the goal a task counts toward. */
+export interface TaskGoalFields {
+  effectiveGoalId: string | null
+  goalLinkedVia: GoalLinkVia | null
+}
+
+/** Each task's resolved goal, keyed by task id, in one pass over the goals. */
+export function goalFieldsForTasks(
+  db: ClawbooDb,
+  rows: readonly TaskLinkRow[],
+): Map<string, TaskGoalFields> {
+  const out = new Map<string, TaskGoalFields>()
+  if (rows.length === 0) return out
+  for (const [id, link] of resolveGoalLinks(db, rows, loadGoalTeams(db)))
+    out.set(id, { effectiveGoalId: link?.goalId ?? null, goalLinkedVia: link?.via ?? null })
+  return out
+}
+
 /** One task's goal, as the resolver reads it, or null. */
 export function resolveTaskGoal(db: ClawbooDb, taskId: string): GoalLink | null {
   const row = db.select(LINK_COLUMNS).from(tasks).where(eq(tasks.id, taskId)).get() as
