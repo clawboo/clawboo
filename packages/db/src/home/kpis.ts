@@ -496,7 +496,6 @@ export function acceptKpiSuggestion(
       .get()
     if (!row) return refuse('kpi_not_found')
     if (row.status !== 'suggested') return refuse('not_suggested')
-    if (liveKpiCount(tx, teamId) > MAX_KPIS_PER_TEAM) return refuse('too_many')
     const cols = columnsFor(tx, teamId, edits, row)
     if (!cols.ok) return cols
     const patch: Partial<DbTeamKpi> = {
