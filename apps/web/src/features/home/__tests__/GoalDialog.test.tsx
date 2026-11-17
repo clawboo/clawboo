@@ -224,3 +224,28 @@ describe('a save in flight', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), T)
   })
 })
+
+describe('a goal with only done or dropped goals under it', () => {
+  it('stays a top goal: the count from its page includes them', async () => {
+    const user = userEvent.setup()
+    render(
+      <GoalDialog
+        open
+        onClose={() => {}}
+        teamId="t1"
+        // Its one child is done, so it is not among the active goals.
+        goals={[makeGoalSummary({ id: 'g-other', title: 'Grow the list' })]}
+        editing={makeGoal({ id: 'g-top', title: 'Launch the beta' })}
+        context={{ parent: null, childCount: 1 }}
+        onSaved={() => {}}
+      />,
+    )
+    const dialog = await screen.findByTestId('goal-dialog', {}, T)
+    const parent = within(dialog).getByRole('button', { name: 'Under goal' })
+    expect(parent).toBeDisabled()
+    expect(dialog).toHaveTextContent('It has goals under it, so it stays a top goal.')
+    await user.click(within(dialog).getByTestId('goal-save'))
+    await waitFor(() => expect(patched).not.toBeNull(), T)
+    expect(patched).not.toHaveProperty('parentGoalId')
+  })
+})

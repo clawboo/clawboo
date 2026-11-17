@@ -352,6 +352,15 @@ export function GoalPage({
             </Button>
           </div>
         </div>
+        {goal.archivedAt !== null ? (
+          <p
+            role="status"
+            data-testid="goal-archived-note"
+            className="m-0 rounded-lg border border-border px-3 py-2 text-sm text-foreground"
+          >
+            This goal is archived, so it takes no updates. Its tasks keep their link.
+          </p>
+        ) : null}
         {goal.healthSetBy && goal.healthSetAt ? (
           <p className="m-0 text-xs text-muted-foreground">
             {healthLabel(goal.health)}, set by {actorName(goal.healthSetBy, names)}{' '}
@@ -409,6 +418,7 @@ export function GoalPage({
       <UpdatesSection
         teamId={teamId}
         goalId={goal.id}
+        archived={goal.archivedAt !== null}
         drafts={drafts}
         published={published}
         now={now}
@@ -561,6 +571,7 @@ export function GoalPage({
 function UpdatesSection({
   teamId,
   goalId,
+  archived,
   drafts,
   published,
   now,
@@ -569,6 +580,8 @@ function UpdatesSection({
 }: {
   teamId: string
   goalId: string
+  /** An archived goal takes no updates. */
+  archived: boolean
   drafts: GoalUpdate[]
   published: GoalUpdate[]
   now: number
@@ -576,13 +589,20 @@ function UpdatesSection({
   onChanged: () => void
 }) {
   const [writing, setWriting] = useState(false)
+  // Archived since the page was read: read again, so the page says so.
+  const readAgainIfArchived = (code: string | null) => {
+    if (code === 'goal_archived') {
+      setWriting(false)
+      onChanged()
+    }
+  }
   return (
     <HomeSection
       id="goal-updates"
       title="Updates"
       count={drafts.length + published.length}
       action={
-        !writing ? (
+        !writing && !archived ? (
           <button
             type="button"
             className={HEADING_ACTION}
@@ -604,7 +624,7 @@ function UpdatesSection({
               const done = await homeWrite(
                 'publish the update',
                 () => createGoalUpdate(teamId, goalId, { body, health }),
-                { success: 'Update published.' },
+                { success: 'Update published.', onRefused: readAgainIfArchived },
               )
               if (done) {
                 setWriting(false)
@@ -677,6 +697,10 @@ function DraftCard({
 }) {
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Archived since the page was read (its drafts went with it): read again.
+  const readAgainIfArchived = (code: string | null) => {
+    if (code === 'goal_archived') onChanged()
+  }
 
   async function publish(body?: string, health?: GoalHealth | null) {
     setBusy(true)
@@ -688,7 +712,7 @@ function DraftCard({
           update.id,
           body === undefined ? {} : { body, health: health ?? null },
         ),
-      { success: 'Update published.' },
+      { success: 'Update published.', onRefused: readAgainIfArchived },
     )
     setBusy(false)
     if (done) onChanged()

@@ -8,6 +8,7 @@ import { CalendarClock } from 'lucide-react'
 import {
   turnOnWeeklyUpdates,
   updateTeamHomeSettings,
+  type LeadCannotWriteReason,
   type TeamHomeSettings,
 } from '@clawboo/control-client'
 
@@ -18,6 +19,21 @@ import { useSettingsModalStore } from '@/stores/settingsModal'
 
 import { DIALOG_PANEL } from './homeForm'
 import { homeWrite } from './homeWrite'
+
+/** Why the team's lead cannot write the status line, from the server's reason. */
+const CANNOT_WRITE: Record<LeadCannotWriteReason, string> = {
+  no_lead: 'This team has no lead, so nobody can write it.',
+  openclaw_lead: 'This team’s lead runs on OpenClaw, whose board tools cannot write it.',
+  tasks_read_only:
+    'This team’s lead runs on Clawboo Native with read-only board access, the default, so it cannot write it.',
+  tasks_off:
+    'This team’s lead runs on Clawboo Native with board access off, so it cannot write it.',
+}
+
+/** The reason in words; an older server sends none. */
+function cannotWriteWords(reason: LeadCannotWriteReason | null | undefined): string {
+  return (reason && CANNOT_WRITE[reason]) ?? 'This team’s lead cannot write it.'
+}
 
 export function HomeSettingsDialog({
   open,
@@ -32,7 +48,9 @@ export function HomeSettingsDialog({
   teamId: string
   teamName: string
   settings: TeamHomeSettings
-  onChanged: (settings: TeamHomeSettings) => void
+  /** A write landed (with the settings it saved), or the server refused the lead
+   *  line (no settings): Home reads again either way. */
+  onChanged: (settings?: TeamHomeSettings) => void
 }) {
   // One write at a time: each answer is the whole settings, so two in flight would
   // let the later answer put back what the earlier one changed. The ref turns a
@@ -48,8 +66,15 @@ export function HomeSettingsDialog({
     if (pending.current) return
     pending.current = true
     setBusy('lead')
-    const saved = await homeWrite('save the setting', () =>
-      updateTeamHomeSettings(teamId, { leadWritesStatus: next }),
+    const saved = await homeWrite(
+      'save the setting',
+      () => updateTeamHomeSettings(teamId, { leadWritesStatus: next }),
+      {
+        // The lead changed since Home was read: read again, so the switch says why.
+        onRefused: (code) => {
+          if (code === 'lead_cannot_write') onChanged()
+        },
+      },
     )
     pending.current = false
     setBusy(null)
@@ -138,8 +163,8 @@ export function HomeSettingsDialog({
                 className="mt-1.5 block text-xs leading-relaxed text-foreground"
                 data-testid="home-lead-cannot-write"
               >
-                This team&apos;s lead cannot write it: an OpenClaw lead has no way to, and a team
-                with no lead has nobody to. Home keeps writing the line from the board.
+                {cannotWriteWords(current.leadCannotWriteReason)} Home keeps writing the line from
+                the board.
               </span>
             ) : null}
           </span>

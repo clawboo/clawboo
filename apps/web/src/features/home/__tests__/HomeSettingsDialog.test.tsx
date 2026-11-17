@@ -70,23 +70,46 @@ describe('Home settings', () => {
     expect(await screen.findByTestId('home-weekly-manage', {}, T)).toBeInTheDocument()
   })
 
-  it('says why the switch is off for a lead that cannot write the line, and keeps it off', async () => {
-    render(
-      <HomeSettingsDialog
-        open
-        onClose={() => {}}
-        teamId="t1"
-        teamName="Launch"
-        settings={{ ...defaultHomeSettings(), leadCanWriteStatus: false }}
-        onChanged={() => {}}
-      />,
-    )
-    const toggle = await screen.findByRole('switch', { name: 'The lead writes the status line' }, T)
-    expect(toggle).toBeDisabled()
-    expect(screen.getByTestId('home-lead-cannot-write')).toHaveTextContent(
-      'an OpenClaw lead has no way to',
-    )
-  })
+  it.each([
+    ['no_lead', 'This team has no lead, so nobody can write it.'],
+    ['openclaw_lead', 'This team’s lead runs on OpenClaw, whose board tools cannot write it.'],
+    [
+      'tasks_read_only',
+      'This team’s lead runs on Clawboo Native with read-only board access, the default, so it cannot write it.',
+    ],
+    [
+      'tasks_off',
+      'This team’s lead runs on Clawboo Native with board access off, so it cannot write it.',
+    ],
+    [null, 'This team’s lead cannot write it.'],
+  ] as const)(
+    'says why the switch is off for a lead that cannot write the line (%s)',
+    async (reason, words) => {
+      render(
+        <HomeSettingsDialog
+          open
+          onClose={() => {}}
+          teamId="t1"
+          teamName="Launch"
+          settings={{
+            ...defaultHomeSettings(),
+            leadCanWriteStatus: false,
+            leadCannotWriteReason: reason,
+          }}
+          onChanged={() => {}}
+        />,
+      )
+      const toggle = await screen.findByRole(
+        'switch',
+        { name: 'The lead writes the status line' },
+        T,
+      )
+      expect(toggle).toBeDisabled()
+      expect(screen.getByTestId('home-lead-cannot-write')).toHaveTextContent(
+        `${words} Home keeps writing the line from the board.`,
+      )
+    },
+  )
 
   it('says so in plain words when the server refuses the lead line', async () => {
     useToastStore.setState({ toasts: [] })
@@ -110,12 +133,42 @@ describe('Home settings', () => {
     await user.click(toggle)
     await waitFor(
       () =>
-        expect(useToastStore.getState().toasts[0]?.message).toMatch(
-          /lead cannot write the status line/,
+        expect(useToastStore.getState().toasts[0]?.message).toBe(
+          'This team’s lead cannot write the status line. Home settings say why.',
         ),
       T,
     )
     expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('reads Home again when the server refuses the lead line, and then says why', async () => {
+    server.use(
+      http.put('/api/home/teams/:teamId/settings', () =>
+        HttpResponse.json({ ok: false, error: 'lead_cannot_write' }, { status: 409 }),
+      ),
+    )
+    const onChanged = vi.fn()
+    const user = userEvent.setup()
+    const props = { open: true, onClose: () => {}, teamId: 't1', teamName: 'Launch', onChanged }
+    const { rerender } = render(<HomeSettingsDialog {...props} settings={defaultHomeSettings()} />)
+    await user.click(
+      await screen.findByRole('switch', { name: 'The lead writes the status line' }, T),
+    )
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1), T)
+    expect(onChanged).toHaveBeenCalledWith()
+    // Home's next read: the lead was swapped for one with read-only board access.
+    rerender(
+      <HomeSettingsDialog
+        {...props}
+        settings={{
+          ...defaultHomeSettings(),
+          leadCanWriteStatus: false,
+          leadCannotWriteReason: 'tasks_read_only',
+        }}
+      />,
+    )
+    expect(screen.getByTestId('home-lead-cannot-write')).toHaveTextContent('read-only board access')
+    expect(screen.getByRole('switch', { name: 'The lead writes the status line' })).toBeDisabled()
   })
 
   it('does not promise a run link Home does not show', async () => {

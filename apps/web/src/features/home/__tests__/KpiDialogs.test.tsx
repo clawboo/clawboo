@@ -3,7 +3,8 @@
 // it, accepting a suggestion sends the person's edits, and a person types a
 // value into a KPI whose source is a person, then sees it in the history. A save
 // in flight keeps the editor open, a late history read never hides a newer one,
-// and a value left open long enough turns stale.
+// and a value left open long enough turns stale. A KPI whose source changed says
+// its history holds the earlier values.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -440,5 +441,65 @@ describe("a KPI's dialog over time", () => {
     expect(dialog).not.toHaveTextContent('Stale')
     rerender(<KpiDetailDialog {...props} now={HOME_FIXTURE_NOW + 2 * 60 * 60_000} />)
     expect(screen.getByTestId('kpi-detail')).toHaveTextContent('expected every hour')
+  })
+})
+
+describe('a KPI whose source changed', () => {
+  it('says it has no value from its current source while the history keeps the old ones', async () => {
+    server.use(
+      http.get('/api/home/teams/:teamId/kpis/:kpiId/values', () =>
+        HttpResponse.json({
+          values: [
+            {
+              id: 'v1',
+              kpiId: 'k5',
+              value: 142,
+              asOf: HOME_FIXTURE_NOW,
+              reportedBy: { kind: 'agent', id: 'a1', name: 'Iris' },
+              executionId: 'e1',
+              taskId: null,
+              sourceUrl: null,
+              note: null,
+              createdAt: HOME_FIXTURE_NOW,
+            },
+          ],
+        }),
+      ),
+    )
+    render(
+      <KpiDetailDialog
+        // It was an agent's, and a person types it now.
+        tile={makeKpiTile({ id: 'k5', name: 'Signups', source: 'person' })}
+        onClose={() => {}}
+        teamId="t1"
+        now={HOME_FIXTURE_NOW}
+        names={names}
+        onEdit={() => {}}
+        onChanged={() => {}}
+        onOpenTask={() => {}}
+      />,
+    )
+    expect(await screen.findByTestId('kpi-history', {}, T)).toHaveTextContent('Reported by Iris')
+    expect(screen.getByTestId('kpi-detail-provenance')).toHaveTextContent(
+      'No value from its current source yet. The history keeps the values from before.',
+    )
+    expect(screen.getByTestId('kpi-detail-value')).toHaveTextContent('No value')
+  })
+
+  it('still says no value typed yet when there is no history at all', async () => {
+    render(
+      <KpiDetailDialog
+        tile={makeKpiTile({ id: 'k6', name: 'Calls', source: 'person' })}
+        onClose={() => {}}
+        teamId="t1"
+        now={HOME_FIXTURE_NOW}
+        names={names}
+        onEdit={() => {}}
+        onChanged={() => {}}
+        onOpenTask={() => {}}
+      />,
+    )
+    expect(await screen.findByText('No value typed yet.', {}, T)).toBeInTheDocument()
+    expect(screen.getByTestId('kpi-detail-provenance')).toHaveTextContent('No value typed yet')
   })
 })

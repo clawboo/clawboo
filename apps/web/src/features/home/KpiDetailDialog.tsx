@@ -174,7 +174,11 @@ function KpiDetailBody({
           </span>
         </div>
         <p className="mt-1 text-xs text-muted-foreground" data-testid="kpi-detail-provenance">
-          {provenanceWords(tile, now, names)}
+          {/* A reading uses only its current source's values, so after the source
+              changes it has none while the history still lists the earlier ones. */}
+          {reading.freshness === 'missing' && stored && values && values.length > 0
+            ? 'No value from its current source yet. The history keeps the values from before.'
+            : provenanceWords(tile, now, names)}
         </p>
         {stale ? <p className="board-reason mt-1 text-xs font-medium">{stale}</p> : null}
       </div>

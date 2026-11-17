@@ -1,6 +1,7 @@
 // One way to make a Home write: run it, and when it fails say why. A write the
 // server's person check refused gets the same notice the Board gives; anything
-// else gets a short "Couldn't ..." toast. The caller gets the result, or null.
+// else gets a short "Couldn't ..." toast. The caller gets the result, or null, and
+// can hear which refusal it was (`onRefused`) to read again what changed.
 
 import { HomeRequestError } from '@clawboo/control-client'
 
@@ -20,7 +21,8 @@ const CODE_WORDS: Record<string, string> = {
   parent_has_parent: 'A goal under another goal cannot have goals under it.',
   goal_has_children: 'This goal has goals under it, so it cannot go under another goal.',
   goal_other_team: 'That goal belongs to another team.',
-  goal_archived: 'That goal is archived.',
+  goal_archived:
+    'That goal was archived, so it takes no updates. Archiving it discarded its drafts.',
   empty: 'Give it a title first.',
   too_long: 'That is too long.',
   too_many: 'This team has as many of these as Home keeps.',
@@ -29,14 +31,19 @@ const CODE_WORDS: Record<string, string> = {
   not_active: 'That KPI is archived.',
   wrong_source: 'Only a KPI a person types takes values by hand.',
   archived: 'That is archived.',
-  lead_cannot_write:
-    'This team’s lead cannot write the status line: an OpenClaw lead has no way to, and a team with no lead has nobody to.',
+  // The refusal does not say why; Home settings do, from the team's settings.
+  lead_cannot_write: 'This team’s lead cannot write the status line. Home settings say why.',
 }
 
 export async function homeWrite<T>(
   what: string,
   write: () => Promise<T>,
-  opts: { success?: string } = {},
+  opts: {
+    success?: string
+    /** Called with the refusal code (null for a failure with none) after any failure
+     *  but the person check's. */
+    onRefused?: (code: string | null) => void
+  } = {},
 ): Promise<T | null> {
   const toast = useToastStore.getState().addToast
   try {
@@ -49,6 +56,7 @@ export async function homeWrite<T>(
       return null
     }
     const code = err instanceof HomeRequestError ? err.code : null
+    opts.onRefused?.(code)
     toast({
       type: 'error',
       message: (code && CODE_WORDS[code]) || `Couldn’t ${what}. Please try again.`,

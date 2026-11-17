@@ -104,7 +104,7 @@ Click a goal to open its page. It has:
 - **Linked tasks**, each with its status, how it reaches the goal (linked itself, through its request, or through its parent task), whether its check passed, and its cost. Click one to open it;
 - the goal's **KPIs**, the **Goals under it** and its **Pages**.
 
-**Mark done**, **Drop** and **Archive** are in the goal's header. A done or dropped goal leaves the Goals list for **Done and dropped**, a folded list under it: open it to reach those goals, and **Reopen** one from its page. An archived goal leaves Home; its tasks keep their link.
+**Mark done**, **Drop** and **Archive** are in the goal's header. A done or dropped goal leaves the Goals list for **Done and dropped**, a folded list under it: open it to reach those goals, and **Reopen** one from its page. An archived goal leaves Home; its tasks keep their link, and its drafts are discarded. It takes no more updates.
 
 ## KPIs
 
@@ -115,6 +115,8 @@ A KPI is a number the team tracks, such as signups or how much it spent. A perso
 | **Computed** | Worked out by Clawboo each time Home is read, from one of the metrics below. Nobody types it.                                                                                               |
 | **An agent** | An agent reports it with its `report_kpi` tool. You can name the one agent who may, or let any agent on the team. Each value records the agent, the run and the task, and may carry a link. |
 | **A person** | You type it: click the tile, then fill in **New value**, with an optional note and link.                                                                                                    |
+
+A KPI reads only values from its current source. Change an agent KPI to one a person types, or the other way round, and it shows no value until the new source reports one; its history keeps every value.
 
 The metrics a computed KPI can read:
 
@@ -159,7 +161,7 @@ You can have the team lead write it instead, in [Home settings](#home-settings).
 Open a team's Home and click the gear in the header.
 
 - **Weekly goal updates**: **Turn on** makes a normal team routine that asks the lead, once a week, to draft an update for each active goal. The drafts wait in **Needs you** for you to publish. Change its time or turn it off in [Routines](/using/routines).
-- **The lead writes the status line**: off by default, because it costs model calls. See [The status line](#the-status-line). It cannot be turned on for a team whose lead is an OpenClaw agent, which has no way to write it, or for a team with no lead; the switch says so.
+- **The lead writes the status line**: off by default, because it costs model calls. See [The status line](#the-status-line). It cannot be turned on for a team with no lead, a team whose lead is an OpenClaw agent, which has no way to write it, or a team whose lead is a Clawboo Native agent with board access that is read-only (the default) or off; the switch says which.
 
 ## On the Board
 

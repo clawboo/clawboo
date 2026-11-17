@@ -1,7 +1,7 @@
 // A goal's page: an agent's draft update is published (as is, or edited first) or
 // discarded by a person, a person sets health, linked tasks open the board
 // drawer, and cost says when it includes estimates. Only the newest read of the
-// goal lands.
+// goal lands, and a goal archived since the page was read says so.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -14,6 +14,7 @@ import { HOME_FIXTURE_NOW, makeGoalSummary } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
 import { resetBoardPerson } from '@/features/board/useBoardPerson'
 import { useFleetStore } from '@/stores/fleet'
+import { useToastStore } from '@/stores/toast'
 
 import { GoalPage, type GoalPageActions } from '../GoalPage'
 
@@ -258,6 +259,24 @@ describe('a goal page', () => {
     })
   })
 
+  it('counts done and dropped goals under it when passing children to Edit', async () => {
+    // The server's count includes done and dropped children, which leave Home's lists.
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', () =>
+        HttpResponse.json({
+          goal: detail({ summary: { ...detail().summary, childCount: 2 }, children: [] }),
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    const a = renderPage()
+    await user.click(await screen.findByTestId('goal-edit', {}, T))
+    expect(a.editGoal).toHaveBeenCalledWith(expect.objectContaining({ id: 'g1' }), {
+      parent: null,
+      childCount: 2,
+    })
+  })
+
   it('says a failed read failed, with Try again, rather than calling the goal gone', async () => {
     let fail = true
     server.use(
@@ -345,5 +364,41 @@ describe('reads of a goal', () => {
     expect(screen.getByTestId('goal-title-heading')).toHaveTextContent(
       'Launch the beta to 100 people',
     )
+  })
+})
+
+describe('a goal archived since the page was read', () => {
+  it('says so when publishing a draft is refused, and reads the goal again', async () => {
+    useToastStore.setState({ toasts: [] })
+    let archived = false
+    server.use(
+      http.get('/api/home/teams/:teamId/goals/:goalId', () => {
+        if (!archived) return HttpResponse.json({ goal: detail() })
+        const gone = detail({ updates: [] })
+        gone.summary.goal.archivedAt = HOME_FIXTURE_NOW
+        return HttpResponse.json({ goal: gone })
+      }),
+      http.post('/api/home/teams/:teamId/updates/:updateId/publish', () => {
+        // Archived in another tab: its drafts went with it.
+        archived = true
+        return HttpResponse.json({ ok: false, error: 'goal_archived' }, { status: 409 })
+      }),
+    )
+    const user = userEvent.setup()
+    const a = renderPage()
+    await user.click(await screen.findByTestId('draft-publish', {}, T))
+    await waitFor(
+      () =>
+        expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+          'That goal was archived, so it takes no updates. Archiving it discarded its drafts.',
+        ),
+      T,
+    )
+    expect(await screen.findByTestId('goal-archived-note', {}, T)).toHaveTextContent(
+      'This goal is archived, so it takes no updates.',
+    )
+    expect(screen.queryByTestId('goal-update-draft')).toBeNull()
+    expect(screen.queryByTestId('goal-write-update')).toBeNull()
+    expect(a.changed).toHaveBeenCalled()
   })
 })
