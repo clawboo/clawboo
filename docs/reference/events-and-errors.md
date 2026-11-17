@@ -23,7 +23,7 @@ These are the orchestration events defined in `@clawboo/obs`. The OpenClaw Gatew
 
 ## Event kinds
 
-There are 34 kinds. New kinds are only ever added, so older logs keep parsing.
+There are 38 kinds. New kinds are only ever added, so older logs keep parsing.
 
 | Kind                                          | Group      | Records                                                        | Written by                                                                         | Activity badge     |
 | --------------------------------------------- | ---------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------ |
@@ -61,6 +61,10 @@ There are 34 kinds. New kinds are only ever added, so older logs keep parsing.
 | [`job_limit_reached`](#job_limit_reached)     | Board      | A job reached its limit of runs started by itself              | Board writes and the board route                                                   |
 | [`job_limit_carried_on`](#job_limit_reached)  | Board      | A person said a job at its limit may carry on                  | Board writes and the board route                                                   |
 | [`connector_health`](#connector_health)       | Connectors | A connector's health changed                                   | Connector supervisor                                                               | connector          |
+| [`kpi_reported`](#home-events)                | Home       | An agent reported a KPI value                                  | Tasks MCP (`report_kpi`)                                                           | (hidden)           |
+| [`goal_update_drafted`](#home-events)         | Home       | An agent drafted a goal update                                 | Tasks MCP (`draft_goal_update`)                                                    | (hidden)           |
+| [`goal_update_published`](#home-events)       | Home       | A person published a goal update                               | Home routes                                                                        | (hidden)           |
+| [`page_revised`](#home-events)                | Home       | A team page got a new revision                                 | Home routes, Tasks MCP (`write_page`)                                              | (hidden)           |
 
 - **Board API** means the board routes the dashboard calls. Tasks MCP tools write the same board events, with an `actor`.
 - **Task runner** runs serve `POST /api/runtimes/:id/run` and agent routine fires on runtimes other than OpenClaw. **Team engine** runs serve team chat and the tasks it delegates. See [How a team works](/intro/how-it-works) for the two paths.
@@ -319,6 +323,16 @@ A task-runner run reached its turn limit or filled its context, and continued in
 ## Pause events
 
 `pause_placed` and `pause_lifted` carry `{ scope, id, reason?, person?, actor? }`, where `scope` is `agent`, `team` or `task_tree`. The envelope names the agent, the team or the root task. A second pause of something already paused writes nothing. The dashboard reads these to keep what it shows as paused up to date. A task a pause holds back raises no Needs you alert, since a person placed the pause.
+
+## Home events
+
+In releases after 0.8.0. What agents and people change on a team's [Home](/reference/rest-api/home). The envelope names the team, and the agent when one wrote it. None carries words: no update body, page text or KPI note.
+
+- `kpi_reported`: `{ kpiId, value, asOf, executionId?, actor? }`, with the bound task as the envelope's task.
+- `goal_update_drafted` and `goal_update_published`: `{ goalId, updateId, health?, executionId?, actor? }`. A published update that names a health set the goal's health.
+- `page_revised`: `{ pageId, revision, revertedFrom?, executionId?, actor? }`. `revertedFrom` names the revision a revert copied.
+
+`actor` is `{ kind: 'person' | 'agent', id, name }`.
 
 ## Approval events
 

@@ -1,0 +1,14 @@
+---
+'clawboo': minor
+---
+
+Each team can now keep goals, KPIs and pages, and Clawboo serves them for a team's Home and for an all-teams view in one read (`GET /api/home`). The Home screen itself comes in its own change; this adds what it reads and writes.
+
+- **Goals.** Flat goals per team, each optionally under one parent goal. A goal has an owner, a target date, a status, a health a person sets, and its own page: the tasks linked to it, its KPIs, its updates and its cost. A task serves a goal when it or its request names one: work handed out under a request takes the request's goal, so it counts toward that goal. Progress is done tasks over linked ones (a request's own card and cancelled or removed tasks are left out), with how many passed their check and how many were added in the last 7 days. Cost is the sum of the linked tasks' run costs and says when it includes an estimate. A goal with no published update within its cadence says so.
+- **KPIs.** A person defines each KPI once: name, unit, target, period and where its value comes from. A computed KPI is worked out from the board on read (tasks done, tasks done with a passing check, requests done, spend, share of the team budget used, run success rate, what needs you, median hours to done, open requests). An agent KPI takes values an agent reports, each with the run and task it came from; a person KPI takes values a person types. A value older than the KPI allows is marked stale. Agents can suggest a KPI; a person accepts or dismisses it.
+- **Goal updates.** Agents draft updates; only a person publishes or discards one, and publishing an update that names a health sets the goal's health.
+- **Pages.** Markdown pages per team, linked to a goal or not, with every revision kept. Agents may write them; a person can revert any revision.
+- **Status line.** A sentence made from the board ("2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent"). A team can instead have its lead write it, which costs model calls and so is off until a person turns it on: the lead is asked only when the board changed, at most every 6 hours and 4 times a day.
+- **Weekly updates.** One call makes a weekly team routine that asks the lead to draft an update for each active goal.
+
+Agents use new Tasks MCP tools: `list_goals`, `get_goal`, `list_kpis`, `list_pages` and `read_page` to read, and, when their session is bound to them, `report_kpi`, `suggest_kpi`, `write_page`, `draft_goal_update` and, for the lead, `write_home_summary`. No tool lets an agent publish an update, set a goal's health, define a KPI or change a target. A lead's turn now lists the team's active goals; a worker's turn names its task's goal. `POST /api/board`, a person's board patch and a person's team chat message take `goalId`. The capability flag `home.goals` says the routes are there, and four new event kinds record agent reports, drafts, publishing and page revisions.

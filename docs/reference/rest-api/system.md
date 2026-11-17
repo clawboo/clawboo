@@ -832,7 +832,8 @@ The answer is built from the running process alone: no database read, no network
     "auth.personCheck": false,
     "auth.readerKey": false,
     "computer.controlClaim": false,
-    "ui.embedTitlebar": true
+    "ui.embedTitlebar": true,
+    "home.goals": true
   }
 }
 ```
@@ -892,6 +893,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `auth.readerKey`                                                            | In releases after 0.8.0. An administrator set a reader key (`proxyIdentityReaderPublicKey`): a program running beside this server can make its own short list of reads with a key of its own, never as a person. See [A program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo).                                                                             |
 | `computer.controlClaim`                                                     | In releases after 0.8.0. Taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent (`proxyIdentityControlClaim: required`). See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen).                                                                                                  |
 | `ui.embedTitlebar`                                                          | Always, in releases after 0.8.0. An app that shows the dashboard in its own window can ask for the slim top bar by setting `data-clawboo-embed-titlebar` on the page. It has no route. See [Show the dashboard in an app's window](/guides/app-window).                                                                                                                  |
+| `home.goals`                                                                | Always, in releases after 0.8.0. Home: a team's goals, KPIs, pages and status line, and the all-teams view (`GET /api/home` and `/api/home/teams/:teamId/...`), plus the Tasks MCP tools agents use there. See [Home API](/reference/rest-api/home).                                                                                                                     |
 
 ### For client authors
 
