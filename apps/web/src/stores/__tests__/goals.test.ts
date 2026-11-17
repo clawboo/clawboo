@@ -1,6 +1,7 @@
 // Each team's goals for the Board. A forced read (Home changed a goal) always reads
 // again, even while an older read is in flight, and only the newest answer is kept:
-// a read that began before the change can never land last and leave a stale list.
+// a read that began before the change can never land last and leave a stale list. A
+// failed read is never kept as "no goals".
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -98,9 +99,23 @@ describe('the goals store', () => {
     await vi.waitFor(() => expect(titles()).toEqual(['Launch the beta']))
   })
 
-  it('keeps an empty list when the read fails', async () => {
-    listGoals.mockRejectedValue(new Error('no Home here'))
+  it('caches nothing when a first read fails, so the next load reads again', async () => {
+    listGoals.mockRejectedValueOnce(new Error('no Home here'))
+    expect(await useGoalsStore.getState().load('t1')).toBeNull()
+    expect(useGoalsStore.getState().byTeam['t1']).toBeUndefined()
+    listGoals.mockResolvedValueOnce([summary('g1', 'Launch')])
     await useGoalsStore.getState().load('t1')
-    expect(useGoalsStore.getState().byTeam['t1']).toEqual([])
+    expect(listGoals).toHaveBeenCalledTimes(2)
+    expect(titles()).toEqual(['Launch'])
+  })
+
+  it('keeps the last good list when a refresh fails', async () => {
+    listGoals.mockResolvedValueOnce([summary('g1', 'Launch')])
+    await useGoalsStore.getState().load('t1')
+    listGoals.mockRejectedValueOnce(new Error('offline'))
+    expect((await useGoalsStore.getState().load('t1', true))?.map((g) => g.title)).toEqual([
+      'Launch',
+    ])
+    expect(titles()).toEqual(['Launch'])
   })
 })

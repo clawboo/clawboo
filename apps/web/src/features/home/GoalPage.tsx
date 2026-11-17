@@ -109,6 +109,9 @@ export function GoalPage({
   const [missing, setMissing] = useState(false)
   const [readFailed, setReadFailed] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  // A status write (Mark done, Drop, Reopen) in flight holds the others.
+  const [statusBusy, setStatusBusy] = useState(false)
+  const statusPending = useRef(false)
 
   // Only the newest read lands: one started before a write must not paint the goal as
   // it was over the read that followed the write.
@@ -225,6 +228,11 @@ export function GoalPage({
   }
 
   async function setStatus(status: GoalStatus) {
+    // One status write at a time: Mark done and Drop in flight together could land in
+    // either order.
+    if (statusPending.current) return
+    statusPending.current = true
+    setStatusBusy(true)
     const saved = await homeWrite(
       'change the goal',
       () => updateGoal(teamId, goal.id, { status }),
@@ -237,6 +245,8 @@ export function GoalPage({
               : 'Goal reopened.',
       },
     )
+    statusPending.current = false
+    setStatusBusy(false)
     if (saved) changed()
   }
 
@@ -328,16 +338,34 @@ export function GoalPage({
               Edit
             </Button>
             {goal.status === 'active' ? (
-              <Button size="sm" variant="secondary" onClick={() => void setStatus('done')}>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={statusBusy}
+                onClick={() => void setStatus('done')}
+                data-testid="goal-mark-done"
+              >
                 Mark done
               </Button>
             ) : (
-              <Button size="sm" variant="secondary" onClick={() => void setStatus('active')}>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={statusBusy}
+                onClick={() => void setStatus('active')}
+                data-testid="goal-reopen"
+              >
                 Reopen
               </Button>
             )}
             {goal.status === 'active' ? (
-              <Button size="sm" variant="ghost" onClick={() => void setStatus('dropped')}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={statusBusy}
+                onClick={() => void setStatus('dropped')}
+                data-testid="goal-drop"
+              >
                 Drop
               </Button>
             ) : null}

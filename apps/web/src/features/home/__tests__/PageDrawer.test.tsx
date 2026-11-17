@@ -1,7 +1,9 @@
 // A team page: its markdown read with who wrote the revision, an edit that makes
 // a new revision, the history naming each revision's author (a person, or an
 // agent in a run), restore as a new revision, pin, and a new page. A late pin
-// answer changes only the pin, never an edit saved while it was on its way.
+// answer changes only the pin, never an edit saved while it was on its way. A new
+// page's default goal is for that page's first save only, and a restore names the
+// revision the server made.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,6 +14,7 @@ import type { TeamPageRevision, TeamPageWithBody } from '@clawboo/control-client
 
 import { HOME_FIXTURE_NOW, makeGoalSummary, makePage } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
+import { useToastStore } from '@/stores/toast'
 
 import { PageDrawer } from '../PageDrawer'
 
@@ -336,5 +339,68 @@ describe('a pin that answers late', () => {
     )
     expect(screen.getByTestId('page-byline')).toHaveTextContent('Revision 3, written by you')
     expect(screen.getByTestId('page-body')).toHaveTextContent('New body')
+  })
+})
+
+describe('a new page saved with No goal', () => {
+  it('keeps No goal when edited again, not the goal the drawer opened with', async () => {
+    let posted: Record<string, unknown> | null = null
+    server.use(
+      http.post('/api/home/teams/:teamId/pages', async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          page: page({ id: 'p9', title: 'Brand voice', revision: 1, goalId: null }),
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <PageDrawer
+        target={{ newPage: true, goalId: 'g1' }}
+        onClose={() => {}}
+        teamId="t1"
+        goals={[makeGoalSummary({ id: 'g1', title: 'Launch the beta' })]}
+        now={HOME_FIXTURE_NOW}
+        names={names}
+        onChanged={() => {}}
+      />,
+    )
+    await user.type(await screen.findByTestId('page-title', {}, T), 'Brand voice')
+    expect(screen.getByRole('button', { name: 'Goal' })).toHaveTextContent('Launch the beta')
+    await user.click(screen.getByRole('button', { name: 'Goal' }))
+    await user.click(await screen.findByRole('option', { name: 'No goal' }))
+    await user.click(screen.getByTestId('page-save'))
+    await waitFor(() => expect(posted).toMatchObject({ goalId: null }), T)
+    await user.click(await screen.findByTestId('page-edit', {}, T))
+    expect(screen.getByRole('button', { name: 'Goal' })).toHaveTextContent('No goal')
+  })
+})
+
+describe('restoring a revision', () => {
+  it('names the revision the server made, not the one the drawer guessed', async () => {
+    useToastStore.setState({ toasts: [] })
+    serveRevisions()
+    server.use(
+      http.get('/api/home/teams/:teamId/pages/:pageId', () => HttpResponse.json({ page: page() })),
+      // Two more revisions landed since the drawer read the page at revision 2.
+      http.post('/api/home/teams/:teamId/pages/:pageId/revert', () =>
+        HttpResponse.json({ page: page({ revision: 5, updatedBy: ME, body: 'First draft' }) }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderDrawer()
+    await screen.findByTestId('page-byline', {}, T)
+    await user.click(screen.getByRole('tab', { name: /History/ }))
+    const list = await screen.findByTestId('page-revisions', {}, T)
+    await user.click(within(list).getByRole('button', { name: /Revision 1/ }))
+    await within(screen.getByTestId('page-revision-preview')).findByText('First draft', {}, T)
+    await user.click(screen.getByTestId('page-restore'))
+    await waitFor(
+      () =>
+        expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+          'Restored revision 1 as revision 5.',
+        ),
+      T,
+    )
   })
 })

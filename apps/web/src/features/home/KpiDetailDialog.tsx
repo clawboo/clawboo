@@ -110,6 +110,13 @@ function KpiDetailBody({
   const [values, setValues] = useState<KpiValue[] | null>(null)
   const [readFailed, setReadFailed] = useState(false)
   const stored = kpi.source !== 'computed'
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   // Only the newest read lands: the first read can answer after the one a new value
   // started, and must not put back the history without that value.
@@ -144,7 +151,8 @@ function KpiDetailBody({
     })
     if (done) {
       onChanged()
-      onClose()
+      // Closed, or showing another KPI, by the time it landed: that dialog stays.
+      if (mounted.current) onClose()
     }
   }
 

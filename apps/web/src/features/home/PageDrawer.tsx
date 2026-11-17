@@ -306,7 +306,8 @@ function PageEditor({
   const ids = { title: useId(), body: useId() }
   const [title, setTitle] = useState(page?.title ?? '')
   const [body, setBody] = useState(page?.body ?? '')
-  const [goalId, setGoalId] = useState(page?.goalId ?? defaultGoalId ?? NO_GOAL)
+  // The drawer's default goal is for a new page only: a page saved with No goal keeps it.
+  const [goalId, setGoalId] = useState(page ? (page.goalId ?? NO_GOAL) : (defaultGoalId ?? NO_GOAL))
   const [pinned, setPinned] = useState(true)
   const [busy, setBusy] = useState(false)
   // A new title or text makes a revision; a new goal alone does not.
@@ -525,13 +526,18 @@ function PageHistory({
 
   async function restore(revision: number) {
     setBusy(true)
-    const saved = await homeWrite(
-      'restore the revision',
-      () => revertPage(teamId, page.id, revision),
-      { success: `Restored revision ${revision} as revision ${page.revision + 1}.` },
+    const saved = await homeWrite('restore the revision', () =>
+      revertPage(teamId, page.id, revision),
     )
     setBusy(false)
-    if (saved) onRestored(saved)
+    if (saved) {
+      // The revision number the server gave it: another may have landed meanwhile.
+      useToastStore.getState().addToast({
+        type: 'success',
+        message: `Restored revision ${revision} as revision ${saved.revision}.`,
+      })
+      onRestored(saved)
+    }
   }
 
   const picked = preview?.revision ?? null

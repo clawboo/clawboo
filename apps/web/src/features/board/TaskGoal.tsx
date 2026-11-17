@@ -18,7 +18,9 @@ const NO_GOAL = ''
 /** The picker's value for a goal the task inherits rather than names. */
 const INHERITED = 'inherited'
 
-/** A team's active goals, read on first use. Null while they are being read. */
+/** A team's active goals, read on first use. Null while they are being read, and
+ *  after a read that failed (nothing is known, so nothing is cleared or offered); a
+ *  later mount reads again. */
 export function useTeamGoals(
   teamId: string | null | undefined,
   enabled = true,

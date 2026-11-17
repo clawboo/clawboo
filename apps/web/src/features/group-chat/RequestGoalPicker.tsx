@@ -21,7 +21,8 @@ export function RequestGoalPicker({
   const goals = useTeamGoals(teamId)
   // A picked goal that is no longer among the team's active goals (done, dropped, or
   // on another team) is cleared, so a request never carries a goal the picker does not
-  // show. Only once the list is read: while it loads, nothing is known to be gone.
+  // show. Only once a read succeeded: while it loads, or after it failed, nothing is
+  // known to be gone.
   const gone = goals !== null && goalId !== null && !goals.some((g) => g.id === goalId)
   useEffect(() => {
     if (gone) onChange(null)

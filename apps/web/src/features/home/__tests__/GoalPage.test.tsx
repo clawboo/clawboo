@@ -1,7 +1,8 @@
 // A goal's page: an agent's draft update is published (as is, or edited first) or
 // discarded by a person, a person sets health, linked tasks open the board
 // drawer, and cost says when it includes estimates. Only the newest read of the
-// goal lands, and a goal archived since the page was read says so.
+// goal lands, a goal archived since the page was read says so, and one status
+// write runs at a time.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -400,5 +401,30 @@ describe('a goal archived since the page was read', () => {
     expect(screen.queryByTestId('goal-update-draft')).toBeNull()
     expect(screen.queryByTestId('goal-write-update')).toBeNull()
     expect(a.changed).toHaveBeenCalled()
+  })
+})
+
+describe("a goal's status", () => {
+  it('holds Drop while Mark done is on its way', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const sent: unknown[] = []
+    server.use(
+      http.patch('/api/home/teams/:teamId/goals/:goalId', async ({ request }) => {
+        sent.push(await request.json())
+        await gate
+        return HttpResponse.json({ goal: { ...detail().summary.goal, status: 'done' } })
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage()
+    await user.click(await screen.findByTestId('goal-mark-done', {}, T))
+    const drop = screen.getByTestId('goal-drop')
+    await waitFor(() => expect(drop).toBeDisabled(), T)
+    expect(screen.getByTestId('goal-mark-done')).toBeDisabled()
+    await user.click(drop)
+    release()
+    await waitFor(() => expect(screen.getByTestId('goal-mark-done')).toBeEnabled(), T)
+    expect(sent).toEqual([{ status: 'done' }])
   })
 })

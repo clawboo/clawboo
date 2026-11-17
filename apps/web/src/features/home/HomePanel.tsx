@@ -148,7 +148,10 @@ export function HomePanel() {
       ? load.data.home
       : null
   const goals: GoalSummary[] = teamHome?.goals ?? []
-  const closedGoals = useClosedGoals(team?.id ?? null, goalReload)
+  // Read again when the team's active goals change in a new snapshot (someone marked
+  // one done elsewhere, say), not on every poll that changes nothing.
+  const activeGoalIds = teamHome ? teamHome.goals.map((g) => g.goal.id).join(',') : null
+  const closedGoals = useClosedGoals(team?.id ?? null, goalReload, activeGoalIds)
 
   useEffect(() => {
     const id = returnToGoal.current
@@ -201,17 +204,18 @@ export function HomePanel() {
     }
   }, [])
 
+  // Answers whether it was dismissed. It closes nothing itself: a dismissal from Needs
+  // you that lands late must not close a dialog opened meanwhile. The suggestion's own
+  // dialog closes itself, and holds still while its dismissal runs.
   const dismissSuggestion = useCallback(
     async (kpiId: string, teamId: string) => {
       const done = await homeWrite('dismiss the suggestion', () =>
         dismissKpiSuggestion(teamId, kpiId),
       )
-      if (done) {
-        closeKpiDialog()
-        afterWrite(teamId)
-      }
+      if (done) afterWrite(teamId)
+      return done !== null
     },
-    [afterWrite, closeKpiDialog],
+    [afterWrite],
   )
 
   const actions: TeamHomeActions = {
@@ -488,7 +492,7 @@ export function HomePanel() {
         teamId={kpiDialog?.teamId ?? team?.id ?? ''}
         goals={kpiDialog && kpiDialog.teamId === team?.id ? goals : []}
         onSaved={() => afterWrite(kpiDialog?.teamId ?? null)}
-        onDismissSuggestion={(kpi) => void dismissSuggestion(kpi.id, kpi.teamId)}
+        onDismissSuggestion={(kpi) => dismissSuggestion(kpi.id, kpi.teamId)}
       />
 
       <AnimatePresence>

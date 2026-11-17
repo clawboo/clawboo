@@ -609,33 +609,38 @@ describe('when Home cannot be read', () => {
   })
 })
 
+/** All teams with two suggested KPIs in Needs you: Reply time on t1, Open rate on t2. */
+function serveTwoSuggestions() {
+  useTeamStore.setState({ selectedTeamId: null })
+  const all = emptyAllTeamsHome()
+  const suggestion = (kpiId: string, name: string, teamId: string) => ({
+    kpiId,
+    name,
+    teamId,
+    goalId: null,
+    suggestedBy: { kind: 'agent' as const, id: 'a1', name: 'Iris' },
+    note: null,
+    createdAt: HOME_FIXTURE_NOW,
+  })
+  all.teams = teams.map((t) => ({
+    team: { id: t.id, name: t.name, icon: t.icon, color: null, leaderAgentId: null },
+    status: computedStatus('Nothing in flight.'),
+    goals: [],
+    kpis: [],
+    needsYouCount: 1,
+    spend: emptyTeamHome(t.id).spend,
+  }))
+  all.needsYou = {
+    ...emptyNeedsYou(),
+    total: 2,
+    suggestedKpis: [suggestion('kA', 'Reply time', 't1'), suggestion('kB', 'Open rate', 't2')],
+  }
+  serveHome((id) => emptyTeamHome(id, 'Launch'), all)
+}
+
 describe('reviewing a suggested KPI', () => {
   it('opens the suggestion picked last, even when the first answers later', async () => {
-    useTeamStore.setState({ selectedTeamId: null })
-    const all = emptyAllTeamsHome()
-    const suggestion = (kpiId: string, name: string, teamId: string) => ({
-      kpiId,
-      name,
-      teamId,
-      goalId: null,
-      suggestedBy: { kind: 'agent' as const, id: 'a1', name: 'Iris' },
-      note: null,
-      createdAt: HOME_FIXTURE_NOW,
-    })
-    all.teams = teams.map((t) => ({
-      team: { id: t.id, name: t.name, icon: t.icon, color: null, leaderAgentId: null },
-      status: computedStatus('Nothing in flight.'),
-      goals: [],
-      kpis: [],
-      needsYouCount: 1,
-      spend: emptyTeamHome(t.id).spend,
-    }))
-    all.needsYou = {
-      ...emptyNeedsYou(),
-      total: 2,
-      suggestedKpis: [suggestion('kA', 'Reply time', 't1'), suggestion('kB', 'Open rate', 't2')],
-    }
-    serveHome((id) => emptyTeamHome(id, 'Launch'), all)
+    serveTwoSuggestions()
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
     server.use(
@@ -667,5 +672,48 @@ describe('reviewing a suggested KPI', () => {
     expect(within(screen.getByTestId('kpi-dialog')).getByTestId('kpi-name')).toHaveValue(
       'Open rate',
     )
+  })
+})
+
+describe('dismissing a suggested KPI from Needs you', () => {
+  it('leaves a dialog opened meanwhile open when the dismissal lands late', async () => {
+    serveTwoSuggestions()
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let dismissed = false
+    server.use(
+      http.post('/api/home/teams/:teamId/kpis/:kpiId/dismiss', async () => {
+        await gate
+        dismissed = true
+        return HttpResponse.json({ kpi: makeKpiTile({ id: 'kA', status: 'archived' }).kpi })
+      }),
+      http.get('/api/home/teams/:teamId/kpis', () =>
+        HttpResponse.json({
+          kpis: [makeKpiTile({ id: 'kB', teamId: 't2', name: 'Open rate', status: 'suggested' })],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<HomePanel />)
+    const rows = await screen.findAllByTestId('home-needs-suggestion', {}, T)
+    await user.click(within(rows[0]!).getByRole('button', { name: 'Dismiss' }))
+    await user.click(within(rows[1]!).getByRole('button', { name: 'Review' }))
+    const dialog = await screen.findByTestId('kpi-dialog', {}, T)
+    await user.type(within(dialog).getByTestId('kpi-target'), '5')
+    const readsBefore = reads.length
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    await waitFor(() => expect(dismissed).toBe(true), T)
+    // The dismissal has landed once Home reads again after it.
+    await waitFor(() => expect(reads.length).toBeGreaterThan(readsBefore), T)
+    // A closed dialog stays in the page while it animates out: wait that out.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1200))
+    })
+    const still = screen.getByTestId('kpi-dialog')
+    expect(within(still).getByTestId('kpi-name')).toHaveValue('Open rate')
+    expect(within(still).getByTestId('kpi-target')).toHaveValue('5')
   })
 })

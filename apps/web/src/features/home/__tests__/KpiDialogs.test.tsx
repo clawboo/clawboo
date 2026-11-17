@@ -4,7 +4,8 @@
 // value into a KPI whose source is a person, then sees it in the history. A save
 // in flight keeps the editor open, a late history read never hides a newer one,
 // and a value left open long enough turns stale. A KPI whose source changed says
-// its history holds the earlier values.
+// its history holds the earlier values. A dismissal holds the dialog that asked,
+// and a late archive never closes another KPI's dialog.
 
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -15,6 +16,7 @@ import type { KpiValue } from '@clawboo/control-client'
 
 import { HOME_FIXTURE_NOW, makeGoalSummary, makeKpi, makeKpiTile } from '@/__vitest__/homeFixtures'
 import { server } from '@/__vitest__/mswServer'
+import { ConfirmDialog } from '@/features/shared/ConfirmDialog'
 import { useFleetStore } from '@/stores/fleet'
 
 import { KpiDetailDialog } from '../KpiDetailDialog'
@@ -501,5 +503,114 @@ describe('a KPI whose source changed', () => {
     )
     expect(await screen.findByText('No value typed yet.', {}, T)).toBeInTheDocument()
     expect(screen.getByTestId('kpi-detail-provenance')).toHaveTextContent('No value typed yet')
+  })
+})
+
+describe('dismissing a suggestion from its dialog', () => {
+  it('holds the dialog while the dismissal runs, then closes it', async () => {
+    let release!: (done: boolean) => void
+    const dismissal = new Promise<boolean>((r) => (release = r))
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <KpiDialog
+        mode={{
+          kind: 'accept',
+          kpi: makeKpi({ id: 'k-sugg', name: 'Reply time', status: 'suggested' }),
+        }}
+        onClose={onClose}
+        teamId="t1"
+        goals={[]}
+        onSaved={() => {}}
+        onDismissSuggestion={() => dismissal}
+      />,
+    )
+    const dialog = await screen.findByTestId('kpi-dialog', {}, T)
+    await user.click(within(dialog).getByTestId('kpi-dismiss'))
+    expect(within(dialog).getByTestId('kpi-dismiss')).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    expect(within(dialog).getByTestId('kpi-name')).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(onClose).not.toHaveBeenCalled()
+    await act(async () => release(true))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), T)
+  })
+
+  it('stays open when the dismissal fails', async () => {
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <KpiDialog
+        mode={{
+          kind: 'accept',
+          kpi: makeKpi({ id: 'k-sugg', name: 'Reply time', status: 'suggested' }),
+        }}
+        onClose={onClose}
+        teamId="t1"
+        goals={[]}
+        onSaved={() => {}}
+        onDismissSuggestion={() => Promise.resolve(false)}
+      />,
+    )
+    const dialog = await screen.findByTestId('kpi-dialog', {}, T)
+    await user.click(within(dialog).getByTestId('kpi-dismiss'))
+    await waitFor(() => expect(within(dialog).getByTestId('kpi-dismiss')).toBeEnabled(), T)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('archiving a KPI that answers late', () => {
+  it('does not close the dialog of a KPI opened meanwhile', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    server.use(
+      http.delete('/api/home/teams/:teamId/kpis/:kpiId', async () => {
+        await gate
+        return HttpResponse.json({ kpi: makeKpi({ id: 'k1', status: 'archived' }) })
+      }),
+    )
+    const onClose = vi.fn()
+    const onChanged = vi.fn()
+    const user = userEvent.setup()
+    const props = {
+      onClose,
+      teamId: 't1',
+      now: HOME_FIXTURE_NOW,
+      names,
+      onEdit: () => {},
+      onChanged,
+      onOpenTask: () => {},
+    }
+    const first = makeKpiTile({ id: 'k1', name: 'Calls', source: 'computed', metric: 'tasks_done' })
+    const { rerender } = render(
+      <>
+        <KpiDetailDialog {...props} tile={first} />
+        <ConfirmDialog />
+      </>,
+    )
+    await user.click(await screen.findByTestId('kpi-archive', {}, T))
+    await user.click(
+      within(await screen.findByTestId('confirm-dialog', {}, T)).getByTestId('confirm-ok'),
+    )
+    // The person opens another KPI before the archive answers.
+    const second = makeKpiTile({
+      id: 'k2',
+      name: 'Signups',
+      source: 'computed',
+      metric: 'tasks_done',
+    })
+    rerender(
+      <>
+        <KpiDetailDialog {...props} tile={second} />
+        <ConfirmDialog />
+      </>,
+    )
+    await act(async () => {
+      release()
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    await waitFor(() => expect(onChanged).toHaveBeenCalled(), T)
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByTestId('kpi-detail')).toHaveTextContent('Signups')
   })
 })

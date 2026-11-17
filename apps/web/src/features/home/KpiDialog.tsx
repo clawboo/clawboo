@@ -64,8 +64,8 @@ export function KpiDialog({
   teamId: string
   goals: GoalSummary[]
   onSaved: (tile: KpiTile) => void
-  /** Accept mode's other answer. */
-  onDismissSuggestion?: (kpi: TeamKpi) => void
+  /** Accept mode's other answer. Resolves to whether it was dismissed. */
+  onDismissSuggestion?: (kpi: TeamKpi) => Promise<boolean>
 }) {
   // Held here so Escape and outside presses cannot close the dialog mid-save: a save
   // that lands later would otherwise close whatever dialog opened next.
@@ -116,7 +116,7 @@ function KpiForm({
   teamId: string
   goals: GoalSummary[]
   onSaved: (tile: KpiTile) => void
-  onDismissSuggestion?: (kpi: TeamKpi) => void
+  onDismissSuggestion?: (kpi: TeamKpi) => Promise<boolean>
   busy: boolean
   setBusy: (busy: boolean) => void
 }) {
@@ -155,6 +155,16 @@ function KpiForm({
   const staleOk =
     computed || staleNumber === null || (Number.isInteger(staleNumber) && staleNumber > 0)
   const canSave = name.trim().length > 0 && targetOk && staleOk && !busy
+
+  // A dismissal holds the dialog like a save does (nothing else can be pressed, and it
+  // cannot be closed), then closes this dialog, the one that asked.
+  async function dismiss() {
+    if (!onDismissSuggestion || mode.kind !== 'accept' || busy) return
+    setBusy(true)
+    const done = await onDismissSuggestion(mode.kpi)
+    setBusy(false)
+    if (done) onClose()
+  }
 
   async function save() {
     if (!canSave) return
@@ -395,7 +405,7 @@ function KpiForm({
             size="sm"
             disabled={busy}
             data-testid="kpi-dismiss"
-            onClick={() => onDismissSuggestion(mode.kpi)}
+            onClick={() => void dismiss()}
           >
             Dismiss
           </Button>

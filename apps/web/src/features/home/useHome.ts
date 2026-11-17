@@ -31,31 +31,45 @@ export function useHome(teamId: string): { load: HomeLoad; refresh: () => Promis
   // before a switch, say) does nothing, so it can neither show that team nor drop the
   // read under way for this one.
   const current = useRef(teamId)
+  // The read still out, if any. A poll waits for it rather than replacing it: on a
+  // server slower than the poll, each poll would drop the read before it, and Home
+  // would never leave the skeleton. Any other read (a team switch, a write, Try
+  // again) still replaces it.
+  const pending = useRef<number | null>(null)
 
-  const refresh = useCallback(async () => {
-    if (teamId !== current.current) return
-    const id = ++seq.current
-    try {
-      const data = await fetchHome(teamId)
-      if (id !== seq.current || teamId !== current.current) return
-      setLoad({ state: 'ready', data })
-    } catch (err) {
-      if (id !== seq.current || teamId !== current.current) return
-      const known = err instanceof HomeRequestError
-      const teamGone = known && err.code === 'team_not_found'
-      const failed: HomeLoad = {
-        state: 'error',
-        missing: known && err.status === 404 && !teamGone,
-        teamGone,
+  const read = useCallback(
+    async (poll: boolean) => {
+      if (teamId !== current.current) return
+      if (poll && pending.current !== null) return
+      const id = ++seq.current
+      pending.current = id
+      try {
+        const data = await fetchHome(teamId)
+        if (id !== seq.current || teamId !== current.current) return
+        setLoad({ state: 'ready', data })
+      } catch (err) {
+        if (id !== seq.current || teamId !== current.current) return
+        const known = err instanceof HomeRequestError
+        const teamGone = known && err.code === 'team_not_found'
+        const failed: HomeLoad = {
+          state: 'error',
+          missing: known && err.status === 404 && !teamGone,
+          teamGone,
+        }
+        // A failed poll keeps this team's sections on screen; anything else (a first
+        // read, or a return to a team whose sections are no longer held) shows the
+        // error. A team that is gone is said even mid-visit, so Home can leave it.
+        setLoad((prev) =>
+          !teamGone && prev.state === 'ready' && readFor(prev.data) === teamId ? prev : failed,
+        )
+      } finally {
+        if (pending.current === id) pending.current = null
       }
-      // A failed poll keeps this team's sections on screen; anything else (a first
-      // read, or a return to a team whose sections are no longer held) shows the
-      // error. A team that is gone is said even mid-visit, so Home can leave it.
-      setLoad((prev) =>
-        !teamGone && prev.state === 'ready' && readFor(prev.data) === teamId ? prev : failed,
-      )
-    }
-  }, [teamId])
+    },
+    [teamId],
+  )
+
+  const refresh = useCallback(() => read(false), [read])
 
   useEffect(() => {
     current.current = teamId
@@ -66,7 +80,7 @@ export function useHome(teamId: string): { load: HomeLoad; refresh: () => Promis
     void refresh()
   }, [teamId, refresh])
 
-  useVisiblePolling(() => void refresh(), HOME_POLL_MS)
+  useVisiblePolling(() => void read(true), HOME_POLL_MS)
 
   return { load, refresh }
 }

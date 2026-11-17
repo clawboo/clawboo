@@ -135,4 +135,24 @@ describe('the goal for new requests', () => {
     )
     expect(onChange).not.toHaveBeenCalled()
   })
+
+  it('keeps a picked goal when the goals read fails, and a later mount reads again', async () => {
+    let reads = 0
+    server.use(
+      http.get('/api/home/teams/:teamId/goals', () => {
+        reads += 1
+        return HttpResponse.json({ error: 'boom' }, { status: 503 })
+      }),
+    )
+    const onChange = vi.fn()
+    const { unmount } = render(<RequestGoalPicker teamId="T" goalId="g1" onChange={onChange} />)
+    await waitFor(() => expect(reads).toBe(1), T)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(onChange).not.toHaveBeenCalled()
+    unmount()
+    render(<RequestGoalPicker teamId="T" goalId="g1" onChange={onChange} />)
+    await waitFor(() => expect(reads).toBe(2), T)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })

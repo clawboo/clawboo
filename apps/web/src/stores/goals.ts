@@ -2,8 +2,10 @@
 // picker in the drawer, the New task dialog and team chat, and the goal filter.
 //
 // Read on demand, per team, and kept until Home changes a goal (Home calls
-// `invalidate`). A read that fails (an engine without Home, say) keeps an empty
-// list, so the Board shows no goal parts rather than an error.
+// `invalidate`). A read that fails (an engine without Home, say) is never kept as
+// an empty list: the team stays unread (so the next mount reads again) and a list
+// read before stays. A failed read is not "this team has no goals", so nothing
+// treats it as one.
 
 import { create } from 'zustand'
 import { listGoals, type GoalHealth, type GoalLinkVia } from '@clawboo/control-client'
@@ -19,13 +21,14 @@ export interface GoalOption {
 interface GoalsStore {
   /** Each team's active goals, in Home's order. Missing: not read yet. */
   byTeam: Record<string, GoalOption[]>
-  /** Read a team's goals unless they are known (or being read). `force` reads again. */
-  load: (teamId: string, force?: boolean) => Promise<GoalOption[]>
+  /** Read a team's goals unless they are known (or being read). `force` reads again.
+   *  Answers the list, or null when the read failed and none was read before. */
+  load: (teamId: string, force?: boolean) => Promise<GoalOption[] | null>
   /** Forget a team's goals, and read them again if they were known. */
   invalidate: (teamId: string) => void
 }
 
-const inflight = new Map<string, Promise<GoalOption[]>>()
+const inflight = new Map<string, Promise<GoalOption[] | null>>()
 /** Each team's newest read. A forced read always starts a new one (a goal changed
  *  after the read in flight began), and only the newest read's answer is kept. */
 const generation = new Map<string, number>()
@@ -51,13 +54,16 @@ export const useGoalsStore = create<GoalsStore>((set, get) => ({
             health: g.goal.health,
           })),
       )
-      .catch(() => [] as GoalOption[])
-      .then((list) => {
-        // A newer read started meanwhile: its answer is the one to keep.
-        if (generation.get(teamId) !== mine) return get().byTeam[teamId] ?? list
-        set((s) => ({ byTeam: { ...s.byTeam, [teamId]: list } }))
-        return list
-      })
+      .then(
+        (list): GoalOption[] | null => {
+          // A newer read started meanwhile: its answer is the one to keep.
+          if (generation.get(teamId) !== mine) return get().byTeam[teamId] ?? list
+          set((s) => ({ byTeam: { ...s.byTeam, [teamId]: list } }))
+          return list
+        },
+        // Failed: keep what was read before, if anything, and cache nothing.
+        () => get().byTeam[teamId] ?? null,
+      )
       .finally(() => {
         if (inflight.get(teamId) === read) inflight.delete(teamId)
       })
