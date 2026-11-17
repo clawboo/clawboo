@@ -488,11 +488,14 @@ const ROUTES: Array<[string, (who: Who, res: Response) => unknown]> = [
   ],
   [
     "turning on a team's lead-written status line",
-    (who, res) =>
-      homeSettingsPUT(
+    (who, res) => {
+      // The fixture's agent is an OpenClaw agent, which could not write the line.
+      getDb().update(agents).set({ runtime: 'hermes' }).where(eq(agents.id, 'coder')).run()
+      return homeSettingsPUT(
         req({ params: { teamId: TEAM }, body: { leadWritesStatus: true }, ...who }),
         res,
-      ),
+      )
+    },
   ],
   [
     "turning on a team's weekly goal updates",
