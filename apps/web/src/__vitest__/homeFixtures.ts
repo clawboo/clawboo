@@ -55,7 +55,7 @@ export function computedStatus(text = 'Nothing in flight.'): HomeStatusLine {
 }
 
 export function defaultHomeSettings(): TeamHomeSettings {
-  return { leadWritesStatus: false, weeklyUpdatesRoutineId: null }
+  return { leadWritesStatus: false, leadCanWriteStatus: true, weeklyUpdatesRoutineId: null }
 }
 
 export function emptyTeamHome(teamId: string, name = 'Team'): TeamHome {
@@ -219,7 +219,10 @@ export const homeHandlers = [
     HttpResponse.json({ ok: false, error: 'page_not_found' }, { status: 404 }),
   ),
   http.get('/api/home/teams/:teamId/pages/:pageId/revisions', () =>
-    HttpResponse.json({ revisions: [] }),
+    HttpResponse.json({ revisions: [], nextBefore: null }),
+  ),
+  http.get('/api/home/teams/:teamId/pages/:pageId/revisions/:revision', () =>
+    HttpResponse.json({ ok: false, error: 'revision_not_found' }, { status: 404 }),
   ),
   http.get('/api/home/teams/:teamId/settings', () =>
     HttpResponse.json({ settings: defaultHomeSettings() }),

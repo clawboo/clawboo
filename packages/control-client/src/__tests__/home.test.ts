@@ -6,8 +6,10 @@ import {
   createGoal,
   fetchHome,
   getGoal,
+  getPageRevision,
   HomeRequestError,
   listKpiValues,
+  listPageRevisions,
   listPages,
   publishGoalUpdate,
   resetControlClient,
@@ -74,6 +76,19 @@ describe('home client', () => {
     expect(err).toBeInstanceOf(HomeRequestError)
     expect((err as HomeRequestError).status).toBe(403)
     expect((err as HomeRequestError).code).toBe('person_only')
+  })
+
+  it('pages the revision list and fetches one revision by number', async () => {
+    const fn = stubFetch({ revisions: [], nextBefore: null, revision: { revision: 3 } })
+    expect(await listPageRevisions('t1', 'p1', { before: 40, limit: 20 })).toMatchObject({
+      revisions: [],
+      nextBefore: null,
+    })
+    await getPageRevision('t1', 'p1', 3)
+    expect(call(fn, 0).url).toBe('/api/home/teams/t1/pages/p1/revisions?before=40&limit=20')
+    expect(call(fn, 1).url).toBe('/api/home/teams/t1/pages/p1/revisions/3')
+    stubFetch({ ok: false, error: 'revision_not_found' }, 404)
+    expect(await getPageRevision('t1', 'p1', 9)).toBeNull()
   })
 
   it('names each write route the server serves', async () => {

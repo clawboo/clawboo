@@ -268,19 +268,33 @@ export interface TeamPage {
   updatedBy: HomeActor | null
 }
 
-export interface TeamPageRevision {
+/** A revision without its words: what the revision list returns. */
+export interface TeamPageRevisionMeta {
   id: string
   pageId: string
   /** 1, 2, 3 for a page. Nothing is overwritten: a revert is a new revision. */
   revision: number
   title: string
-  /** Markdown. */
-  body: string
+  /** How long its body is, in characters. */
+  bodyChars: number
   author: HomeActor | null
   executionId: string | null
   /** The revision this one copied, for a revert. */
   revertedFrom: number | null
   createdAt: number
+}
+
+/** One revision with its words (`getPageRevision`). */
+export interface TeamPageRevision extends TeamPageRevisionMeta {
+  /** Markdown. */
+  body: string
+}
+
+/** A page of the revision list, newest first. */
+export interface TeamPageRevisionList {
+  revisions: TeamPageRevisionMeta[]
+  /** Pass as `before` for the next, older page; null when there is none. */
+  nextBefore: number | null
 }
 
 export interface TeamPageWithBody extends TeamPage {
@@ -425,6 +439,10 @@ export interface HomeRecentFile {
 export interface TeamHomeSettings {
   /** The team lead writes the status line (costs model calls). Off by default. */
   leadWritesStatus: boolean
+  /** Whether the team's lead can write it at all. An OpenClaw lead cannot: its Tasks
+   *  tools carry no identity, so it is never offered `write_home_summary`. Turning the
+   *  line on for such a team answers 409 `lead_cannot_write`. */
+  leadCanWriteStatus: boolean
   /** The routine that asks the lead for weekly goal updates, when turned on. */
   weeklyUpdatesRoutineId: string | null
 }
@@ -834,14 +852,34 @@ export async function updatePage(
   return (await jsonOrThrow<{ page: TeamPageWithBody }>(res, 'Update page')).page
 }
 
-/** Every revision, newest first. */
+/**
+ * Revisions newest first, without their words, a page at a time: up to `limit`
+ * (default 50, at most 200) older than `before`. Fetch one revision's words with
+ * `getPageRevision`.
+ */
 export async function listPageRevisions(
   teamId: string,
   pageId: string,
-): Promise<TeamPageRevision[]> {
-  const res = await apiFetch(teamPath(teamId, `/pages/${enc(pageId)}/revisions`))
-  return (await jsonOrThrow<{ revisions: TeamPageRevision[] }>(res, 'List page revisions'))
-    .revisions
+  opts: { before?: number; limit?: number } = {},
+): Promise<TeamPageRevisionList> {
+  const res = await apiFetch(
+    withQuery(teamPath(teamId, `/pages/${enc(pageId)}/revisions`), {
+      before: opts.before !== undefined ? String(opts.before) : undefined,
+      limit: opts.limit !== undefined ? String(opts.limit) : undefined,
+    }),
+  )
+  return jsonOrThrow<TeamPageRevisionList>(res, 'List page revisions')
+}
+
+/** One revision with its words, or null when the page has no such revision. */
+export async function getPageRevision(
+  teamId: string,
+  pageId: string,
+  revision: number,
+): Promise<TeamPageRevision | null> {
+  const res = await apiFetch(teamPath(teamId, `/pages/${enc(pageId)}/revisions/${revision}`))
+  if (res.status === 404) return null
+  return (await jsonOrThrow<{ revision: TeamPageRevision }>(res, 'Load page revision')).revision
 }
 
 /** A new revision that copies `revision`. */
@@ -875,6 +913,10 @@ export async function getTeamHomeSettings(teamId: string): Promise<TeamHomeSetti
   return (await jsonOrThrow<{ settings: TeamHomeSettings }>(res, 'Load Home settings')).settings
 }
 
+/**
+ * Turn the lead-written status line on or off. Turning it on for a team whose lead
+ * cannot write it (`leadCanWriteStatus` false) answers 409 `lead_cannot_write`.
+ */
 export async function updateTeamHomeSettings(
   teamId: string,
   input: { leadWritesStatus: boolean },
