@@ -34,10 +34,20 @@ describe('orchestration event schema', () => {
     expect(orchestrationEventSchema.safeParse({ id: 'e', kind: 'cost' }).success).toBe(false)
   })
 
-  it('covers all 34 kinds', () => {
+  it('covers all 38 kinds', () => {
     // A deliberate tripwire: adding a kind must be a decision someone sees in a
     // diff, not something that slips in. Bump the number WITH the kind.
-    expect(ORCHESTRATION_EVENT_KINDS).toHaveLength(34)
+    expect(ORCHESTRATION_EVENT_KINDS).toHaveLength(38)
+  })
+
+  it("carries Home's kinds", () => {
+    for (const kind of [
+      'kpi_reported',
+      'goal_update_drafted',
+      'goal_update_published',
+      'page_revised',
+    ])
+      expect(ORCHESTRATION_EVENT_KINDS).toContain(kind)
   })
 
   it('carries the connector/grant plane kinds', () => {

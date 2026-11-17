@@ -59,6 +59,13 @@ export const ORCHESTRATION_EVENT_KINDS = [
   // A job has started all the runs it may by itself, and a person said to carry on.
   'job_limit_reached',
   'job_limit_carried_on',
+  // ─── Home: goals, KPIs and pages ──────────────────────────────────────────
+  // An agent reported a KPI value; an update was drafted (by an agent) or
+  // published (by a person); a page got a new revision.
+  'kpi_reported',
+  'goal_update_drafted',
+  'goal_update_published',
+  'page_revised',
 ] as const
 
 export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number]
@@ -390,6 +397,40 @@ export interface JobLimitData {
   actor?: EventActor
 }
 
+/** Who did something on Home, as the event records it. */
+export interface HomeEventActor {
+  kind: 'person' | 'agent'
+  id: string
+  name: string | null
+}
+
+/** A KPI value was stored by an agent (`report_kpi`). The value, never a note. */
+export interface KpiReportedData {
+  kpiId: string
+  value: number
+  asOf: number
+  executionId?: string | null
+  actor?: HomeEventActor | null
+}
+
+/** A goal update was drafted, or published. Never the update's words. */
+export interface GoalUpdateEventData {
+  goalId: string
+  updateId: string
+  health?: string | null
+  executionId?: string | null
+  actor?: HomeEventActor | null
+}
+
+/** A page got a new revision. Never the page's words. */
+export interface PageRevisedData {
+  pageId: string
+  revision: number
+  revertedFrom?: number | null
+  executionId?: string | null
+  actor?: HomeEventActor | null
+}
+
 export interface KindToData {
   task_created: TaskCreatedData
   task_claimed: TaskClaimedData
@@ -425,6 +466,10 @@ export interface KindToData {
   task_braked: TaskBrakedData
   job_limit_reached: JobLimitData
   job_limit_carried_on: JobLimitData
+  kpi_reported: KpiReportedData
+  goal_update_drafted: GoalUpdateEventData
+  goal_update_published: GoalUpdateEventData
+  page_revised: PageRevisedData
 }
 
 /** A producer-side typed event: the envelope minus the server-assigned bits, plus

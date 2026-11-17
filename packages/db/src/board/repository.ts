@@ -54,6 +54,8 @@ import { and, count, desc, eq, gt, gte, inArray, isNull, like, lt, ne, or, sql }
 
 import { readyOrder } from './readyOrder'
 
+import { goalForNewTaskTx } from '../home/links'
+
 import type { ClawbooDb } from '../db'
 import { appendEvent } from '../events/appendEvent'
 import { parsePersonJson, personJson, type PersonRecord } from '../person'
@@ -155,6 +157,9 @@ export interface CreateTaskInput {
   titleMatchAnyRequest?: boolean
   /** The one-to-one chat it was handed off from (see `tasks.chat_session_key`). */
   chatSessionKey?: string | null
+  /** The team goal it serves. Omitted: its parent's goal, when that is on its team.
+   *  A goal of another team is dropped (see home/links.ts). */
+  goalId?: string | null
 }
 
 /** What an open main task says it waits for. */
@@ -206,6 +211,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     runExecutionId: null,
     isMainTask: input.mainTaskLead ? 1 : 0,
     chatSessionKey: input.chatSessionKey ?? null,
+    goalId: input.goalId ?? null,
   }
 }
 
@@ -213,6 +219,9 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
  *  its idempotency key, so all three land or none do. */
 export function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
   const row = buildTaskRow(input)
+  // Every create path comes through here, so this is where a request's or a
+  // parent's goal is copied down.
+  row.goalId = goalForNewTaskTx(tx, row, input.goalId)
   row.identifier = allocateTaskIdentifier(tx, row.teamId)
   tx.insert(tasks).values(row).run()
   if (input.createKey) rememberCreateKey(tx, input.createKey, row.id, row.createdAt)
@@ -547,6 +556,8 @@ export interface MainTaskRequest {
   key: string
   /** The one-to-one chat the message came from: what reports on the request goes there. */
   chatSessionKey?: string | null
+  /** The team goal the person filed the message under; its work inherits it. */
+  goalId?: string | null
 }
 
 export type HandOffUnderRequestResult =
@@ -578,6 +589,7 @@ export function insertMainTaskTx(
       mainTaskLead: request.leadAgentId,
       createKey: { key: request.key },
       chatSessionKey: request.chatSessionKey ?? null,
+      goalId: request.goalId ?? null,
     }),
   }
 }
