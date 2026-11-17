@@ -496,6 +496,23 @@ export type HomeResponse = { scope: 'team'; home: TeamHome } | { scope: 'all'; h
 
 // ─── A goal's own page ───────────────────────────────────────────────────────
 
+/** How a task reaches the goal it counts toward: its own `goalId`, its request's
+ *  (the main task above it), or a parent's between. */
+export type GoalLinkVia = 'own' | 'request' | 'parent'
+
+/**
+ * What board task rows (`GET /api/board`, `GET /api/board/:taskId`) and board change
+ * frames carry about a task's goal. `goalId` is what the task itself stores (null for
+ * none of its own); `effectiveGoalId` is the goal it counts toward, the one the goal
+ * page and its progress use. Show a goal chip and filter "No goal" by
+ * `effectiveGoalId`; edit with `setTaskGoal`.
+ */
+export interface BoardTaskGoal {
+  goalId: string | null
+  effectiveGoalId: string | null
+  goalLinkedVia: GoalLinkVia | null
+}
+
 export interface GoalTask {
   taskId: string
   identifier: string | null
@@ -507,7 +524,7 @@ export interface GoalTask {
   /** True when the check passed, false when it failed, null with no check. */
   checked: boolean | null
   /** How the task reaches the goal: its own `goalId`, its request's, or a parent's. */
-  linkedVia: 'own' | 'request' | 'parent'
+  linkedVia: GoalLinkVia
   dropped: boolean
   createdAt: number
   completedAt: number | null
@@ -943,10 +960,11 @@ export async function turnOnWeeklyUpdates(
 // Board links
 
 /**
- * Link a task to a goal on its own team, or unlink it with null:
- * `PATCH /api/board/:taskId` with `goalId`. `POST /api/board` (the New task
- * dialog) and a team chat message (`goalId` on the send, for the request's main
- * task) take `goalId` too. Board task rows carry `goalId`.
+ * Link a task to a goal on its own team, or take it off every goal with null (its
+ * request's included; the work under it follows): `PATCH /api/board/:taskId` with
+ * `goalId`. `POST /api/board` (the New task dialog) and a team chat message
+ * (`goalId` on the send, for the request's main task) take `goalId` too. Board task
+ * rows and board change frames carry `BoardTaskGoal`.
  */
 export async function setTaskGoal(taskId: string, goalId: string | null): Promise<void> {
   const res = await send(`/api/board/${enc(taskId)}`, 'PATCH', { goalId })

@@ -119,8 +119,14 @@ export const boardChangeFrameSchema = z.object({
   isMainTask: z.boolean().optional(),
   /** A card that only holds a plan. */
   planHolder: z.boolean().optional(),
-  /** The team goal the task itself names (its own `goalId`), or null. */
+  /** The team goal the task itself names (its own stored `goalId`), or null. */
   goalId: z.string().nullable().optional(),
+  /** The goal the task counts toward: its own, else the nearest one up its parent
+   *  chain (its request's when nothing between names another). Null for none, which
+   *  includes a task a person took off every goal. */
+  effectiveGoalId: z.string().nullable().optional(),
+  /** How `effectiveGoalId` reaches the task; null when it has none. */
+  goalLinkedVia: z.enum(['own', 'request', 'parent']).nullable().optional(),
 })
 export type BoardChangeFrame = z.infer<typeof boardChangeFrameSchema>
 

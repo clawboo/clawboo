@@ -55,6 +55,12 @@ export interface BoardTaskView {
   isMainTask?: boolean
   /** A card that only holds a plan: it does no work, so a request's progress skips it. */
   planHolder?: boolean
+  /** The team goal the task itself names, or null. */
+  goalId?: string | null
+  /** The goal it counts toward (its own, else its request's or a parent's), or null. */
+  effectiveGoalId?: string | null
+  /** How `effectiveGoalId` reaches it. */
+  goalLinkedVia?: 'own' | 'request' | 'parent' | null
   /** The question it waits on, as a one-to-one chat's stream last said: its card there
    *  shows the answer buttons. Null when none is open. */
   openQuestion?: { id: string; kind: string; payload: unknown } | null
@@ -77,7 +83,15 @@ export type BoardChangeFrame = BoardChange & {
   assigneePersonId?: string | null
   assigneePerson?: string | null
   planHolder?: boolean
+  goalId?: string | null
+  effectiveGoalId?: string | null
+  goalLinkedVia?: 'own' | 'request' | 'parent' | null
   openQuestion?: { id: string; kind: string; payload: unknown } | null
+}
+
+/** A row's `goalLinkedVia`, or null for anything else. */
+function goalLinkOf(v: unknown): BoardTaskView['goalLinkedVia'] {
+  return v === 'own' || v === 'request' || v === 'parent' ? v : null
 }
 
 export function mergeTask(
@@ -119,6 +133,14 @@ export function mergeTask(
     parentTaskId: change.parentTaskId ?? existing?.parentTaskId ?? null,
     isMainTask: change.isMainTask ?? existing?.isMainTask ?? false,
     planHolder: change.planHolder ?? existing?.planHolder ?? false,
+    // A frame that names the goal says it; one that does not keeps what was known.
+    goalId: change.goalId !== undefined ? change.goalId : (existing?.goalId ?? null),
+    effectiveGoalId:
+      change.effectiveGoalId !== undefined
+        ? change.effectiveGoalId
+        : (existing?.effectiveGoalId ?? null),
+    goalLinkedVia:
+      change.goalLinkedVia !== undefined ? change.goalLinkedVia : (existing?.goalLinkedVia ?? null),
     // Like `waitingOn`: what the frame said, else the old one holds only while the status
     // is unchanged, since a card that moved has stopped waiting on it.
     openQuestion:
@@ -208,6 +230,9 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
             assigneePerson: typeof r['assigneePerson'] === 'string' ? r['assigneePerson'] : null,
             checkHeldSince: typeof r['checkHeldSince'] === 'number' ? r['checkHeldSince'] : null,
             isMainTask: r.isMainTask === 1 || r.isMainTask === true,
+            goalId: typeof r['goalId'] === 'string' ? r['goalId'] : null,
+            effectiveGoalId: typeof r['effectiveGoalId'] === 'string' ? r['effectiveGoalId'] : null,
+            goalLinkedVia: goalLinkOf(r['goalLinkedVia']),
             planHolder: isPlanHolder(
               typeof r['sourceDelegationId'] === 'string' ? r['sourceDelegationId'] : null,
             ),
