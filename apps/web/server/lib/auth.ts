@@ -36,6 +36,10 @@ declare global {
       /** The program a service token names (roles enforced, `svc: true`): a
        *  caller the sign-in front vouched for that is not a person. Unset otherwise. */
       service?: PersonRef | null
+      /** The `sub` of a reader key's verified token (`reader:...`): a program
+       *  running beside the server making one of its reads, never a person.
+       *  Unset otherwise. */
+      reader?: string | null
       /** The teams a guest may see on this request, set by the route's role
        *  guard. Unset for everyone else. */
       roleScope?: RoleScope
@@ -108,8 +112,9 @@ export function personField(req: Request): { person?: PersonRef } {
  * would answer it for every request, so that person belongs behind this check.
  */
 export function actsAsPerson(req: Request): boolean {
-  // A service token is a program, whatever headers it sends: it never acts as a person.
-  if (req.service) return false
+  // A service token or a reader key's token is a program, whatever headers it
+  // sends (the dashboard's fetch metadata included): it never acts as a person.
+  if (req.service || req.reader) return false
   if (personOf(req) !== null) return true
   return personCheckMode() === 'page' && isDashboardRequest(req)
 }
@@ -121,7 +126,9 @@ export function actsAsPerson(req: Request): boolean {
  * sets the claim otherwise.
  */
 export function controlClaimFor(req: Request, agentId: string): boolean {
-  if (req.service || personOf(req) === null || req.personVia !== 'proxy') return false
+  if (req.service || req.reader || personOf(req) === null || req.personVia !== 'proxy') {
+    return false
+  }
   return typeof req.controlClaim === 'string' && req.controlClaim === agentId && agentId !== ''
 }
 

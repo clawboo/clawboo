@@ -10,11 +10,13 @@ import { generateKeyPairSync, type KeyObject } from 'node:crypto'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 
-import { SignJWT, UnsecuredJWT, type JWK, type JWTPayload } from 'jose'
+import { createDb, type ClawbooDb } from '@clawboo/db'
+import { createLocalJWKSet, SignJWT, UnsecuredJWT, type JWK, type JWTPayload } from 'jose'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { ProxyIdentityConfig } from '../config'
-import { CLOCK_SKEW_SECONDS, createAssertionVerifier } from '../verifier'
+import { createSeenTokenStore } from '../seenTokens'
+import { CLOCK_SKEW_SECONDS, createAssertionVerifier, type SeenTokenStore } from '../verifier'
 
 const ISSUER = 'https://proxy.example.com'
 const AUDIENCE = 'clawboo'
@@ -487,5 +489,283 @@ describe('keys from a JWKS URL', () => {
     const now = Math.floor(Date.now() / 1000)
     const token = await sign(claims({ iat: now, exp: now + 30 }), ed.privateKey, 'EdDSA', 'ed-1')
     expect(await v.verify(at(token))).toEqual({ ok: false, reason: 'keys-unavailable' })
+  })
+})
+
+describe('the reader key', () => {
+  const reader = generateKeyPairSync('ed25519')
+  const readerConfig = (over: Partial<ProxyIdentityConfig> = {}): ProxyIdentityConfig =>
+    config({
+      mode: 'on',
+      header: 'clawboo-reader-identity',
+      issuer: 'clawboo-reader',
+      audience: 'clawboo-engine',
+      keys: { source: 'public-key', jwks: { keys: [jwkOf(reader.publicKey)] } },
+      reader: true,
+      ...over,
+    })
+  const readerClaims = (over: Record<string, unknown> = {}) =>
+    claims({ iss: 'clawboo-reader', aud: 'clawboo-engine', sub: 'reader:companion', ...over })
+
+  it('names its program by its sub alone: no name, role or claim is read', async () => {
+    const v = createAssertionVerifier(readerConfig({ roles: 'enforce' }), { now: () => NOW_MS })
+    const token = await sign(
+      readerClaims({ name: 'Ada', role: 'owner', control: 'a1', svc: true, teams: ['T'] }),
+      reader.privateKey,
+    )
+    expect(await v.verify({ token, method: 'GET', path: '/api/board' })).toEqual({
+      ok: true,
+      person: { id: 'reader:companion', name: null, role: null },
+    })
+  })
+
+  it('refuses a sub that is not reader:, and reader: with nothing after it', async () => {
+    const v = createAssertionVerifier(readerConfig(), { now: () => NOW_MS })
+    for (const sub of ['user-42', 'account:u-7', 'reader:', 'READER:x', ' reader:x']) {
+      const token = await sign(readerClaims({ sub }), reader.privateKey)
+      expect(await v.verify({ token, method: 'GET', path: '/api/board' }), sub).toEqual({
+        ok: false,
+        reason: 'claims',
+      })
+    }
+  })
+
+  it('is request-bound and single use, like a person token', async () => {
+    const v = createAssertionVerifier(readerConfig(), { now: () => NOW_MS })
+    const token = await sign(readerClaims(), reader.privateKey)
+    expect((await v.verify({ token, method: 'GET', path: '/api/board' })).ok).toBe(true)
+    expect(await v.verify({ token, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'replayed',
+    })
+    const other = await sign(readerClaims(), reader.privateKey)
+    expect(await v.verify({ token: other, method: 'GET', path: '/api/teams' })).toEqual({
+      ok: false,
+      reason: 'binding',
+    })
+    const noJti = await sign(readerClaims({ jti: undefined }), reader.privateKey)
+    expect((await v.verify({ token: noJti, method: 'GET', path: '/api/board' })).ok).toBe(false)
+    // Session binding is never a reader's: its config is always request-bound.
+    const session = createAssertionVerifier(readerConfig({ binding: 'session' }), {
+      now: () => NOW_MS,
+    })
+    const s1 = await sign(readerClaims(), reader.privateKey)
+    expect(await session.verify({ token: s1, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'claims',
+    })
+  })
+
+  it("refuses a token signed with a sign-in proxy's key, or for a proxy's issuer", async () => {
+    const v = createAssertionVerifier(readerConfig(), { now: () => NOW_MS })
+    const proxySigned = await sign(readerClaims(), ed.privateKey)
+    expect(await v.verify({ token: proxySigned, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'signature',
+    })
+    const proxyIssuer = await sign(readerClaims({ iss: ISSUER }), reader.privateKey)
+    expect(await v.verify({ token: proxyIssuer, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'issuer',
+    })
+  })
+
+  it("refuses every token while the proxy's published key set holds the reader key", async () => {
+    const verify = async (set: () => Promise<{ keys: JWK[] }>, kid?: string) => {
+      const own = readerConfig({
+        keys: { source: 'public-key', jwks: { keys: [jwkOf(reader.publicKey, kid)] } },
+      })
+      const v = createAssertionVerifier(own, { now: () => NOW_MS, personKeySet: set })
+      const token = await sign(readerClaims(), reader.privateKey, 'EdDSA', kid)
+      return v.verify({ token, method: 'GET', path: '/api/board' })
+    }
+    // A rotation: two keys of the same kind, one of them the reader's, and a
+    // token with no kid, which a key lookup could not pick between.
+    const rotating = async () => ({ keys: [jwkOf(ed.publicKey), jwkOf(reader.publicKey)] })
+    expect(await verify(rotating)).toEqual({ ok: false, reason: 'shared-key' })
+    // The same key under another kid in each set.
+    const renamed = async () => ({ keys: [jwkOf(reader.publicKey, 'proxy-2')] })
+    expect(await verify(renamed, 'reader-1')).toEqual({ ok: false, reason: 'shared-key' })
+    // A set it cannot fetch refuses the token rather than pass it.
+    const unreachable = async (): Promise<{ keys: JWK[] }> => {
+      throw new Error('timed out')
+    }
+    expect(await verify(unreachable)).toEqual({ ok: false, reason: 'keys-unavailable' })
+    // A proxy whose keys are all its own: the reader's token passes, and a key it
+    // cannot read in its set changes nothing.
+    const apart = async () => ({ keys: [jwkOf(ed.publicKey), { kty: 'oct', k: 'c2VjcmV0' }] })
+    expect((await verify(apart)).ok).toBe(true)
+  })
+
+  it('lets a proxy name no reader: subject while the reader key is on, and any id otherwise', async () => {
+    const token = await sign(claims({ sub: 'reader:companion' }))
+    const beside = createAssertionVerifier(config({ refuseReaderSubjects: true }), {
+      now: () => NOW_MS,
+    })
+    expect(await beside.verify({ token, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'claims',
+    })
+    const alone = createAssertionVerifier(config(), { now: () => NOW_MS })
+    const again = await sign(claims({ sub: 'reader:companion' }))
+    expect((await alone.verify({ token: again, method: 'GET', path: '/api/board' })).ok).toBe(true)
+  })
+})
+
+describe("a sign-in proxy's verifier beside the reader key", () => {
+  const reader = generateKeyPairSync('ed25519')
+
+  it('refuses a token a refused key signed, whatever it claims, and takes the rest', async () => {
+    // The proxy's key set holds the reader key too, as a JWKS URL could.
+    const v = createAssertionVerifier(config(), {
+      now: () => NOW_MS,
+      getKey: createLocalJWKSet({
+        keys: [jwkOf(ed.publicKey, 'p-1'), jwkOf(reader.publicKey, 'p-2')],
+      }),
+      refuseKeysIn: { keys: [jwkOf(reader.publicKey)] },
+    })
+    const posing = await sign(claims(), reader.privateKey, 'EdDSA', 'p-2')
+    expect(await v.verify({ token: posing, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'shared-key',
+    })
+    const person = await sign(claims(), ed.privateKey, 'EdDSA', 'p-1')
+    expect((await v.verify({ token: person, method: 'GET', path: '/api/board' })).ok).toBe(true)
+  })
+})
+
+describe('single use across a restart', () => {
+  const reader = generateKeyPairSync('ed25519')
+  let db: ClawbooDb
+
+  const lanes: Array<{
+    issuer: 'proxy' | 'app' | 'reader'
+    cfg: ProxyIdentityConfig
+    sub: string
+    key: KeyObject
+    iss: string
+    aud: string
+  }> = [
+    {
+      issuer: 'proxy',
+      cfg: config(),
+      sub: 'user-42',
+      key: ed.privateKey,
+      iss: ISSUER,
+      aud: AUDIENCE,
+    },
+    {
+      issuer: 'app',
+      cfg: config({
+        mode: 'on',
+        header: 'clawboo-app-identity',
+        issuer: 'clawboo-app-link',
+        audience: 'clawboo-engine',
+        accountSubjects: 'only',
+      }),
+      sub: 'account:u-7',
+      key: ed.privateKey,
+      iss: 'clawboo-app-link',
+      aud: 'clawboo-engine',
+    },
+    {
+      issuer: 'reader',
+      cfg: config({
+        mode: 'on',
+        header: 'clawboo-reader-identity',
+        issuer: 'clawboo-reader',
+        audience: 'clawboo-engine',
+        keys: { source: 'public-key', jwks: { keys: [jwkOf(reader.publicKey)] } },
+        reader: true,
+      }),
+      sub: 'reader:companion',
+      key: reader.privateKey,
+      iss: 'clawboo-reader',
+      aud: 'clawboo-engine',
+    },
+  ]
+
+  /** A verifier as the server builds one, recording into `db`: a fresh one is a restart. */
+  const boot = (cfg: ProxyIdentityConfig, issuer: 'proxy' | 'app' | 'reader', now = NOW_MS) =>
+    createAssertionVerifier(cfg, {
+      now: () => now,
+      seen: createSeenTokenStore(issuer, { db: () => db }),
+    })
+
+  for (const lane of lanes) {
+    it(`${lane.issuer}: refuses a token used before the restart, and takes one never used`, async () => {
+      db = createDb(':memory:')
+      const used = await sign(claims({ sub: lane.sub, iss: lane.iss, aud: lane.aud }), lane.key)
+      const unused = await sign(claims({ sub: lane.sub, iss: lane.iss, aud: lane.aud }), lane.key)
+      const before = boot(lane.cfg, lane.issuer)
+      expect((await before.verify({ token: used, method: 'GET', path: '/api/board' })).ok).toBe(
+        true,
+      )
+      // The server restarts: a new verifier with empty memory, the same database.
+      const after = boot(lane.cfg, lane.issuer, NOW_MS + 1_000)
+      expect(await after.verify({ token: used, method: 'GET', path: '/api/board' })).toEqual({
+        ok: false,
+        reason: 'replayed',
+      })
+      // A token issued before the restart but never used is not refused for that.
+      expect((await after.verify({ token: unused, method: 'GET', path: '/api/board' })).ok).toBe(
+        true,
+      )
+    })
+  }
+
+  it('keeps each lane apart: one id used on one lane is still new on another', async () => {
+    db = createDb(':memory:')
+    const proxy = boot(lanes[0]!.cfg, 'proxy')
+    const app = boot(lanes[1]!.cfg, 'app')
+    const jti = 'shared-id'
+    const p = await sign(claims({ jti }), ed.privateKey)
+    const a = await sign(
+      claims({ jti, sub: 'account:u-7', iss: 'clawboo-app-link', aud: 'clawboo-engine' }),
+      ed.privateKey,
+    )
+    expect((await proxy.verify({ token: p, method: 'GET', path: '/api/board' })).ok).toBe(true)
+    expect((await app.verify({ token: a, method: 'GET', path: '/api/board' })).ok).toBe(true)
+  })
+
+  it('goes by memory alone when the database refuses the record, so nobody is locked out', async () => {
+    const broken: SeenTokenStore = {
+      claim: () => {
+        throw new Error('database or disk is full')
+      },
+      sweep: () => {},
+    }
+    const v = createAssertionVerifier(config(), { now: () => NOW_MS, seen: broken })
+    const token = await sign(claims())
+    expect((await v.verify({ token, method: 'GET', path: '/api/board' })).ok).toBe(true)
+    // Memory still holds its single use.
+    expect(await v.verify({ token, method: 'GET', path: '/api/board' })).toEqual({
+      ok: false,
+      reason: 'replayed',
+    })
+  })
+
+  it('sweeps the records with its memory, at most once a second', async () => {
+    const sweeps: number[] = []
+    const store: SeenTokenStore = { claim: () => true, sweep: (at) => sweeps.push(at) }
+    let now = NOW_MS
+    const v = createAssertionVerifier(config(), { now: () => now, seen: store })
+    for (const step of [0, 200, 1_200]) {
+      now = NOW_MS + step
+      await v.verify({ token: await sign(claims()), method: 'GET', path: '/api/board' })
+    }
+    expect(sweeps).toEqual([NOW_MS, NOW_MS + 1_200])
+  })
+
+  it('records nothing for a session-bound token, which has no single use', async () => {
+    const claimed: string[] = []
+    const store: SeenTokenStore = { claim: (jti) => (claimed.push(jti), true), sweep: () => {} }
+    const v = createAssertionVerifier(config({ binding: 'session' }), {
+      now: () => NOW_MS,
+      seen: store,
+    })
+    const token = await sign(claims({ htm: undefined, htu: undefined }))
+    expect((await v.verify({ token, method: 'GET', path: '/api/board' })).ok).toBe(true)
+    expect(claimed).toEqual([])
   })
 })

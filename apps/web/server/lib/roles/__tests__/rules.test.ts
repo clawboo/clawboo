@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Request } from 'express'
 
+import { READER_ROUTE_KEYS } from '../../proxyIdentity/readerRoutes'
 import { GUARD_RULE } from '../guard'
 import { PERMISSIONS, type Permission } from '../policy'
 import { ROUTE_RULES, type Need, type RouteRule } from '../rules'
@@ -64,6 +65,7 @@ describe('route rules', () => {
   it('lets any verified person reach only the routes that are about the person or the engine', () => {
     const anyPerson = Object.entries(ROUTE_RULES)
       .filter(([, rule]) => typeof rule.need !== 'function' && needOf(rule).length === 0)
+      .filter(([, rule]) => rule.open !== true)
       .map(([key]) => key)
       .sort()
     expect(anyPerson).toEqual([
@@ -72,6 +74,19 @@ describe('route rules', () => {
       'GET /api/system/capabilities',
       'POST /api/system/presence',
     ])
+  })
+
+  it("marks exactly the reader key's reads, and leaves only the liveness probe open", () => {
+    const reader = Object.entries(ROUTE_RULES)
+      .filter(([, rule]) => rule.reader === true)
+      .map(([key]) => key)
+    expect(new Set(reader)).toEqual(
+      new Set(READER_ROUTE_KEYS.filter((k) => k !== 'GET /api/system/live')),
+    )
+    const open = Object.entries(ROUTE_RULES)
+      .filter(([, rule]) => rule.open === true)
+      .map(([key]) => key)
+    expect(open).toEqual(['GET /api/system/live'])
   })
 
   it('marks only the four MCP mounts as a runtime call', () => {

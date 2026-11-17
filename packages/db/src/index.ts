@@ -152,6 +152,10 @@ export * from './taskWakes'
 // ── The agent user pool (CLAWBOO_AGENT_USERS) and its team groups ───────────
 export * from './agentOsUsers'
 
+// ── Request-bound identity tokens already used, kept across restarts ────────
+export { claimIdentityTokenUse, sweepIdentityTokenUses } from './identityTokenUses'
+export type { IdentityTokenUse } from './identityTokenUses'
+
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'
 

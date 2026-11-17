@@ -31,6 +31,8 @@ import {
   roleRefusalBody,
   upgradeAllowedForRoles,
 } from '../guard'
+import { readerRefusalBody } from '../../proxyIdentity/lane'
+import { READER_ROUTE_KEYS } from '../../proxyIdentity/readerRoutes'
 import type { PersonAccess, Role } from '../policy'
 import { ROUTE_RULES, type RouteRule } from '../rules'
 
@@ -48,6 +50,8 @@ interface ReqParts {
   person?: boolean
   /** A service token's program instead of a person. */
   service?: boolean
+  /** A reader key's program instead of a person. */
+  reader?: string
 }
 
 function request({
@@ -57,14 +61,16 @@ function request({
   access,
   person = true,
   service = false,
+  reader,
 }: ReqParts): Request {
   const who = { id: 'p-1', name: 'Ada', role: null }
   return {
     params,
     query,
     body,
-    person: person && !service ? who : null,
+    person: person && !service && !reader ? who : null,
     service: service ? who : null,
+    ...(reader ? { reader } : {}),
     access: access ?? null,
     app: { locals: { rolesMode: 'enforce' } },
   } as unknown as Request
@@ -341,6 +347,45 @@ describe('decideRole', () => {
           body: { decision: 'allow_once' },
         }),
       ).toEqual({ ok: false, reason: 'not-allowed' })
+    })
+  })
+
+  describe("a reader key's program", () => {
+    const readerReads = READER_ROUTE_KEYS.filter((k) => k !== 'GET /api/system/live')
+
+    it('reaches each of its reads, workspace-wide, with no role and no team scoping', () => {
+      for (const key of readerReads) {
+        expect(decide(key, { reader: 'reader:companion' }), key).toEqual({ ok: true, scope: null })
+      }
+    })
+
+    it('reaches nothing else, not even the routes any person may use', () => {
+      for (const key of [
+        'GET /api/access/identity',
+        'GET /api/system/capabilities',
+        'GET /api/health',
+        'GET /api/settings',
+        'POST /api/teams',
+        'GET /api/obs/errors',
+        'POST /api/tools/approvals/:id/resolve',
+        'POST /api/mcp/tasks',
+      ]) {
+        expect(decide(key, { reader: 'reader:companion' }), key).toEqual({
+          ok: false,
+          reason: 'reader',
+        })
+      }
+    })
+
+    it('gets the same 403 from the guard as from the identity lane', () => {
+      expect(roleRefusalBody('reader')).toEqual(JSON.parse(readerRefusalBody()))
+    })
+  })
+
+  describe('the liveness probe', () => {
+    it('needs no person, service or reader', () => {
+      expect(decide('GET /api/system/live', { person: false })).toEqual({ ok: true, scope: null })
+      expect(decide('GET /api/system/live', { reader: 'reader:companion' }).ok).toBe(true)
     })
   })
 

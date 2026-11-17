@@ -91,6 +91,12 @@ export interface RouteRule {
   /** A spawned runtime's own call on one of the four MCP mounts, which names no
    *  person: the access gate already let it in by its attach token. */
   runtime?: true
+  /** One of the reads a reader key's program may make
+   *  (lib/proxyIdentity/readerRoutes.ts). It reaches these routes and no other,
+   *  with no team scoping. */
+  reader?: true
+  /** The liveness probe, which needs no identity at all. */
+  open?: true
 }
 
 /** Owner or operator: a team's own preferences, which either may set. */
@@ -108,6 +114,8 @@ const accounts: RouteRule = { need: 'accounts' }
 const tighten: RouteRule = { need: 'tighten' }
 const ownerOrOperator: RouteRule = { need: OWNER_OR_OPERATOR }
 const mcp: RouteRule = { need: 'system', runtime: true }
+/** A rule a reader key's program may use as well (lib/proxyIdentity/readerRoutes.ts). */
+const forReader = (rule: RouteRule): RouteRule => ({ ...rule, reader: true })
 
 const team = (param = 'id'): GuestReach => ({ by: 'team', param })
 const agent = (param = 'agentId'): GuestReach => ({ by: 'agent', param })
@@ -257,7 +265,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   // ── Approvals ──────────────────────────────────────────────────────────────
   'GET /api/approvals': records,
   'POST /api/approvals': { need: 'approve', more: standingIf('action', 'allow-always') },
-  'GET /api/tools/approvals': see(list),
+  'GET /api/tools/approvals': forReader(see(list)),
   'POST /api/tools/approvals/:id/resolve': {
     need: 'approve',
     more: standingIf('decision', 'allow_always'),
@@ -324,7 +332,8 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'GET /api/system/models': system,
   // A paired device talks to the Gateway directly, approvals included: a standing grant.
   'POST /api/system/approve-device': { need: 'system', more: ASKS_LESS },
-  'GET /api/system/self-version': system,
+  'GET /api/system/self-version': forReader(system),
+  'GET /api/system/live': { need: [], open: true },
   'GET /api/system/capabilities': ANY_PERSON,
   'POST /api/system/self-update': system,
   'GET /api/system/hold': system,
@@ -345,7 +354,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'DELETE /api/pauses/:kind/:id': work({ by: 'pause', from: 'params' }),
 
   // ── Teams ──────────────────────────────────────────────────────────────────
-  'GET /api/teams': see(list),
+  'GET /api/teams': forReader(see(list)),
   'GET /api/teams/member-roles': see(),
   'POST /api/teams': setup,
   'PATCH /api/teams/:id': setup,
@@ -389,7 +398,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   },
 
   // ── Agents ─────────────────────────────────────────────────────────────────
-  'GET /api/agents': see(list),
+  'GET /api/agents': forReader(see(list)),
   'POST /api/agents': setup,
   'POST /api/agents/sync': setup,
   'GET /api/agents/registry/health': system,
@@ -586,7 +595,7 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'DELETE /api/mcp/teamchat': mcp,
 
   // ── Runtimes and providers ─────────────────────────────────────────────────
-  'GET /api/runtimes': system,
+  'GET /api/runtimes': forReader(system),
   'GET /api/runtimes/openrouter/models': system,
   'GET /api/runtimes/codex/models': system,
   'GET /api/runtimes/hermes/gateway': system,
@@ -623,12 +632,12 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   // ── Governance and observability ───────────────────────────────────────────
   'GET /api/governance/audit': records,
   'POST /api/governance/delegation-approval': work(),
-  'GET /api/obs/events': records,
+  'GET /api/obs/events': forReader(records),
   'GET /api/obs/traces/:traceId': records,
   'GET /api/obs/errors': records,
   'GET /api/obs/health': records,
   'GET /api/obs/graph': records,
-  'GET /api/obs/stream': records,
+  'GET /api/obs/stream': forReader(records),
 }
 
 /** The key a route's rule is filed under. */

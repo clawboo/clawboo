@@ -12,6 +12,7 @@ import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
+import { READER_EVENT_KINDS } from '../../lib/proxyIdentity/readerRoutes'
 import {
   DASHBOARD_EVENT_WINDOW,
   obsErrorsGET,
@@ -617,6 +618,36 @@ describe('observability REST', () => {
       const resumed = frames(again.writes())
       expect(resumed.map((f) => f.row.kind)).toEqual(['approval_resolved'])
       expect(JSON.parse(resumed[0]!.row.data)).toMatchObject({ approvalId: a.id, decision: 'deny' })
+    })
+
+    it("gives the reader key's exact queries the two approval kinds and nothing else", () => {
+      seed()
+      chatter(3)
+      const a = ask()
+      chatter(3)
+      resolveApproval(getDb(), a.id, 'allow_once')
+      chatter(3)
+      // The stream, from the start, as the reader resumes it.
+      const s = open({ kinds: READER_EVENT_KINDS, afterSeq: '0' })
+      s.close()
+      expect(kindsOf(s.writes())).toEqual(['approval_requested', 'approval_resolved'])
+      // The newest and the oldest approval event, one row each.
+      for (const [order, kind] of [
+        ['desc', 'approval_resolved'],
+        ['asc', 'approval_requested'],
+        [undefined, 'approval_requested'],
+      ] as const) {
+        const res = mockRes()
+        obsEventsGET(
+          req({ kinds: READER_EVENT_KINDS, limit: '1', ...(order ? { order } : {}) }),
+          res.res,
+        )
+        const events = (res.body() as { events: { kind: string }[] }).events
+        expect(
+          events.map((e) => e.kind),
+          String(order),
+        ).toEqual([kind])
+      }
     })
 
     it('kinds narrows the stream to the approval lifecycle', () => {

@@ -61,7 +61,8 @@ describe('attachIdentity (the no-op identity middleware seam)', () => {
 
 // Who may act as the person, in each mode of the person check. The page's own
 // marks (fetch metadata, or Origin matching Host over plain http) count only in
-// `page` mode; a verified person counts in both; a service token never does.
+// `page` mode; a verified person counts in both; a service token and a reader
+// key's program never do.
 describe('actsAsPerson across the person check modes', () => {
   afterEach(() => resetPersonCheckForTests())
 
@@ -75,6 +76,7 @@ describe('actsAsPerson across the person check modes', () => {
     person?: typeof ADA | null
     personVia?: 'proxy' | 'app'
     service?: typeof ADA | null
+    reader?: string | null
     controlClaim?: string | null
   }): Request =>
     ({ headers: {}, person: null, method: 'POST', path: '/api/x', ...over }) as unknown as Request
@@ -122,6 +124,18 @@ describe('actsAsPerson across the person check modes', () => {
       page: false,
       verified: false,
     },
+    {
+      name: "a reader key's program, even with the page marks",
+      r: req({ reader: 'reader:companion', headers: FETCH_MARKS }),
+      page: false,
+      verified: false,
+    },
+    {
+      name: "a reader key's program, even by Origin over plain http",
+      r: req({ reader: 'reader:companion', headers: ORIGIN_MARK }),
+      page: false,
+      verified: false,
+    },
   ]
 
   for (const mode of ['page', 'verified'] as PersonCheckMode[]) {
@@ -165,6 +179,12 @@ describe('actsAsPerson across the person check modes', () => {
       false,
     )
     expect(controlClaimFor(req({ service: ADA, controlClaim: 'a1' }), 'a1')).toBe(false)
+    expect(
+      controlClaimFor(
+        req({ person: ADA, personVia: 'proxy', reader: 'reader:c', controlClaim: 'a1' }),
+        'a1',
+      ),
+    ).toBe(false)
     expect(controlClaimFor(req({ controlClaim: 'a1', headers: FETCH_MARKS }), 'a1')).toBe(false)
   })
 })

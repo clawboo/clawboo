@@ -103,6 +103,10 @@ export const ENGINE_FEATURES = [
   // when the next scheduled work is due. A client reports a person with
   // POST /api/system/presence.
   'system.idle',
+  // GET and HEAD /api/system/live: whether the server is up, with no sign-in at
+  // all (no access token, no identity token). It answers `{ "ok": true }` and
+  // nothing else.
+  'system.live',
   // Pause an agent, a team or a task tree, durably, until a person resumes it
   // (/api/pauses).
   'board.pause',
@@ -121,6 +125,10 @@ export const ENGINE_FEATURES = [
   // verified, or a required sign-in proxy lane): the dashboard's page alone does
   // not, and the Gateway WebSocket and an agent's screen need such a person too.
   'auth.personCheck',
+  // A program running beside the server may make its own background reads with
+  // a key of its own (proxyIdentityReaderPublicKey): a short fixed list of reads,
+  // in their own header, never as a person.
+  'auth.readerKey',
   // Taking over an agent's screen, and every batch of input after, needs a
   // sign-in proxy token whose `control` claim names that agent
   // (proxyIdentityControlClaim: required).

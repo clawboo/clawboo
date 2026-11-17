@@ -171,6 +171,15 @@ export const OPERATOR_KEYS = {
     userEditable: false,
     choices: ['off', 'required'],
   },
+  /** The public key of a program running beside the server that makes its own
+   *  background reads (lib/proxyIdentity/readerRoutes.ts): a PEM public key, a
+   *  JWK or a JWKS. Its tokens never name a person. */
+  proxyIdentityReaderPublicKey: {
+    kind: 'text',
+    env: 'CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY',
+    userEditable: false,
+    multiline: true,
+  },
   /** Who may act as the person (lib/personCheck.ts): `page`, the dashboard's own
    *  page or a verified person, or `verified`, a verified person only. */
   personCheck: {
@@ -214,6 +223,7 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   proxyIdentityRoleClaim: 'role',
   proxyIdentityRoles: 'off',
   proxyIdentityControlClaim: 'off',
+  proxyIdentityReaderPublicKey: null,
   personCheck: 'page',
   anthropicBaseUrl: null,
   openaiBaseUrl: null,

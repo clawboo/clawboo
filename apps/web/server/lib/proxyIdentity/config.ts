@@ -20,8 +20,17 @@
 // That key is read from the environment and nowhere else: the operator file is
 // a file an agent could change, and an app link is only ever set up by the app
 // that launches the engine.
+//
+// A READER KEY. In releases after 0.8.0 a program running beside the server (a
+// companion process) can make its own background reads with a key of its own,
+// proxyIdentityReaderPublicKey. Those reads are no person's act: its tokens
+// travel in their own header, name a `reader:` program, never a person, and are
+// let through only to the short list of reads in readerRoutes.ts. It rides beside
+// the sign-in proxy's lane, which must be on, and its key may be neither one of
+// the proxy's keys nor the app link's: a key that signs reads must never be able
+// to sign a person.
 
-import { createPublicKey, type webcrypto } from 'node:crypto'
+import { createPublicKey, KeyObject, type webcrypto } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -75,6 +84,21 @@ export interface ProxyIdentityConfig {
    *  agent whose screen it may take over), and a malformed one refuses the
    *  token. Unset: `off`. Never set on the app link. */
   controlClaim?: ProxyIdentityControlClaim
+  /** The reader key's lane: every token must name a `reader:` program, and
+   *  nothing but its `sub` is read from it (no name, no role, no other claim).
+   *  Unset on every person's issuer. */
+  reader?: true
+  /** Set on a sign-in proxy while a reader key is on: none of its tokens may name
+   *  a `reader:` subject, so a person and the reader never share an id. */
+  refuseReaderSubjects?: true
+}
+
+/** Which issuer a lane config is: a sign-in proxy, the app link, or the reader key. */
+export type IdentityIssuer = 'proxy' | 'app' | 'reader'
+
+export function issuerOf(config: ProxyIdentityConfig): IdentityIssuer {
+  if (config.reader) return 'reader'
+  return config.accountSubjects === 'only' ? 'app' : 'proxy'
 }
 
 /** A route an app link's token may be used on: a method and a whole-path pattern. */
@@ -110,6 +134,15 @@ export const APP_LINK_ISSUER = 'clawboo-app-link'
 export const APP_LINK_AUDIENCE = 'clawboo-engine'
 /** The environment variable that holds the app link's public key. */
 export const APP_LINK_KEY_ENV = 'CLAWBOO_APP_LINK_PUBLIC_KEY'
+
+/** The header a reader key's token travels in, named like the app link's. */
+export const READER_HEADER = 'clawboo-reader-identity'
+/** The `iss` and `aud` a reader key's token carries. The key is trusted for
+ *  nothing else, so these say what kind of token it is. */
+export const READER_ISSUER = 'clawboo-reader'
+export const READER_AUDIENCE = 'clawboo-engine'
+/** Every reader token's `sub` starts with this. */
+export const READER_SUBJECT_PREFIX = 'reader:'
 
 /** A header name: an HTTP token, and none Clawboo or a browser already gives a meaning. */
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/
@@ -295,6 +328,14 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
         'or required, so that a take over can carry a claim Clawboo can verify.',
     )
   }
+  // The reader key rides beside the sign-in proxy's lane. With the lane off no
+  // token is checked, so a key set then would look on and do nothing.
+  if (mode === 'off' && textSetting('proxyIdentityReaderPublicKey')) {
+    fail(
+      'proxyIdentityReaderPublicKey is set but proxyIdentity is off. Set proxyIdentity to on or ' +
+        'required, so that the reads a program beside Clawboo signs are checked, or remove the key.',
+    )
+  }
   if (mode === 'off') return null
 
   const lane = 'The proxy identity lane'
@@ -374,28 +415,47 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
 
 /**
  * The issuers the lane trusts, in order: the sign-in proxy's, then the app
- * link's. With both on, the proxy may not name an `account:` person, so the two
- * id spaces cannot meet. A proxy on its own keeps whatever ids it already used.
+ * link's, then the reader key's. With the app link on, the proxy may not name an
+ * `account:` person, and with the reader key on, no `reader:` subject, so no two
+ * id spaces meet. A proxy on its own keeps whatever ids it already used.
  */
 export function identityConfigs(
   proxy: ProxyIdentityConfig | null,
   appLink: ProxyIdentityConfig | null,
+  reader: ProxyIdentityConfig | null = null,
 ): ProxyIdentityConfig[] {
-  if (!proxy) return appLink ? [appLink] : []
-  if (!appLink) return [proxy]
+  if (!proxy) {
+    // loadReaderConfig already refuses a reader key with the lane off.
+    if (reader) fail('proxyIdentityReaderPublicKey needs proxyIdentity on or required.')
+    return appLink ? [appLink] : []
+  }
   // Only a clash when both are on: a proxy on its own may use any header name.
-  if (proxy.header === appLink.header) {
+  if (appLink && proxy.header === appLink.header) {
     fail(
       `proxyIdentityHeader is ${APP_LINK_HEADER}, the header the app that started Clawboo ` +
         'signs its requests in. Give your sign-in proxy a header of its own.',
     )
   }
+  if (reader && proxy.header === reader.header) {
+    fail(
+      `proxyIdentityHeader is ${READER_HEADER}, the header a program beside Clawboo signs its ` +
+        'reads in. Give your sign-in proxy a header of its own.',
+    )
+  }
+  const out: ProxyIdentityConfig[] = [
+    {
+      ...proxy,
+      ...(appLink ? { accountSubjects: 'never' as const } : {}),
+      ...(reader ? { refuseReaderSubjects: true as const } : {}),
+    },
+  ]
   // With roles enforced, the app link's people need a role as well: a token
   // without one would otherwise be a person no route could check.
-  return [
-    { ...proxy, accountSubjects: 'never' },
-    proxy.roles ? { ...appLink, roles: proxy.roles } : appLink,
-  ]
+  if (appLink) out.push(proxy.roles ? { ...appLink, roles: proxy.roles } : appLink)
+  // The reader never gets a role: it reaches its own list of reads, whatever
+  // roles say (lib/roles/guard.ts).
+  if (reader) out.push(reader)
+  return out
 }
 
 /** How roles are applied, from the lane's config: `off` when the lane is. */
@@ -421,6 +481,108 @@ export function loadPersonCheck(proxy: ProxyIdentityConfig | null): PersonCheckM
   )
   if (!resolved.ok) fail(resolved.error)
   return resolved.mode
+}
+
+/** The same key material, however it was written (PEM or JWK, any `kid`). A key
+ *  Clawboo cannot read (in a set someone else publishes) is left out: it cannot
+ *  be a key the reader setting holds, which Clawboo has read. */
+export function keyFingerprints(jwks: JSONWebKeySet): Set<string> {
+  const out = new Set<string>()
+  for (const k of jwks.keys) {
+    try {
+      out.add(
+        createPublicKey({ key: k as webcrypto.JsonWebKey, format: 'jwk' })
+          .export({ type: 'spki', format: 'der' })
+          .toString('base64'),
+      )
+    } catch {
+      // Not a key Clawboo can read: nothing to compare.
+    }
+  }
+  return out
+}
+
+/** The fingerprint `keyFingerprints` gives, of a key a verifier resolved (a
+ *  CryptoKey or a KeyObject), or null when it is not a key Clawboo can read. */
+export function keyFingerprintOf(key: unknown): string | null {
+  try {
+    const object = key instanceof KeyObject ? key : KeyObject.from(key as webcrypto.CryptoKey)
+    const pub = object.type === 'private' ? createPublicKey(object) : object
+    if (pub.type !== 'public') return null
+    return pub.export({ type: 'spki', format: 'der' }).toString('base64')
+  } catch {
+    return null
+  }
+}
+
+/** Whether two key sets hold the same key material, whatever each calls it. */
+export function sharesKey(a: JSONWebKeySet, b: JSONWebKeySet): boolean {
+  const theirs = keyFingerprints(b)
+  return [...keyFingerprints(a)].some((k) => theirs.has(k))
+}
+
+/** Whether a reader key is set (proxyIdentityReaderPublicKey). The server only
+ *  starts with one beside a sign-in proxy lane that is on. */
+export function readerKeyOn(): boolean {
+  return textSetting('proxyIdentityReaderPublicKey') !== null
+}
+
+/**
+ * The reader key's settings, or null when none is set. `proxy` is the sign-in
+ * proxy's lane (null when it is off), `appLink` the app link's.
+ *
+ * Throws OperatorSettingsError when the key is set with the lane off, when it is
+ * not a public key Clawboo can read, or when it is also one of the proxy's keys
+ * (proxyIdentityPublicKey) or the app link's: a key that signs reads must never
+ * sign a person. A proxy that publishes a JWKS URL cannot be compared at
+ * startup; the reader's verifier compares its key with the set the URL serves
+ * instead, and refuses every reader token while they share one (sources.ts).
+ *
+ * What it trusts is fixed apart from the key: request-bound tokens no longer
+ * lived than proxyIdentityMaxLifetime, each used once, naming a `reader:`
+ * program. It never makes a request required to carry one.
+ */
+export function loadReaderConfig(
+  proxy: ProxyIdentityConfig | null,
+  appLink: ProxyIdentityConfig | null,
+): ProxyIdentityConfig | null {
+  const raw = textSetting('proxyIdentityReaderPublicKey')
+  if (!raw) return null
+  if (!proxy) {
+    fail(
+      'proxyIdentityReaderPublicKey is set but proxyIdentity is off. Set proxyIdentity to on or ' +
+        'required, so that the reads a program beside Clawboo signs are checked, or remove the key.',
+    )
+  }
+  const holder = 'the program that signs the reads'
+  const jwks = parsePublicKeySetting(raw, 'proxyIdentityReaderPublicKey', holder)
+  if (proxy.keys.source === 'public-key' && sharesKey(jwks, proxy.keys.jwks)) {
+    fail(
+      'proxyIdentityReaderPublicKey holds a key that proxyIdentityPublicKey holds too. Give the ' +
+        'program that signs the reads a key pair of its own: a key that signs reads must never ' +
+        'be able to sign a person.',
+    )
+  }
+  if (appLink?.keys.source === 'public-key' && sharesKey(jwks, appLink.keys.jwks)) {
+    fail(
+      `proxyIdentityReaderPublicKey holds the key in ${APP_LINK_KEY_ENV}. Give the program that ` +
+        'signs the reads a key pair of its own: a key that signs reads must never be able to ' +
+        'sign a person.',
+    )
+  }
+  return {
+    mode: 'on',
+    header: READER_HEADER,
+    issuer: READER_ISSUER,
+    audience: READER_AUDIENCE,
+    binding: 'request',
+    maxLifetimeSeconds: proxy.maxLifetimeSeconds,
+    nameClaim: 'name',
+    roleClaim: 'role',
+    keys: { source: 'public-key', jwks },
+    accountSubjects: 'never',
+    reader: true,
+  }
 }
 
 /** Whether the app that started this engine handed it an app link key. */
