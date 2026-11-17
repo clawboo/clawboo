@@ -234,6 +234,8 @@ export interface MainTaskInput {
   key: string
   /** The one-to-one chat the message came from: what reports on the request goes there. */
   chatSessionKey?: string
+  /** The team goal the person filed the message under; its work inherits it. */
+  goalId?: string
 }
 
 /** Where a person's request stands, read from the board. */

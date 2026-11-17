@@ -33,6 +33,8 @@ export interface TurnRequest {
   requestedBy?: { id: string; name: string | null; role: string | null } | null
   /** The routine that posted it, when one did. */
   routineName?: string
+  /** The team goal the person filed it under: the request's main task serves it. */
+  goalId?: string
 }
 
 /** The reason a turn is being delivered. */

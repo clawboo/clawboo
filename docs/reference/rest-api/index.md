@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 238 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 297 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -17,7 +17,7 @@ The Clawboo server answers JSON requests under `/api/` on the same port as the d
 | Cross-origin   | Browser requests from other origins are refused with `403` unless you allowlist them  |
 | Rate limits    | 3,000 requests a minute per client; 60 a minute across the sensitive routes           |
 | Streaming      | 9 routes answer with Server-Sent Events; one WebSocket route for the OpenClaw Gateway |
-| Routes         | 238: 106 `GET`, 91 `POST`, 18 `DELETE`, 13 `PUT`, 10 `PATCH` ([index](#route-index))  |
+| Routes         | 297: 127 `GET`, 116 `POST`, 25 `DELETE`, 15 `PUT`, 14 `PATCH` ([index](#route-index)) |
 
 Check that the server is up (the response carries `"ok": true` when no boot check failed). Without the cookie the answer is a `401` from the access gate, which also tells you Clawboo is running:
 
@@ -192,13 +192,14 @@ Something that stops or restarts a server (a stop script, an updater, a process 
 
 ## Route index
 
-The router registers 263 routes: 115 `GET`, 101 `POST`, 22 `DELETE`, 14 `PUT`, 11 `PATCH`. Each belongs to one page:
+The router registers 297 routes: 127 `GET`, 116 `POST`, 25 `DELETE`, 15 `PUT`, 14 `PATCH`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                                                                                                                         |
 | ---------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [Agents](/reference/rest-api/agents)                 | 34     | `/api/agents*`: list, create, sync, delete, move, model, agent files, sessions, workspaces, browser screenshots, the live screen and take over, the native shell switch, 1:1 agent chats; `/api/computer-link/*`, `/api/computer/tools/install`        |
 | [Teams](/reference/rest-api/teams)                   | 34     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat, task id letters, labels), `/api/team-rules/:teamId`, `/api/team-verify-command/:teamId`, `/api/team-plan-approval/:teamId`, `/api/team-agent-wakes/:teamId`, `/api/team-chat*` |
 | [Board](/reference/rest-api/board)                   | 40     | `/api/board*`: tasks, claim, status changes, comments, labels, read state, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview, a job's limit of runs; `/api/pauses*`                                              |
+| [Home](/reference/rest-api/home)                     | 32     | `/api/home*`: one team's Home or all teams, goals, goal updates, KPIs and their values, pages and their revisions, Home settings, weekly updates                                                                                                       |
 | [Memory](/reference/rest-api/memory)                 | 9      | `/api/memory*`: search, save, browse, graph, feedback, outcomes, embedding status, reindex, model install                                                                                                                                              |
 | [Capabilities](/reference/rest-api/capabilities)     | 2      | `/api/capabilities*`: the merged skills, tools and connectors inventory, and its actions                                                                                                                                                               |
 | [Connectors](/reference/rest-api/connectors)         | 21     | `/api/connectors*` (including Composio and custom connectors), `/api/grants*`                                                                                                                                                                          |

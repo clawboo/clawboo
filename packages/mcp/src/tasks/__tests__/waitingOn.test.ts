@@ -215,7 +215,8 @@ describe('ask_person', () => {
         'write_plan',
       ]),
     )
-    expect(await listToolNames(await connect({ ...teamRun(id), readOnly: true }))).toHaveLength(5)
+    // Plus Home's five reads.
+    expect(await listToolNames(await connect({ ...teamRun(id), readOnly: true }))).toHaveLength(10)
   })
 
   it('is not served where nothing could wake the asker', async () => {

@@ -15,7 +15,7 @@ keywords:
   ]
 ---
 
-This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 51 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
+This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 63 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
 
 To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI reference](/reference/cli)). Where the file lives and how to reset it are in [Data and state](/operating/data-and-state).
 
@@ -43,6 +43,14 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`task_activity`](#task_activity)               | Board                    | Each task's newest change, for read state                         |
 | [`task_readers`](#task_readers)                 | Board                    | How far each reader has read the whole board                      |
 | [`task_reads`](#task_reads)                     | Board                    | How far each reader has read one task                             |
+| [`team_goals`](#team_goals)                     | Home                     | A team's goals                                                    |
+| [`team_goal_health`](#team_goal_health)         | Home                     | Every change of a goal's health                                   |
+| [`team_goal_updates`](#team_goal_updates)       | Home                     | Goal updates: agents' drafts and published updates                |
+| [`team_kpis`](#team_kpis)                       | Home                     | A team's KPIs, active, suggested or archived                      |
+| [`team_kpi_values`](#team_kpi_values)           | Home                     | KPI values agents reported or people typed                        |
+| [`team_pages`](#team_pages)                     | Home                     | A team's pages                                                    |
+| [`team_page_revisions`](#team_page_revisions)   | Home                     | Every revision of every page                                      |
+| [`team_home_summary`](#team_home_summary)       | Home                     | The status line a team's lead wrote                               |
 | [`workspaces`](#workspaces)                     | Board                    | The git worktree a task ran in                                    |
 | [`execution_processes`](#execution_processes)   | Board                    | One row per run, with cost and status                             |
 | [`scheduled_runs`](#scheduled_runs)             | Routines                 | Routines                                                          |
@@ -86,27 +94,32 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 
 ### Foreign keys
 
-| Column                                              | References      | When the referenced row is deleted |
-| --------------------------------------------------- | --------------- | ---------------------------------- |
-| `agents.team_id`                                    | `teams.id`      | Refused while rows point at it     |
-| `cost_records.agent_id`                             | `agents.id`     | Refused while rows point at it     |
-| `approval_history.agent_id`                         | `agents.id`     | Refused while rows point at it     |
-| `boo_zero_team_briefs.team_id`                      | `teams.id`      | The brief is deleted with it       |
-| `rooms.team_id`                                     | `teams.id`      | The rooms are deleted with it      |
-| `room_members.room_id`                              | `rooms.id`      | Memberships are deleted with it    |
-| `room_members.agent_id`                             | `agents.id`     | Memberships are deleted with it    |
-| `labels.team_id`                                    | `teams.id`      | The labels are deleted with it     |
-| `task_labels.label_id`                              | `labels.id`     | Removed from tasks with it         |
-| `task_labels.task_id`, `task_create_keys.task_id`   | `tasks.id`      | Deleted with it                    |
-| `tasks.parent_task_id`                              | `tasks.id`      | Refused while rows point at it     |
-| `task_deps.task_id`, `task_deps.depends_on_task_id` | `tasks.id`      | Refused while rows point at it     |
-| `task_comments.task_id`                             | `tasks.id`      | Refused while rows point at it     |
-| `task_questions.task_id`                            | `tasks.id`      | Refused while rows point at it     |
-| `task_documents.task_id`                            | `tasks.id`      | Refused while rows point at it     |
-| `workspaces.task_id`                                | `tasks.id`      | Refused while rows point at it     |
-| `execution_processes.task_id`                       | `tasks.id`      | Refused while rows point at it     |
-| `execution_processes.workspace_id`                  | `workspaces.id` | Refused while rows point at it     |
-| `budget_reservations.budget_id`                     | `budgets.id`    | The holds are deleted with it      |
+| Column                                                                                       | References      | When the referenced row is deleted |
+| -------------------------------------------------------------------------------------------- | --------------- | ---------------------------------- |
+| `agents.team_id`                                                                             | `teams.id`      | Refused while rows point at it     |
+| `cost_records.agent_id`                                                                      | `agents.id`     | Refused while rows point at it     |
+| `approval_history.agent_id`                                                                  | `agents.id`     | Refused while rows point at it     |
+| `boo_zero_team_briefs.team_id`                                                               | `teams.id`      | The brief is deleted with it       |
+| `rooms.team_id`                                                                              | `teams.id`      | The rooms are deleted with it      |
+| `room_members.room_id`                                                                       | `rooms.id`      | Memberships are deleted with it    |
+| `room_members.agent_id`                                                                      | `agents.id`     | Memberships are deleted with it    |
+| `labels.team_id`                                                                             | `teams.id`      | The labels are deleted with it     |
+| `task_labels.label_id`                                                                       | `labels.id`     | Removed from tasks with it         |
+| `task_labels.task_id`, `task_create_keys.task_id`                                            | `tasks.id`      | Deleted with it                    |
+| `tasks.parent_task_id`                                                                       | `tasks.id`      | Refused while rows point at it     |
+| `task_deps.task_id`, `task_deps.depends_on_task_id`                                          | `tasks.id`      | Refused while rows point at it     |
+| `task_comments.task_id`                                                                      | `tasks.id`      | Refused while rows point at it     |
+| `task_questions.task_id`                                                                     | `tasks.id`      | Refused while rows point at it     |
+| `task_documents.task_id`                                                                     | `tasks.id`      | Refused while rows point at it     |
+| `workspaces.task_id`                                                                         | `tasks.id`      | Refused while rows point at it     |
+| `execution_processes.task_id`                                                                | `tasks.id`      | Refused while rows point at it     |
+| `execution_processes.workspace_id`                                                           | `workspaces.id` | Refused while rows point at it     |
+| `budget_reservations.budget_id`                                                              | `budgets.id`    | The holds are deleted with it      |
+| `team_goals.team_id`, `team_kpis.team_id`, `team_pages.team_id`, `team_home_summary.team_id` | `teams.id`      | Deleted with it                    |
+| `team_goal_health.goal_id`, `team_goal_updates.goal_id`                                      | `team_goals.id` | Deleted with it                    |
+| `team_kpis.goal_id`, `team_pages.goal_id`                                                    | `team_goals.id` | Set to null                        |
+| `team_kpi_values.kpi_id`                                                                     | `team_kpis.id`  | Deleted with it                    |
+| `team_page_revisions.page_id`                                                                | `team_pages.id` | Deleted with it                    |
 
 In the column tables below, `FK` marks these columns and `cascade` marks the ones deleted with their parent.
 
@@ -303,8 +316,10 @@ The task cards.
 | `assignee_person_id`    | `TEXT`                                | The person it is assigned to: a sign-in proxy's subject, or `local` for the built-in person. Never set together with `assignee_agent_id`: triggers refuse the row. There is no people table                                                                                                            |
 | `assignee_person`       | `TEXT`                                | JSON `{ id, name, role }` of that person                                                                                                                                                                                                                                                               |
 | `requested_by`          | `TEXT`                                | JSON `{ id, name, role }` of the person who asked for it, where a hand-back goes. Written by `POST /api/board`, and on a request's main task and its plan card. Null for other tasks an agent or the engine made                                                                                       |
+| `goal_id`               | `TEXT`                                | The [team goal](#team_goals) it serves, a goal of its own team, or null. Copied from its parent when the task is made; a task with none reads as its nearest parent's goal. Plain reference, no foreign key                                                                                            |
+| `goal_cleared`          | `INTEGER`, not null, default `0`      | `1`: a person took the task off every goal. Goal resolution stops here instead of reaching its request's goal, so the work under it serves no goal either                                                                                                                                              |
 
-Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_assignee_person` (`assignee_person_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique), `idx_tasks_chat_session` (`chat_session_key`, `updated_at`).
+Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_assignee_person` (`assignee_person_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique), `idx_tasks_chat_session` (`chat_session_key`, `updated_at`), `idx_tasks_goal` (`goal_id`).
 
 The `(parent_task_id, dropped, created_at)` index serves the Tasks MCP creation caps, which count live children per parent and new root tasks per 5 minutes.
 
@@ -546,6 +561,98 @@ One row per run of a task, on any runtime: its status, git checkpoints, and toke
 | `created_at`         | `INTEGER`, not null                  |                                                                                                                                                                                                                                                                        |
 
 Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
+
+## Home
+
+In releases after 0.8.0. A team's goals, KPIs, pages and status line (see the [Home API](/reference/rest-api/home)). People and agents in these rows are JSON `{ kind: 'person' | 'agent', id, name }`. A team's Home settings live in `settings`, as `team-home:<teamId>`: JSON `{ leadWritesStatus, weeklyUpdatesRoutineId, statusAsks, statusWrites, onSeq, lastAskSeq, pendingAskAt }`: the times of the lead's asks and lines in the last day, the board's position when the line was turned on and at the last ask, and the newest ask until a line answers it.
+
+### team_goals
+
+| Column                | Type                                     | Notes                                                      |
+| --------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| `id`                  | `TEXT`, PK                               |                                                            |
+| `team_id`             | `TEXT`, not null, FK `teams.id`, cascade |                                                            |
+| `parent_goal_id`      | `TEXT`                                   | One level only, same team. Plain reference                 |
+| `title`               | `TEXT`, not null                         | Up to 200 characters                                       |
+| `description`         | `TEXT`, not null, default `''`           | Markdown                                                   |
+| `owner`               | `TEXT`                                   | JSON person or agent                                       |
+| `target_date`         | `INTEGER`                                |                                                            |
+| `status`              | `TEXT`, not null, default `'active'`     | `active`, `done` or `dropped`                              |
+| `health`              | `TEXT`                                   | `on_track`, `at_risk` or `off_track`; set only by a person |
+| `health_set_by`       | `TEXT`                                   | JSON person                                                |
+| `health_set_at`       | `INTEGER`                                |                                                            |
+| `update_cadence_days` | `INTEGER`, not null, default `7`         |                                                            |
+| `position`            | `INTEGER`, not null, default `0`         |                                                            |
+| `created_by`          | `TEXT`                                   | JSON person                                                |
+| `created_at`          | `INTEGER`, not null                      |                                                            |
+| `updated_at`          | `INTEGER`, not null                      |                                                            |
+| `archived_at`         | `INTEGER`                                |                                                            |
+
+Indexes: `idx_team_goals_team` (`team_id`, `position`), `idx_team_goals_parent` (`parent_goal_id`).
+
+### team_goal_health
+
+One row per health change: `id`, `goal_id` (FK `team_goals.id`, cascade), `health`, `set_by` (JSON person), `set_at`, and `update_id`, the update whose publishing set it (null for a direct set). Index: `idx_team_goal_health_goal` (`goal_id`, `set_at`).
+
+### team_goal_updates
+
+| Column         | Type                                          | Notes                               |
+| -------------- | --------------------------------------------- | ----------------------------------- |
+| `id`           | `TEXT`, PK                                    |                                     |
+| `goal_id`      | `TEXT`, not null, FK `team_goals.id`, cascade |                                     |
+| `team_id`      | `TEXT`, not null                              | The goal's team                     |
+| `body`         | `TEXT`, not null                              | Markdown, up to 20,000 characters   |
+| `health`       | `TEXT`                                        | The health it names, if any         |
+| `author`       | `TEXT`                                        | JSON person or agent                |
+| `execution_id` | `TEXT`                                        | The run that drafted it             |
+| `state`        | `TEXT`, not null, default `'draft'`           | `draft`, `published` or `discarded` |
+| `published_by` | `TEXT`                                        | JSON person                         |
+| `published_at` | `INTEGER`                                     |                                     |
+| `created_at`   | `INTEGER`, not null                           |                                     |
+
+Indexes: `idx_team_goal_updates_goal` (`goal_id`, `created_at`), `idx_team_goal_updates_team_state` (`team_id`, `state`).
+
+### team_kpis
+
+| Column              | Type                                     | Notes                                         |
+| ------------------- | ---------------------------------------- | --------------------------------------------- |
+| `id`                | `TEXT`, PK                               |                                               |
+| `team_id`           | `TEXT`, not null, FK `teams.id`, cascade |                                               |
+| `goal_id`           | `TEXT`, FK `team_goals.id`               | Set to null when the goal is deleted          |
+| `name`              | `TEXT`, not null                         |                                               |
+| `unit`              | `TEXT`, not null, default `''`           | Free text                                     |
+| `direction`         | `TEXT`, not null, default `'up'`         | `up` or `down`                                |
+| `target`            | `REAL`                                   |                                               |
+| `period`            | `TEXT`, not null, default `'week'`       | `week`, `month`, `quarter` or `all`           |
+| `source`            | `TEXT`, not null                         | `computed`, `agent` or `person`               |
+| `metric`            | `TEXT`                                   | The computed metric, for a computed KPI       |
+| `reporter_agent_id` | `TEXT`                                   | Agent source: the one agent who may report it |
+| `stale_after_hours` | `REAL`                                   | Agent and person sources                      |
+| `status`            | `TEXT`, not null, default `'active'`     | `active`, `suggested` or `archived`           |
+| `suggested_by`      | `TEXT`                                   | JSON agent, for a suggestion                  |
+| `suggestion_note`   | `TEXT`                                   | Why the agent suggested it                    |
+| `created_by`        | `TEXT`                                   | JSON person                                   |
+| `position`          | `INTEGER`, not null, default `0`         |                                               |
+| `created_at`        | `INTEGER`, not null                      |                                               |
+| `updated_at`        | `INTEGER`, not null                      |                                               |
+
+Indexes: `idx_team_kpis_team` (`team_id`, `status`, `position`), `idx_team_kpis_goal` (`goal_id`).
+
+### team_kpi_values
+
+Append-only: `id`, `kpi_id` (FK `team_kpis.id`, cascade), `value` (`REAL`), `as_of`, `reported_by` (JSON person or agent), `execution_id` and `task_id` (the reporting run and its task), `source_url`, `note`, `created_at`. Index: `idx_team_kpi_values_kpi` (`kpi_id`, `as_of`).
+
+### team_pages
+
+`id`, `team_id` (FK `teams.id`, cascade), `goal_id` (FK `team_goals.id`, set to null), `title` (the newest revision's), `pinned` (`INTEGER`, default `0`), `archived_at`, `created_at`, `updated_at`. Index: `idx_team_pages_team` (`team_id`, `updated_at`).
+
+### team_page_revisions
+
+One row per revision, never overwritten: `id`, `page_id` (FK `team_pages.id`, cascade), `revision` (1, 2, 3 per page; an agent may not add one to a page that has 200, a person may), `title`, `body` (up to 200,000 characters from a person, 50,000 from an agent), `author` (JSON person or agent), `execution_id`, `reverted_from` (the revision a revert copied), `created_at`. Index: the unique `idx_team_page_revisions_revision` (`page_id`, `revision`).
+
+### team_home_summary
+
+The status line a team's lead wrote, one row per team: `team_id` (PK, FK `teams.id`, cascade), `body` (up to 400 characters), `author` (JSON agent), `execution_id`, `model` (what the lead's registry row says it runs), `written_at`, and `board_seq`, the team board's newest task change when it was written, which tells the next ask whether the board moved.
 
 ## Routines
 

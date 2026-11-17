@@ -20,6 +20,9 @@ import {
   agents,
   appendAudit,
   assignTaskDelegation,
+  goalFieldsForTasks,
+  goalIsOnTeam,
+  setTaskGoal,
   attentionForTask,
   attentionForTasks,
   claimBody,
@@ -70,6 +73,7 @@ import {
   waitingOnDetailOf,
   wakeCommentIds,
   type DbTask,
+  type TaskGoalFields,
   type DbTaskQuestion,
   type TaskLabel,
   type TaskRunCost,
@@ -138,11 +142,11 @@ export function boardListGET(req: Request, res: Response): void {
     const db = getDb()
     const teamId = typeof req.query['teamId'] === 'string' ? req.query['teamId'] : undefined
     if (req.query['ready'] === 'true') {
-      res.json({
-        tasks: getReadyTasks(db, teamId ? { teamId } : {}).filter((t) =>
-          inRoleScope(req, t.teamId),
-        ),
-      })
+      const ready = getReadyTasks(db, teamId ? { teamId } : {}).filter((t) =>
+        inRoleScope(req, t.teamId),
+      )
+      const goals = goalFieldsForTasks(db, ready)
+      res.json({ tasks: ready.map((t) => ({ ...t, ...(goals.get(t.id) ?? NO_GOAL) })) })
       return
     }
     const status =
@@ -204,6 +208,7 @@ export function boardGetGET(req: Request, res: Response): void {
       task: {
         ...withReadState(states, [withWaiting!])[0]!,
         attention: attentionForTask(db, taskId),
+        ...goalFieldsOf(db, task),
         jobStopped: jobStoppedTaskIds(db, [task]).has(taskId),
         pause: pauseViewOfTask(db, task),
         runCost: runCostOf(db, task),
@@ -270,10 +275,27 @@ function pendingWakeOf(
 }
 
 /** Each task with why it needs a person (`attention`, null when it does not), so
- *  the board can route it into its needs-you column without a request per card. */
-function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attention: unknown }> {
+ *  the board can route it into its needs-you column without a request per card. Each
+ *  also says the goal it counts toward (`effectiveGoalId`, `goalLinkedVia`), which a
+ *  subtask or hand-off inherits from its request without storing it. */
+function withAttention(
+  db: ClawbooDb,
+  rows: DbTask[],
+): Array<DbTask & { attention: unknown } & TaskGoalFields> {
   const byId = attentionForTasks(db, rows)
-  return rows.map((t) => ({ ...t, attention: byId.get(t.id) ?? null }))
+  const goals = goalFieldsForTasks(db, rows)
+  return rows.map((t) => ({
+    ...t,
+    attention: byId.get(t.id) ?? null,
+    ...(goals.get(t.id) ?? NO_GOAL),
+  }))
+}
+
+const NO_GOAL: TaskGoalFields = { effectiveGoalId: null, goalLinkedVia: null }
+
+/** One task's resolved goal, for a single-task answer. */
+function goalFieldsOf(db: ClawbooDb, task: DbTask): TaskGoalFields {
+  return goalFieldsForTasks(db, [task]).get(task.id) ?? NO_GOAL
 }
 
 /** Each task with whether a person stopped its job on the job's card, so a card waiting
@@ -412,9 +434,25 @@ export function boardCreatePOST(req: Request, res: Response): void {
       return
     }
     const db = getDb()
-    const { assigneeAgentId, assignToMe, idempotencyKey, priority, ...input } = parsed.data
+    const {
+      assigneeAgentId,
+      assignToMe,
+      idempotencyKey,
+      priority,
+      goalId: goalAsked,
+      ...rest
+    } = parsed.data
+    // Naming a task's goal is a person's choice, as changing it is (see the PATCH).
+    // Any other caller's task takes its parent's goal, as an agent's create does.
+    const input: typeof rest & { goalId?: string | null } =
+      actsAsPerson(req) && goalAsked !== undefined ? { ...rest, goalId: goalAsked } : rest
     if (assigneeAgentId && assignToMe) {
       res.status(400).json({ error: 'one_assignee' })
+      return
+    }
+    // A goal must be one of the task's own team's.
+    if (input.goalId && !goalIsOnTeam(db, input.goalId, input.teamId)) {
+      res.status(400).json({ error: 'goal_other_team' })
       return
     }
     if (
@@ -468,7 +506,12 @@ export function boardCreatePOST(req: Request, res: Response): void {
     // A retried draft: it was logged and started the first time.
     if (task.deduplicated) {
       res.json({
-        task: { ...task, attention: attentionForTask(db, task.id), runCost: runCostOf(db, task) },
+        task: {
+          ...task,
+          attention: attentionForTask(db, task.id),
+          ...goalFieldsOf(db, task),
+          runCost: runCostOf(db, task),
+        },
         deduplicated: true,
       })
       return
@@ -490,7 +533,12 @@ export function boardCreatePOST(req: Request, res: Response): void {
       requestTaskDispatch(task.teamId, task.id, loopbackMcpBaseUrl(req))
     }
     res.json({
-      task: { ...task, attention: attentionForTask(db, task.id), runCost: runCostOf(db, task) },
+      task: {
+        ...task,
+        attention: attentionForTask(db, task.id),
+        ...goalFieldsOf(db, task),
+        runCost: runCostOf(db, task),
+      },
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -785,7 +833,14 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const { status, humanOverride: overrideAsked, completedAt, priority, ...rest } = parsed.data
+    const {
+      status,
+      humanOverride: overrideAsked,
+      completedAt,
+      priority,
+      goalId: goalAsked,
+      ...rest
+    } = parsed.data
     const byPerson = actsAsPerson(req)
     // A task's title and description are the brief its next run is told to follow, so
     // changing them takes a person's request. Sent unchanged, they change nothing.
@@ -797,6 +852,19 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       refuseUnlessPerson(req, res)
     )
       return
+    // Linking a task to a goal is a person's write, and only to a goal of the
+    // task's own team. Null takes it off every goal, its request's included.
+    const goalChange =
+      goalAsked !== undefined &&
+      current !== null &&
+      (goalAsked !== (current.goalId ?? null) || (goalAsked === null && current.goalCleared !== 1))
+    if (goalChange) {
+      if (refuseUnlessPerson(req, res)) return
+      if (goalAsked !== null && !goalIsOnTeam(db, goalAsked, current.teamId)) {
+        res.status(400).json({ error: 'goal_other_team' })
+        return
+      }
+    }
     const humanOverride = byPerson && overrideAsked
     const allowedPriority = priorityFor(req, priority)
     const fields = {
@@ -898,6 +966,9 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         })
       }
     }
+    // The work under it that carried its old goal moves with it (setTaskGoal).
+    if (goalChange && goalAsked !== undefined)
+      runOwnWrite(db, ownWriterOf(req), taskId, () => setTaskGoal(db, taskId, goalAsked))
     const hasFields = Object.keys(fields).length > 0
     const task = hasFields
       ? runOwnWrite(db, ownWriterOf(req), taskId, () => updateTaskFields(db, taskId, fields))
@@ -954,7 +1025,7 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     res.json({
       ok: true,
-      task,
+      task: { ...task, ...goalFieldsOf(db, task) },
       ...(status === 'cancelled' || closedWithRequest.length > 0 ? { cancelledDependents } : {}),
       // Told so the dashboard can say so, if this was a person it could not recognise.
       ...(status && !byPerson ? { byPerson: false } : {}),

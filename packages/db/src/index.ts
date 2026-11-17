@@ -30,6 +30,14 @@ export {
   taskDocuments,
   taskQuestions,
   tasks,
+  teamGoalHealth,
+  teamGoals,
+  teamGoalUpdates,
+  teamHomeSummary,
+  teamKpis,
+  teamKpiValues,
+  teamPageRevisions,
+  teamPages,
   agentWakeChains,
   agentWakeGates,
   jobRuns,
@@ -121,6 +129,9 @@ export type {
 
 // ── Durable board — repository + state machine + contention ──
 export * from './board'
+
+// ── Home: team goals, KPIs, pages and status line ──
+export * from './home'
 
 // ── Unified capability inventory — durable projection + data-access ──
 export * from './capabilities'

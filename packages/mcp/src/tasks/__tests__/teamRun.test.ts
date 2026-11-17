@@ -39,6 +39,16 @@ describe('Tasks MCP on a team run', () => {
         'create_task',
         'get_task',
         'list_tasks',
+        // Home: its reads, and the writes an agent may make there.
+        'list_goals',
+        'get_goal',
+        'list_kpis',
+        'list_pages',
+        'read_page',
+        'report_kpi',
+        'suggest_kpi',
+        'write_page',
+        'draft_goal_update',
       ].sort(),
     )
   })
@@ -106,6 +116,12 @@ describe('Tasks MCP for an unverified caller (every OpenClaw agent)', () => {
         'get_task',
         'link_task',
         'list_tasks',
+        // Home's reads only: its writes are attributed to an agent.
+        'list_goals',
+        'get_goal',
+        'list_kpis',
+        'list_pages',
+        'read_page',
       ].sort(),
     )
   })

@@ -236,6 +236,7 @@
               "reference/rest-api/agents",
               "reference/rest-api/teams",
               "reference/rest-api/board",
+              "reference/rest-api/home",
               "reference/rest-api/memory",
               "reference/rest-api/capabilities",
               "reference/rest-api/connectors",

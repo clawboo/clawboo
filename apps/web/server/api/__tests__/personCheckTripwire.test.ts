@@ -59,6 +59,8 @@ const VERIFIED_COVERAGE: Record<string, string> = {
   'api/execAllowlist.ts': 'personCheckRoutes.test.ts (REFUSED)',
   'api/execSettings.ts': 'personCheckRoutes.test.ts (REFUSED)',
   'api/grants.ts': 'personCheckRoutes.test.ts (REFUSED)',
+  'api/home.ts':
+    'personCheckRoutes.test.ts (Home: goals, health, updates, KPI values, pages, settings)',
   'api/nativeShell.ts': 'personCheckRoutes.test.ts (REFUSED)',
   'api/pauses.ts': 'personCheckRoutes.test.ts (pausing, resuming)',
   'api/rooms.ts': 'personCheckRoutes.test.ts (REFUSED)',

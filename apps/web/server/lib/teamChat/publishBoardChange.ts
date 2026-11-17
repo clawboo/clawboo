@@ -12,9 +12,11 @@ import { isPlanHolder } from '@clawboo/board-core'
 import {
   attentionForTask,
   getTask,
+  goalFieldsForTasks,
   waitingOnDetailOf,
   type ClawbooDb,
   type DbTask,
+  type GoalLinkVia,
   type TaskAttention,
 } from '@clawboo/db'
 import type { BoardChange, BoardChangePause } from '@clawboo/team-orchestration'
@@ -39,6 +41,25 @@ export type RoomedBoardChange = BoardChange & {
   assigneePerson?: string | null
   /** A card that only holds a plan. */
   planHolder?: boolean
+  /** The team goal the task itself names, or null. */
+  goalId?: string | null
+  /** The goal it counts toward (its own, else its request's or a parent's), or null. */
+  effectiveGoalId?: string | null
+  goalLinkedVia?: GoalLinkVia | null
+}
+
+/** The goal a task counts toward, as its frame says it; best effort. */
+function resolvedGoalOf(
+  db: ClawbooDb,
+  row: DbTask,
+): { effectiveGoalId: string | null; goalLinkedVia: GoalLinkVia | null } | Record<string, never> {
+  try {
+    const link = goalFieldsForTasks(db, [row]).get(row.id)
+    return link ?? { effectiveGoalId: null, goalLinkedVia: null }
+  } catch {
+    // Without it the client keeps the goal it already knew.
+    return {}
+  }
 }
 
 export function publishBoardChangeWithAttention(
@@ -61,6 +82,7 @@ export function publishBoardChangeWithAttention(
       : {
           ...change,
           roomId,
+          ...(row ? { goalId: row.goalId ?? null, ...resolvedGoalOf(db, row) } : {}),
           ...(row?.isMainTask === 1 ? { isMainTask: true } : {}),
           ...(isPlanHolder(row?.sourceDelegationId) ? { planHolder: true } : {}),
         }

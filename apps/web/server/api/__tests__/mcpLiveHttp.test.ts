@@ -120,7 +120,17 @@ const EVERY_TOOL = [
   'unblock_task',
   'update_task_status',
   'write_plan',
-]
+  // Home: its reads, and the writes a bound agent may make there.
+  'draft_goal_update',
+  'get_goal',
+  'list_goals',
+  'list_kpis',
+  'list_pages',
+  'read_page',
+  'report_kpi',
+  'suggest_kpi',
+  'write_page',
+].sort()
 
 describe('live MCP URLs', () => {
   it('names only the agent, under a signature that covers the live mark', () => {

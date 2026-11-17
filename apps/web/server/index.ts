@@ -84,6 +84,7 @@ import {
 import { taskForRoutineSession } from './lib/routines/openclawDispatch'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { engineHeld, engineHold } from './lib/engineHold'
+import { startHomeStatusAsks } from './lib/home/statusAsks'
 import { onPauseLifted } from './lib/pauseBus'
 import { isRunnerRerunWaiting, pumpRunnerReruns } from './lib/runnerRerun'
 import { runnerTargetOf } from './lib/runnerRoute'
@@ -1175,6 +1176,9 @@ async function main() {
       }
     }
     startChatReportUps(getDb, { mcpBaseUrl: mcpBase })
+    // Teams that turned on a lead-written Home status line: ask their lead when the
+    // board moved, inside the line's limits (lib/home/statusAsks.ts).
+    startHomeStatusAsks({ mcpBaseUrl: mcpBase })
     // First pass shortly after boot (let the registry / Boo Zero bootstrap land).
     setTimeout(pump, 10_000).unref()
     setInterval(pump, pumpMs).unref()

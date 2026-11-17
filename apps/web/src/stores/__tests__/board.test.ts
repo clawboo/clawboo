@@ -45,6 +45,35 @@ describe('useBoardStore.applyChange (a check waiting for the team folder)', () =
   })
 })
 
+describe('useBoardStore.applyChange (the goal a task counts toward)', () => {
+  beforeEach(() => useBoardStore.getState().reset('goals'))
+  const get = () => useBoardStore.getState().tasksByTeam.get('goals')?.get('task-1')
+
+  it('keeps the resolved goal across frames that do not name it, and takes a change', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('goals', {
+      id: 'task-1',
+      status: 'todo',
+      goalId: null,
+      effectiveGoalId: 'g1',
+      goalLinkedVia: 'request',
+      updatedAt: 100,
+    })
+    expect(get()).toMatchObject({ goalId: null, effectiveGoalId: 'g1', goalLinkedVia: 'request' })
+    s.applyChange('goals', { id: 'task-1', status: 'in_progress', updatedAt: 110 })
+    expect(get()).toMatchObject({ effectiveGoalId: 'g1', goalLinkedVia: 'request' })
+    // A person took it off every goal.
+    s.applyChange('goals', {
+      id: 'task-1',
+      goalId: null,
+      effectiveGoalId: null,
+      goalLinkedVia: null,
+      updatedAt: 120,
+    })
+    expect(get()).toMatchObject({ effectiveGoalId: null, goalLinkedVia: null })
+  })
+})
+
 describe('useBoardStore.applyChange (projection merge)', () => {
   beforeEach(() => useBoardStore.getState().reset('t1'))
 

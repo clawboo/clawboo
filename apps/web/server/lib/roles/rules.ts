@@ -382,6 +382,43 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   'POST /api/team-chat/exchange': work(),
   'GET /api/team-rules/:teamId': see(team('teamId')),
   'PUT /api/team-rules/:teamId': ownerOrOperator,
+  // ── Home ───────────────────────────────────────────────────────────────────
+  // All teams, cut to a guest's teams by the handler; one team, a guest's own.
+  'GET /api/home': see(list),
+  'GET /api/home/teams/:teamId/goals': see(team('teamId')),
+  'POST /api/home/teams/:teamId/goals': work(team('teamId')),
+  'POST /api/home/teams/:teamId/goals/reorder': work(team('teamId')),
+  'GET /api/home/teams/:teamId/goals/:goalId': see(team('teamId')),
+  'PATCH /api/home/teams/:teamId/goals/:goalId': work(team('teamId')),
+  'DELETE /api/home/teams/:teamId/goals/:goalId': work(team('teamId')),
+  'POST /api/home/teams/:teamId/goals/:goalId/health': work(team('teamId')),
+  'GET /api/home/teams/:teamId/goals/:goalId/updates': see(team('teamId')),
+  'POST /api/home/teams/:teamId/goals/:goalId/updates': work(team('teamId')),
+  'POST /api/home/teams/:teamId/updates/:updateId/publish': work(team('teamId')),
+  'POST /api/home/teams/:teamId/updates/:updateId/discard': work(team('teamId')),
+  'GET /api/home/teams/:teamId/kpis': see(team('teamId')),
+  'POST /api/home/teams/:teamId/kpis': work(team('teamId')),
+  'PATCH /api/home/teams/:teamId/kpis/:kpiId': work(team('teamId')),
+  'DELETE /api/home/teams/:teamId/kpis/:kpiId': work(team('teamId')),
+  'POST /api/home/teams/:teamId/kpis/:kpiId/accept': work(team('teamId')),
+  'POST /api/home/teams/:teamId/kpis/:kpiId/dismiss': work(team('teamId')),
+  'GET /api/home/teams/:teamId/kpis/:kpiId/values': see(team('teamId')),
+  'POST /api/home/teams/:teamId/kpis/:kpiId/values': work(team('teamId')),
+  'GET /api/home/teams/:teamId/pages': see(team('teamId')),
+  'POST /api/home/teams/:teamId/pages': work(team('teamId')),
+  'GET /api/home/teams/:teamId/pages/:pageId': see(team('teamId')),
+  'PATCH /api/home/teams/:teamId/pages/:pageId': work(team('teamId')),
+  'DELETE /api/home/teams/:teamId/pages/:pageId': work(team('teamId')),
+  'GET /api/home/teams/:teamId/pages/:pageId/revisions': see(team('teamId')),
+  'GET /api/home/teams/:teamId/pages/:pageId/revisions/:revision': see(team('teamId')),
+  'POST /api/home/teams/:teamId/pages/:pageId/revert': work(team('teamId')),
+  'POST /api/home/teams/:teamId/pages/:pageId/pin': work(team('teamId')),
+  'GET /api/home/teams/:teamId/settings': see(team('teamId')),
+  // A lead-written status line costs model calls, and the weekly updates are a
+  // routine: a team's own preferences, which an owner or operator sets.
+  'PUT /api/home/teams/:teamId/settings': ownerOrOperator,
+  'POST /api/home/teams/:teamId/weekly-updates': setup,
+
   'GET /api/team-plan-approval/:teamId': see(team('teamId')),
   // Turning plan approval off lets plans start without anyone's yes.
   'PUT /api/team-plan-approval/:teamId': {
