@@ -55,7 +55,12 @@ export function computedStatus(text = 'Nothing in flight.'): HomeStatusLine {
 }
 
 export function defaultHomeSettings(): TeamHomeSettings {
-  return { leadWritesStatus: false, leadCanWriteStatus: true, weeklyUpdatesRoutineId: null }
+  return {
+    leadWritesStatus: false,
+    leadCanWriteStatus: true,
+    leadCannotWriteReason: null,
+    weeklyUpdatesRoutineId: null,
+  }
 }
 
 export function emptyTeamHome(teamId: string, name = 'Team'): TeamHome {

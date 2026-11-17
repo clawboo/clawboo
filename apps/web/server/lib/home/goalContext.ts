@@ -2,6 +2,9 @@
 // A lead sees the team's active goals, so what it hands out can serve them; a
 // worker sees only its task's goal, which is all it needs and keeps its turn
 // short. Capped: a team with many goals shows the first few by position.
+//
+// The lead is pointed at list_goals and get_goal only when its run can call them
+// (`canReadGoals`): naming a tool the run does not have costs a failed call.
 
 import {
   buildGoalIndex,
@@ -28,7 +31,12 @@ function dateWord(ms: number): string {
 export function buildGoalsBlock(
   db: ClawbooDb,
   teamId: string,
-  opts: { isLeader: boolean; taskId?: string | null },
+  opts: {
+    isLeader: boolean
+    taskId?: string | null
+    /** Can this run call list_goals and get_goal for its team? */
+    canReadGoals?: boolean
+  },
 ): string | null {
   if (opts.isLeader) {
     const goals = listTeamGoals(db, teamId).filter((g) => g.status === 'active')
@@ -44,11 +52,13 @@ export function buildGoalsBlock(
       ].filter(Boolean)
       return `- ${clip(g.title)} (${bits.join(', ')})`
     })
-    const more = goals.length > shown.length ? `\n…and ${goals.length - shown.length} more.` : ''
+    const more = goals.length > shown.length ? `…and ${goals.length - shown.length} more.` : null
+    const hint = opts.canReadGoals ? ' Use list_goals and get_goal for more.' : ''
     return [
       '[Team Goals, set by a person]',
       ...lines,
-      `${more ? more.trim() + '\n' : ''}Work you hand out serves one of these when it can. Use list_goals and get_goal for more.`,
+      ...(more ? [more] : []),
+      `Work you hand out serves one of these when it can.${hint}`,
       '[End Team Goals]',
     ].join('\n')
   }

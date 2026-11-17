@@ -1,23 +1,30 @@
 // The team's goals in an agent's turn: a lead sees the active goals (capped), a
-// worker sees only its own task's goal, and a team with none adds nothing.
+// worker sees only its own task's goal, and a team with none adds nothing. A
+// parent's progress holds its children that are not archived, and the lead is
+// pointed at list_goals only when its run can call it.
 
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import {
   agents,
+  archiveTeamGoal,
   createSubtask,
   createTask,
   createTeamGoal,
   setTeamGoalHealth,
+  tasks,
   teams,
   updateTeamGoal,
 } from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../../db'
+import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { buildServerTeamContext } from '../../teamChat/contextPreamble'
 import { GOALS_IN_LEAD_TURN } from '../goalContext'
 
@@ -65,10 +72,23 @@ describe('goals in the team preamble', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  function goal(title: string): string {
-    const r = createTeamGoal(getDb(), 'T', { title }, PERSON)
+  function goal(title: string, parentGoalId?: string): string {
+    const r = createTeamGoal(
+      getDb(),
+      'T',
+      { title, ...(parentGoalId ? { parentGoalId } : {}) },
+      PERSON,
+    )
     if (!r.ok) throw new Error(r.reason)
     return r.value.id
+  }
+
+  function setLeadTasks(access: boolean | 'read'): void {
+    saveAgentConfig(getDb(), {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'lead',
+      tools: { ...DEFAULT_AGENT_CONFIG.tools, tasks: access },
+    })
   }
 
   it('adds nothing for a team with no goals', () => {
@@ -96,6 +116,44 @@ describe('goals in the team preamble', () => {
     const ctx = buildServerTeamContext(getDb(), 'T', 'lead', LEADER) ?? ''
     expect(ctx).toContain('…and 2 more.')
     expect(ctx).not.toContain(`Goal ${GOALS_IN_LEAD_TURN}`)
+  })
+
+  it("rolls a done child's tasks into its parent, and leaves an archived child's out", () => {
+    const db = getDb()
+    const parent = goal('Launch the beta')
+    const done = goal('Write the docs', parent)
+    const archived = goal('Old plan', parent)
+    const t = createTask(db, { title: 'Docs page', teamId: 'T', goalId: done })
+    db.update(tasks)
+      .set({ status: 'done', completedAt: Date.now() })
+      .where(eq(tasks.id, t.id))
+      .run()
+    createTask(db, { title: 'Dropped idea', teamId: 'T', goalId: archived })
+    updateTeamGoal(db, 'T', done, { status: 'done' })
+    archiveTeamGoal(db, 'T', archived)
+    const ctx = buildServerTeamContext(db, 'T', 'lead', LEADER) ?? ''
+    expect(ctx).toContain('- Launch the beta (1 of 1 tasks done)')
+  })
+
+  it('points a lead at list_goals only when its run can call it', () => {
+    goal('Launch the beta')
+    const db = getDb()
+    const summary = '- Launch the beta (no linked tasks yet)'
+    // A native lead with board reads (the default) has the Tasks tools.
+    expect(buildServerTeamContext(db, 'T', 'lead', LEADER) ?? '').toContain(
+      'Use list_goals and get_goal for more.',
+    )
+    // Tasks off: no Tasks server, so no tool to name. The goals still show.
+    setLeadTasks(false)
+    const off = buildServerTeamContext(db, 'T', 'lead', LEADER) ?? ''
+    expect(off).toContain(summary)
+    expect(off).not.toContain('list_goals')
+    // An OpenClaw lead's Tasks session is bound to no team.
+    setLeadTasks(true)
+    db.update(agents).set({ runtime: 'openclaw' }).where(eq(agents.id, 'lead')).run()
+    const openclaw = buildServerTeamContext(db, 'T', 'lead', LEADER) ?? ''
+    expect(openclaw).toContain(summary)
+    expect(openclaw).not.toContain('list_goals')
   })
 
   it("gives a worker only its own task's goal", () => {

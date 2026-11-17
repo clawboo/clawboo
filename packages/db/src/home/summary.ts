@@ -15,8 +15,9 @@
 //   line, so the model call it cost is never thrown away. A line the lead writes
 //   unasked keeps to the same board and clock rules.
 //
-// The server never asks a lead that cannot hold the tool (an OpenClaw lead's Tasks
-// tools carry no identity): see apps/web/server/lib/home/leadStatus.ts.
+// The server never asks a lead that cannot hold the tool (an OpenClaw lead, or a
+// Clawboo native lead whose Tasks access is read-only or off): see
+// apps/web/server/lib/home/leadStatus.ts. An ask that fails to post is taken back.
 
 import { eq, max } from 'drizzle-orm'
 
@@ -188,31 +189,63 @@ function askStands(s: StoredSettings, now: number): boolean {
   return s.pendingAskAt !== null && now - s.pendingAskAt < LEAD_STATUS_MIN_GAP_MS
 }
 
+/** An ask that was recorded, with what it replaced, so it can be taken back. */
+export interface LeadStatusAsk {
+  teamId: string
+  askedAt: number
+  previousLastAskSeq: number
+}
+
 /**
  * Should the lead be asked for a status line now? Records the ask when it says
- * yes, so a second sweep in the same window says no. `leadCanWrite`: whether the
- * team's lead can hold `write_home_summary` at all (the server knows; see above).
+ * yes, so a second sweep in the same window says no; null when it says no.
+ * `leadCanWrite`: whether the team's lead can hold `write_home_summary` at all (the
+ * server knows; see above).
  */
 export function takeLeadStatusAsk(
   db: ClawbooDb,
   teamId: string,
   now = Date.now(),
   opts: { leadCanWrite?: boolean } = {},
-): boolean {
-  if (opts.leadCanWrite === false) return false
+): LeadStatusAsk | null {
+  if (opts.leadCanWrite === false) return null
   const s = readStored(db, teamId)
-  if (!s.leadWritesStatus) return false
+  if (!s.leadWritesStatus) return null
   const seq = boardSeq(db, teamId)
-  if (!boardMoved(s, getHomeSummary(db, teamId), seq)) return false
-  if (tooSoon(s, now)) return false
-  if (inLastDay(s.statusAsks, now) >= LEAD_STATUS_MAX_PER_DAY) return false
+  if (!boardMoved(s, getHomeSummary(db, teamId), seq)) return null
+  if (tooSoon(s, now)) return null
+  if (inLastDay(s.statusAsks, now) >= LEAD_STATUS_MAX_PER_DAY) return null
   writeStored(
     db,
     teamId,
     { ...s, statusAsks: [...s.statusAsks, now], lastAskSeq: seq, pendingAskAt: now },
     now,
   )
-  return true
+  return { teamId, askedAt: now, previousLastAskSeq: s.lastAskSeq }
+}
+
+/**
+ * Take back an ask that never reached the lead (posting it failed), so the next
+ * pass may ask again instead of waiting out the clock and the board for an ask
+ * nobody received. Leaves alone anything a later ask or line changed.
+ */
+export function withdrawLeadStatusAsk(db: ClawbooDb, ask: LeadStatusAsk): void {
+  const s = readStored(db, ask.teamId)
+  const at = s.statusAsks.lastIndexOf(ask.askedAt)
+  if (at === -1) return
+  const statusAsks = s.statusAsks.filter((_, i) => i !== at)
+  const newest = statusAsks.every((t) => t < ask.askedAt)
+  writeStored(
+    db,
+    ask.teamId,
+    {
+      ...s,
+      statusAsks,
+      ...(newest ? { lastAskSeq: ask.previousLastAskSeq } : {}),
+      ...(s.pendingAskAt === ask.askedAt ? { pendingAskAt: null } : {}),
+    },
+    ask.askedAt,
+  )
 }
 
 /** The model an agent is set to, as its registry row says, else its runtime. */

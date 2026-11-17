@@ -320,6 +320,14 @@ function hasBoardRead(db: ClawbooDb, agentId: string, runtime: string | null): b
   return loadAgentConfigOrDefault(db, agentId).tools.tasks !== false
 }
 
+/** Can this run call `list_goals` / `get_goal` for its own team? It needs the Tasks
+ *  tools bound to the team. OpenClaw's Tasks URL is unsigned, so its session is bound
+ *  to no team and the tools would ask for a teamId it is never told. */
+function canReadTeamGoals(db: ClawbooDb, agentId: string, runtime: string | null): boolean {
+  if (runtime === 'openclaw') return false
+  return hasBoardRead(db, agentId, runtime)
+}
+
 /** Can this run ask a person (`ask_person`)? A worker's run on its task, where the
  *  Tasks tools are attached and bound to it. OpenClaw's Tasks URL carries no identity,
  *  so nothing could wake it. A routine's run may not: its person may be away, the
@@ -432,7 +440,11 @@ export function buildServerTeamContext(
   const planBlock = buildPlanApprovalBlock(db, teamId, selfAgentId, roomId)
 
   // The team's goals for a lead; a worker's own task's goal (lib/home/goalContext).
-  const goalsBlock = buildGoalsBlock(db, teamId, { isLeader: framing.isLeader, taskId })
+  const goalsBlock = buildGoalsBlock(db, teamId, {
+    isLeader: framing.isLeader,
+    taskId,
+    canReadGoals: canReadTeamGoals(db, selfAgentId, runtime),
+  })
 
   const composed = [
     personaBlock,

@@ -8,7 +8,13 @@
 // what the lead was asked and what it cost. The lead answers with the Tasks tool
 // `write_home_summary`; a line that answers the ask always lands.
 
-import { takeLeadStatusAsk, teams, teamsWithLeadStatus, type ClawbooDb } from '@clawboo/db'
+import {
+  takeLeadStatusAsk,
+  teams,
+  teamsWithLeadStatus,
+  withdrawLeadStatusAsk,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
 import { getDb } from '../db'
@@ -50,22 +56,30 @@ export async function askLeadsForStatus(deps: StatusAskDeps = {}): Promise<strin
   for (const teamId of teamsWithLeadStatus(db, live)) {
     if (!resolveServerOrchestrated(db, teamId)) continue
     // The lead may have changed since the line was turned on: never ask one that
-    // cannot write it.
-    if (!takeLeadStatusAsk(db, teamId, deps.now, { leadCanWrite: leadCanWriteStatus(db, teamId) }))
-      continue
+    // cannot write it. The ask is recorded before it is posted, so a pass running
+    // alongside this one cannot ask twice.
+    const ask = takeLeadStatusAsk(db, teamId, deps.now, {
+      leadCanWrite: leadCanWriteStatus(db, teamId),
+    })
+    if (!ask) continue
     const enqueue =
       deps.enqueue ??
       ((id: string, input: EnqueueUserMessageInput) =>
         getTeamOrchestrator(id, { mcpBaseUrl: deps.mcpBaseUrl ?? null }).enqueueUserMessage(input))
+    let posted = false
     try {
       const result = await enqueue(teamId, {
         stimulus: STATUS_ASK_TEXT,
         routine: { id: `home-status:${teamId}`, name: STATUS_ASK_ROUTINE_NAME },
       })
-      if (result.ok) asked.push(teamId)
+      posted = result.ok
     } catch {
-      // The next pass tries again once its window opens.
+      // Not posted: taken back below.
     }
+    if (posted) asked.push(teamId)
+    // Nothing reached the lead (a pause, the engine down): take the ask back, so
+    // the next pass asks again rather than wait out the clock for nothing.
+    else withdrawLeadStatusAsk(db, ask)
   }
   return asked
 }

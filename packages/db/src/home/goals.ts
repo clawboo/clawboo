@@ -8,7 +8,14 @@ import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { immediateWrite, type BoardTx } from '../board/contention'
-import { agents, teamGoalHealth, teamGoals, teams, type DbTeamGoal } from '../schema'
+import {
+  agents,
+  teamGoalHealth,
+  teamGoalUpdates,
+  teamGoals,
+  teams,
+  type DbTeamGoal,
+} from '../schema'
 import {
   actorJson,
   cleanTitle,
@@ -274,7 +281,10 @@ export function updateTeamGoal(
   })
 }
 
-/** Archive a goal. Its tasks keep their link; its child goals lose their parent. */
+/**
+ * Archive a goal. Its tasks keep their link; its child goals lose their parent; its
+ * open drafts are discarded, since an archived goal takes no updates.
+ */
 export function archiveTeamGoal(
   db: ClawbooDb,
   teamId: string,
@@ -292,6 +302,10 @@ export function archiveTeamGoal(
     tx.update(teamGoals)
       .set({ parentGoalId: null, updatedAt: now })
       .where(eq(teamGoals.parentGoalId, goalId))
+      .run()
+    tx.update(teamGoalUpdates)
+      .set({ state: 'discarded' })
+      .where(and(eq(teamGoalUpdates.goalId, goalId), eq(teamGoalUpdates.state, 'draft')))
       .run()
     return done(toGoalRecord({ ...row, archivedAt: now, updatedAt: now }))
   })

@@ -28,6 +28,7 @@ import {
   teams,
   updateTeamGoal,
 } from '@clawboo/db'
+import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,6 +42,7 @@ const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const home = await import('../home')
 const { boardCreatePOST, boardGetGET, boardListGET, boardUpdatePATCH } = await import('../board')
 const { askLeadsForStatus, STATUS_ASK_ROUTINE_NAME } = await import('../../lib/home/statusAsks')
+const { saveAgentConfig } = await import('../../lib/runtimes/native/agentConfigStore')
 
 interface Body {
   ok?: boolean
@@ -321,6 +323,27 @@ describe('Home routes', () => {
     expect(asked).toEqual([{ teamId: 'T', name: STATUS_ASK_ROUTINE_NAME }])
   })
 
+  it('asks a quiet board again after an ask that failed to post', async () => {
+    const db = getDb()
+    const later = Date.now() + 10_000
+    setTeamHomeSettings(db, 'T', { leadWritesStatus: true })
+    const t = createTask(db, { title: 'More work', teamId: 'T' })
+    db.update(tasks)
+      .set({ updatedAt: later - 1 })
+      .where(eq(tasks.id, t.id))
+      .run()
+    const failed = async () => ({ ok: false as const, error: 'paused', paused: true as const })
+    expect(await askLeadsForStatus({ enqueue: failed, now: later })).toEqual([])
+    const threw = async (): Promise<never> => {
+      throw new Error('engine down')
+    }
+    expect(await askLeadsForStatus({ enqueue: threw, now: later + 1000 })).toEqual([])
+    // The board has not moved since, and it is minutes later, not hours.
+    const posted = async () => ({ ok: true as const, targetAgentId: 'a1' })
+    expect(await askLeadsForStatus({ enqueue: posted, now: later + 2000 })).toEqual(['T'])
+    expect(await askLeadsForStatus({ enqueue: posted, now: later + 3000 })).toEqual([])
+  })
+
   it('never turns on, or asks, a lead that cannot write the line', async () => {
     const db = getDb()
     const now = Date.now()
@@ -344,6 +367,7 @@ describe('Home routes', () => {
     expect(read.body['settings']).toMatchObject({
       leadWritesStatus: false,
       leadCanWriteStatus: false,
+      leadCannotWriteReason: 'openclaw_lead',
     })
     const ok = await call(
       home.homeSettingsPUT,
@@ -366,6 +390,75 @@ describe('Home routes', () => {
       },
     })
     expect(asked).not.toContain('U')
+  })
+
+  it('refuses the line for a native lead whose board access is read-only or off, and says why', async () => {
+    const db = getDb()
+    const now = Date.now()
+    const reasonOf = async (): Promise<unknown> =>
+      (await call(home.homeSettingsGET, req({ params: { teamId: 'U' } }))).body['settings']
+    const turnOn = () =>
+      call(
+        home.homeSettingsPUT,
+        asPerson({ params: { teamId: 'U' }, body: { leadWritesStatus: true } }),
+      )
+    expect(await reasonOf()).toMatchObject({
+      leadCanWriteStatus: false,
+      leadCannotWriteReason: 'no_lead',
+    })
+    db.insert(agents)
+      .values({
+        id: 'nat',
+        runtime: 'clawboo-native',
+        name: 'Nat',
+        teamId: 'U',
+        gatewayId: 'nat',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    const access = (tasks: boolean | 'read') =>
+      saveAgentConfig(db, {
+        ...DEFAULT_AGENT_CONFIG,
+        id: 'nat',
+        tools: { ...DEFAULT_AGENT_CONFIG.tools, tasks },
+      })
+    // No stored config: the native default, read-only board access.
+    expect(await reasonOf()).toMatchObject({
+      leadCanWriteStatus: false,
+      leadCannotWriteReason: 'tasks_read_only',
+    })
+    expect((await turnOn()).status).toBe(409)
+    access(false)
+    expect(await reasonOf()).toMatchObject({ leadCannotWriteReason: 'tasks_off' })
+    expect((await turnOn()).status).toBe(409)
+    // Turned on earlier, then the lead's access became read-only: never asked.
+    setTeamHomeSettings(db, 'U', { leadWritesStatus: true })
+    access('read')
+    const t = createTask(db, { title: 'Work', teamId: 'U' })
+    db.update(tasks)
+      .set({ updatedAt: now + 5000 })
+      .where(eq(tasks.id, t.id))
+      .run()
+    const asked: string[] = []
+    await askLeadsForStatus({
+      now: now + 10_000,
+      enqueue: async (teamId) => {
+        asked.push(teamId)
+        return { ok: true as const, targetAgentId: 'nat' }
+      },
+    })
+    expect(asked).not.toContain('U')
+    // Full board access: the lead holds write_home_summary.
+    setTeamHomeSettings(db, 'U', { leadWritesStatus: false })
+    access(true)
+    const on = await turnOn()
+    expect(on.status).toBe(200)
+    expect(on.body['settings']).toMatchObject({
+      leadWritesStatus: true,
+      leadCanWriteStatus: true,
+      leadCannotWriteReason: null,
+    })
   })
 
   it("unlinks a task under a goal-linked request, so it leaves the goal's count", async () => {

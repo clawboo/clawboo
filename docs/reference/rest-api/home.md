@@ -106,6 +106,7 @@ TeamHome {
   asOf: number
   status: StatusLine        // see "The status line"
   settings: { leadWritesStatus: boolean, leadCanWriteStatus: boolean,
+              leadCannotWriteReason: string | null,
               weeklyUpdatesRoutineId: string | null }
   needsYou: {
     total: number           // tasks + approvals + drafts + suggestions
@@ -136,7 +137,7 @@ AllTeamsHome {
 }
 ```
 
-`recentFiles` lists the newest files at the top of the folders of the team's 8 most recently changed tasks (`<team folder>/tasks/<task id>`), up to 8. Open one with `GET /api/board/:taskId/folder/file?path=`. A folder that is gone or unreadable is skipped. Worktree checkouts are not listed.
+`recentFiles` lists up to 8 files from the top of the folders of the team's 8 most recently changed tasks (`<team folder>/tasks/<task id>`), the most recently modified first. Each folder's first 40 entries in name order (folders first) are read, so a folder with more entries can hold a newer file than the ones listed. Open one with `GET /api/board/:taskId/folder/file?path=`. A folder that is gone or unreadable is skipped. Worktree checkouts are not listed.
 
 ### The status line
 
@@ -153,7 +154,7 @@ StatusLine {
 }
 ```
 
-By default the line is computed from `facts`, for example "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent." A team can turn on a line its lead writes ([settings](#settings-and-weekly-updates)). Each ask is a model call, so it is off until a person turns it on, and the asks keep to limits that waste none. Every 15 minutes Clawboo looks at the teams that turned it on and asks the lead for a line in the team chat (it shows as "Routine · Home status line") only when the team's board moved past every point already seen: where it stood when the line was turned on, at the last ask, and at the last line. An untouched board is never asked about. Asks and lines share one clock: at most one every 6 hours, counting both, and at most 4 asks in a rolling day. The lead answers with the `write_home_summary` tool, and a line that answers the ask always lands. A line the lead writes unasked keeps to the same board and clock rules. A lead that cannot hold the tool (an OpenClaw lead) is never asked, even if the lead changed after the line was turned on. A written line older than a day gives way to the computed one.
+By default the line is computed from `facts`, for example "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent." A team can turn on a line its lead writes ([settings](#settings-and-weekly-updates)). Each ask is a model call, so it is off until a person turns it on, and the asks keep to limits that waste none. Every 15 minutes Clawboo looks at the teams that turned it on and asks the lead for a line in the team chat (it shows as "Routine · Home status line") only when the team's board moved past every point already seen: where it stood when the line was turned on, at the last ask, and at the last line. An untouched board is never asked about. Asks and lines share one clock: at most one every 6 hours, counting both, and at most 4 asks in a rolling day. The lead answers with the `write_home_summary` tool, and a line that answers the ask always lands. A line the lead writes unasked keeps to the same board and clock rules. A lead that cannot hold the tool (see `leadCannotWriteReason` in [settings](#settings-and-weekly-updates)) is never asked, even if the lead changed after the line was turned on. An ask that fails to post (a pause covers the team, or the engine is down) is taken back, so the next pass asks again instead of waiting out the clock. A written line older than a day gives way to the computed one.
 
 ## Goals
 
@@ -190,7 +191,7 @@ A task's goal is its own `goalId`, else the nearest goal up its parent chain, wh
 - `GET .../goals` lists the team's goals that are not archived, whatever their status (active, done and dropped), as `{ "goals": GoalSummary[] }`; `?includeArchived=true` adds archived ones. The team's Home (`GET /api/home`) shows only the active ones.
 - `POST .../goals` takes `{ title, description?, parentGoalId?, owner?, targetDate?, updateCadenceDays? }` and answers `{ "goal": TeamGoal }`.
 - `PATCH .../goals/:goalId` takes any of those fields and `status`. A parent must be a goal of the same team that is not archived and has no parent itself; a goal with child goals cannot take a parent.
-- `DELETE .../goals/:goalId` archives the goal. Its tasks keep their link; its child goals lose their parent.
+- `DELETE .../goals/:goalId` archives the goal. Its tasks keep their link; its child goals lose their parent; its open drafts are discarded, so they leave Needs you.
 - `POST .../goals/:goalId/health` takes `{ "health": "on_track" | "at_risk" | "off_track" | null }`. Each change is recorded.
 - `POST .../goals/reorder` takes `{ "goalIds": string[] }`: those first, in that order; the rest keep their order after them.
 
@@ -213,7 +214,7 @@ GoalDetail {
 
 ### Linking tasks to goals
 
-`POST /api/board` and `PATCH /api/board/:taskId` take `goalId`: a goal of the task's own team, or `null` for none. Another team's goal answers `400` with `"error": "goal_other_team"`. Changing a task's goal is a person's write (on `POST`, a `goalId` from a caller that is not a person is ignored and the task takes its parent's goal). `null` takes the task off every goal, its request's included, and the work under it with it. When a task's goal changes, the work under it that still carried the old goal moves to the new one; work a person put on another goal stays there. A person's team chat message (`POST /api/teams/:id/chat`) can carry `goalId` too: the request's main task, and the work filed under it, serve that goal. Board task rows (`GET /api/board`, `GET /api/board/:taskId`, and the task a create or patch returns) and board change frames carry the stored `goalId` and the goal the task counts toward: `effectiveGoalId`, with `goalLinkedVia` `own`, `request` or `parent` (the goal page's `linkedVia`). A subtask or hand-off that inherits its request's goal has a null `goalId` and a set `effectiveGoalId`, so a goal chip and a "No goal" filter read `effectiveGoalId`.
+`POST /api/board` and `PATCH /api/board/:taskId` take `goalId`: a goal of the task's own team, or `null` for none. Another team's goal answers `400` with `"error": "goal_other_team"`. Changing a task's goal is a person's write (on `POST`, a `goalId` from a caller that is not a person is ignored and the task takes its parent's goal). `null` takes the task off every goal, its request's included, and the work under it with it. When a task's goal changes, the work under it that still carried the old goal moves to the new one; work a person put on another goal stays there. A person's team chat message (`POST /api/teams/:id/chat`) can carry `goalId` too: the request's main task, and the work filed under it, serve that goal. Board task rows (`GET /api/board`, `GET /api/board/:taskId`, and the task a create or patch returns) and board change frames carry the stored `goalId` and the goal the task counts toward: `effectiveGoalId`, with `goalLinkedVia` `own`, `request` or `parent` (the goal page's `linkedVia`). A subtask or hand-off made under a request that has a goal stores that goal as its `goalId`. Work filed before its request had a goal keeps a null `goalId` and has `effectiveGoalId` set through the request, so a goal chip and a "No goal" filter read `effectiveGoalId`.
 
 ## Goal updates
 
@@ -231,8 +232,8 @@ GoalUpdate {
 
 Agents draft updates with `draft_goal_update`. Each agent holds at most one open draft on a goal: drafting again rewrites it in place (its words, health, run and time), so the table does not grow with each draft. Publishing an update that names a health sets the goal's health, recorded as set by the person who published it.
 
-- `POST .../goals/:goalId/updates` takes `{ body, health? }`: a person's own update, published at once. Answers `{ update, goal }`.
-- `POST .../updates/:updateId/publish` takes `{ body?, health? }` to edit before publishing. Answers `{ update, goal }`; a draft that is not a draft any more answers `409 not_draft`.
+- `POST .../goals/:goalId/updates` takes `{ body, health? }`: a person's own update, published at once. Answers `{ update, goal }`; an archived goal answers `409 goal_archived`.
+- `POST .../updates/:updateId/publish` takes `{ body?, health? }` to edit before publishing. Answers `{ update, goal }`; a draft that is not a draft any more answers `409 not_draft`, and a draft on an archived goal `409 goal_archived`.
 - `POST .../updates/:updateId/discard` answers `{ update }`.
 
 ## KPIs
@@ -269,7 +270,7 @@ KpiTile {
 KpiValue { id, kpiId, value, asOf, reportedBy, executionId, taskId, sourceUrl, note, createdAt }
 ```
 
-A reading is `stale` when its value is older than `staleAfterHours`, and `missing` when there is no value yet. A computed reading is always `ok`, with `asOf` the time of the read.
+A reading is `stale` when its value is older than `staleAfterHours`, and `missing` when there is no value yet. A computed reading is always `ok`, with `asOf` the time of the read. An agent or person reading uses only values from the KPI's current source, by who reported them: a person's values for a `person` KPI, an agent's for an `agent` one. So after its source changes, a KPI reads `missing` until the new source reports. Its value history keeps every value.
 
 - `GET .../kpis` answers `{ "kpis": KpiTile[] }`: active and suggested (`?includeArchived=true` adds archived).
 - `POST .../kpis` takes `{ name, source, unit?, direction?, target?, period?, metric?, goalId?, reporterAgentId?, staleAfterHours? }`. A computed KPI needs a `metric`; a reporter must be an agent on the team. Answers `{ "kpi": KpiTile }`.
@@ -327,7 +328,16 @@ Every edit is a new revision; nothing is overwritten, and the same words again m
 
 ### GET /api/home/teams/:teamId/settings
 
-Answers `{ "settings": { leadWritesStatus: boolean, leadCanWriteStatus: boolean, weeklyUpdatesRoutineId: string | null } }`. `leadCanWriteStatus` is false when the team's lead cannot write the line: an OpenClaw lead, whose Tasks tools carry no identity and so are never offered `write_home_summary`, or a team with no lead.
+Answers `{ "settings": { leadWritesStatus: boolean, leadCanWriteStatus: boolean, leadCannotWriteReason: string | null, weeklyUpdatesRoutineId: string | null } }`. `leadCanWriteStatus` is false when the team's lead cannot write the line, because it is never offered `write_home_summary`, and `leadCannotWriteReason` says why (null when it can):
+
+| Reason            | The team's lead                                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `no_lead`         | There is none.                                                                                                             |
+| `openclaw_lead`   | An OpenClaw agent. Its Tasks tools carry no identity, so they never include Home's writes.                                 |
+| `tasks_read_only` | A Clawboo Native agent whose Tasks access is read (the default for Clawboo Native). A read-only session serves reads only. |
+| `tasks_off`       | A Clawboo Native agent with Tasks access off.                                                                              |
+
+Codex, Claude Code and Hermes leads get a signed Tasks session bound to them on every team run, so they can write it.
 
 ### PUT /api/home/teams/:teamId/settings
 

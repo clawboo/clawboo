@@ -80,8 +80,16 @@ interface LinkedTask {
 export interface GoalIndex {
   now: number
   byGoal: Map<string, LinkedTask[]>
+  /** Each parent goal's children that are not archived. */
+  childIds: Map<string, string[]>
 }
 
+/**
+ * The linked tasks of `goals`, the goals a view shows. One roll-up rule holds
+ * wherever goals are shown: a parent holds the tasks of each of its children that
+ * is not archived (active, done or dropped), whether or not the view lists that
+ * child. An archived child's tasks stay with it alone.
+ */
 export function buildGoalIndex(
   db: ClawbooDb,
   goals: readonly TeamGoalRecord[],
@@ -98,13 +106,18 @@ export function buildGoalIndex(
     list.push({ row, via: link.via, goalId: link.goalId })
     direct.set(link.goalId, list)
   }
+  const childIds = new Map<string, string[]>()
+  for (const child of teamIds.flatMap((id) => listTeamGoals(db, id))) {
+    if (!child.parentGoalId) continue
+    childIds.set(child.parentGoalId, [...(childIds.get(child.parentGoalId) ?? []), child.id])
+  }
   const byGoal = new Map<string, LinkedTask[]>()
   for (const goal of goals) {
     const own = direct.get(goal.id) ?? []
-    const children = goals.filter((g) => g.parentGoalId === goal.id)
-    byGoal.set(goal.id, [...own, ...children.flatMap((c) => direct.get(c.id) ?? [])])
+    const children = childIds.get(goal.id) ?? []
+    byGoal.set(goal.id, [...own, ...children.flatMap((id) => direct.get(id) ?? [])])
   }
-  return { now, byGoal }
+  return { now, byGoal, childIds }
 }
 
 const counted = (t: TaskLinkRow): boolean =>
@@ -166,7 +179,7 @@ export function goalSummaries(
         goal.archivedAt === null &&
         index.now - since > goal.updateCadenceDays * DAY_MS,
       draftCount: drafts.get(goal.id) ?? 0,
-      childCount: goals.filter((g) => g.parentGoalId === goal.id && g.archivedAt === null).length,
+      childCount: index.childIds.get(goal.id)?.length ?? 0,
     }
   })
 }
