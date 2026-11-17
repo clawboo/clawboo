@@ -66,6 +66,16 @@ const { boardAgentWakesPOST, boardAssignPersonPOST, boardQuestionAnswerPOST, boa
   await import('../boardPerson')
 const { teamAgentWakesPUT } = await import('../teamAgentWakes')
 const { teamPlanApprovalPUT } = await import('../teamPlanApproval')
+const {
+  homeGoalHealthPOST,
+  homeGoalsPOST,
+  homeKpiValuesPOST,
+  homePagesPOST,
+  homeSettingsPUT,
+  homeUpdatePublishPOST,
+  homeWeeklyUpdatesPOST,
+} = await import('../home')
+const { createTeamGoal, createTeamKpi, draftGoalUpdate } = await import('@clawboo/db')
 const { boardInboxReadPOST, boardTaskReadPOST } = await import('../boardInbox')
 const { teamLabelDELETE, teamLabelPATCH, teamLabelsPOST, teamTaskPrefixPUT } =
   await import('../teamLabels')
@@ -424,6 +434,69 @@ const ROUTES: Array<[string, (who: Who, res: Response) => unknown]> = [
     "a team's switch for asking before a plan starts",
     (who, res) =>
       teamPlanApprovalPUT(req({ params: { teamId: TEAM }, body: { on: true }, ...who }), res),
+  ],
+  // Home: every write there is a person's.
+  [
+    'creating a goal',
+    (who, res) =>
+      homeGoalsPOST(req({ params: { teamId: TEAM }, body: { title: 'Ship' }, ...who }), res),
+  ],
+  [
+    "setting a goal's health",
+    (who, res) => {
+      const g = createTeamGoal(getDb(), TEAM, { title: 'Ship' }, null)
+      if (!g.ok) throw new Error(g.reason)
+      return homeGoalHealthPOST(
+        req({ params: { teamId: TEAM, goalId: g.value.id }, body: { health: 'at_risk' }, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    "publishing an agent's goal update",
+    (who, res) => {
+      const g = createTeamGoal(getDb(), TEAM, { title: 'Ship' }, null)
+      if (!g.ok) throw new Error(g.reason)
+      const d = draftGoalUpdate(getDb(), {
+        goalId: g.value.id,
+        teamId: TEAM,
+        body: 'Half done',
+        agent: { kind: 'agent', id: 'coder', name: 'Coder' },
+      })
+      if (!d.ok) throw new Error(d.reason)
+      return homeUpdatePublishPOST(
+        req({ params: { teamId: TEAM, updateId: d.value.id }, body: {}, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    "typing a KPI's value",
+    (who, res) => {
+      const k = createTeamKpi(getDb(), TEAM, { name: 'NPS', source: 'person' }, null)
+      if (!k.ok) throw new Error(k.reason)
+      return homeKpiValuesPOST(
+        req({ params: { teamId: TEAM, kpiId: k.value.id }, body: { value: 40 }, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    'writing a team page',
+    (who, res) =>
+      homePagesPOST(req({ params: { teamId: TEAM }, body: { title: 'Notes' }, ...who }), res),
+  ],
+  [
+    "turning on a team's lead-written status line",
+    (who, res) =>
+      homeSettingsPUT(
+        req({ params: { teamId: TEAM }, body: { leadWritesStatus: true }, ...who }),
+        res,
+      ),
+  ],
+  [
+    "turning on a team's weekly goal updates",
+    (who, res) => homeWeeklyUpdatesPOST(req({ params: { teamId: TEAM }, ...who }), res),
   ],
   [
     'answering a plan',
