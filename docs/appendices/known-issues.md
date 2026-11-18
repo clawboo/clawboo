@@ -251,7 +251,7 @@ The latest npm release is 0.9.0. Run `clawboo --version` to see which one you ha
 
 ### One install serves one person
 
-**What you see:** everyone who can open the dashboard sees every team, agent, task and memory fact.
+**What you see:** everyone who can open the dashboard sees every team, agent, task and memory fact, unless roles are enforced behind a sign-in proxy (see below).
 
 **What it affects:** Clawboo has no user accounts and keeps no data apart per person. Anyone with the access token gets the whole install. From 0.9.0, behind a sign-in proxy, [Roles](/guides/sso-proxy#roles) can decide what each person may do, and a guest then reaches only the teams their token lists. Every other role still sees the whole install.
 
@@ -271,7 +271,7 @@ The latest npm release is 0.9.0. Run `clawboo --version` to see which one you ha
 
 ## Issues in 0.8.0 that are fixed in 0.9.0
 
-These problems affect the 0.8.0 release. They are fixed in 0.9.0, which the [changelog](/appendices/changelog) describes.
+These problems affect the 0.8.0 release. They are fixed in 0.9.0, which the [changelog](/appendices/changelog) describes. Where a row says the fix needs more, such as installing a runtime again or a server that writes a start marker, it holds only then.
 
 | What you see on 0.8.0                                                                                                                                                                                                                                                              | Area       |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
@@ -280,7 +280,7 @@ These problems affect the 0.8.0 release. They are fixed in 0.9.0, which the [cha
 | On a start that moves work folders, a stop sent during the start can let the routines resume, and possibly start a run, in the moment before the stop                                                                                                                              | Routines   |
 | On macOS and Linux, a process that started in the hour a daylight saving change repeats can be taken for another one                                                                                                                                                               | Server     |
 | After a server crashes, the `clawboo` command can hand the access token to another program that now holds the recorded port, and count it as a busy server holding that port (fixed for a server from 0.9.0, which writes a [start marker](/reference/configuration#start-marker)) | CLI        |
-| A request-bound identity token used before a restart is accepted once more after it                                                                                                                                                                                                | Security   |
+| A request-bound identity token used before a restart is accepted once more after it (from 0.9.0, only a token whose record the database would not take, such as on a full disk)                                                                                                    | Security   |
 | A task that waits on or depends on a task of another team copies that task's title into its own comments, its waiting reason and its team's room                                                                                                                                   | Board      |
 | A dashboard page that was open when something else connected Clawboo to the OpenClaw Gateway has no Gateway connection of its own until you reload it, and OpenClaw 1:1 chats need one                                                                                             | OpenClaw   |
 | A runtime Clawboo installed reads as not installed once its Node.js is gone, such as when an app that runs Clawboo on a Node.js of its own is moved or renamed, even when Clawboo runs on the same Node.js version                                                                 | Runtimes   |

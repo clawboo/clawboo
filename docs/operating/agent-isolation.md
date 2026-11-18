@@ -45,7 +45,7 @@ With the setting on, a prompt-injected agent can no longer:
 
 Clawboo checks the first and the last of these from inside the agent user's account every time it starts, and refuses to start when it cannot prove them.
 
-This is what gives [the person check](/operating/security#what-counts-as-a-person) its strength. Without it, an agent can act as you around every check by changing the database directly. With it, and from 0.9.0 with `personCheck: verified` behind a sign-in proxy, an agent other than OpenClaw's cannot act as you even if it gets the access token some other way.
+This is what gives [the person check](/operating/security#what-counts-as-a-person) its strength. Without it, an agent can act as you around every check by changing the database directly. With it, and from 0.9.0 with `personCheck: verified` behind a sign-in proxy, an agent other than OpenClaw's cannot act as you even if it gets the access token some other way. That rests on your proxy signing only for a browser a person signed in. An agent's browser is kept off the dashboard's own port, not off your proxy's address, so if a person signs in to the proxy in an agent's browser, for example while taking over its screen, or a [website login](/using/website-logins) saved for your sign-in page fills it there, that agent can act as that person. It also rests on the conditions in [What counts as a person](/operating/security#what-counts-as-a-person).
 
 It does **not**:
 
