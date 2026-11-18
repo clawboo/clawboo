@@ -116,11 +116,16 @@ describe('ComputerScreen', () => {
     return screen.getByLabelText(/You have control/)
   }
 
-  async function inputEvents(): Promise<unknown[]> {
-    await new Promise((r) => setTimeout(r, 120))
+  /** Every input event sent to the agent so far, in order. */
+  function sentEvents(): unknown[] {
     return calls.list
       .filter((c) => c.path === '/api/agents/a1/computer/input')
       .flatMap((c) => (JSON.parse(String(c.init?.body)) as { events: unknown[] }).events)
+  }
+
+  async function inputEvents(): Promise<unknown[]> {
+    await new Promise((r) => setTimeout(r, 120))
+    return sentEvents()
   }
 
   it('releases a key with the keysym it was pressed with', async () => {
@@ -143,10 +148,37 @@ describe('ComputerScreen', () => {
     act(() => {
       window.dispatchEvent(new Event('blur'))
     })
-    expect(await inputEvents()).toEqual([
-      { t: 'k', s: 0xffe7, d: true },
-      { t: 'k', s: 0xffe7, d: false },
-    ])
+    await waitFor(() =>
+      expect(sentEvents()).toEqual([
+        { t: 'k', s: 0xffe7, d: true },
+        { t: 'k', s: 0xffe7, d: false },
+      ]),
+    )
+  })
+
+  it('lets go of a key pressed as control arrives when the window loses focus at once', async () => {
+    await openOnDisplay()
+    const canvas = await screen.findByLabelText("The agent's screen")
+    // Press a key and leave the window straight from the DOM change that shows
+    // this view in control, before React's next task: the canvas takes keys
+    // from that commit, so the release has to be listening from it too.
+    let pressed = false
+    const watch = new MutationObserver(() => {
+      if (!/You have control/.test(canvas.getAttribute('aria-label') ?? '')) return
+      watch.disconnect()
+      fireEvent.keyDown(canvas, { key: 'Meta', code: 'MetaLeft' })
+      window.dispatchEvent(new Event('blur'))
+      pressed = true
+    })
+    watch.observe(canvas, { attributes: true, attributeFilter: ['aria-label'] })
+    send('control', { state: 'you', canControl: true })
+    await waitFor(() => expect(pressed).toBe(true))
+    await waitFor(() =>
+      expect(sentEvents()).toEqual([
+        { t: 'k', s: 0xffe7, d: true },
+        { t: 'k', s: 0xffe7, d: false },
+      ]),
+    )
   })
 
   it('never moves a press to where a drag went next', async () => {
