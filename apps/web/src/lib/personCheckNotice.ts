@@ -32,7 +32,7 @@ export const VERIFIED_REFUSED = `Clawboo did not do this: ${UNSIGNED}. ${SIGN_IN
 export const VERIFIED_MOVE = `The card moved, but ${UNSIGNED}, so any run on it keeps going. ${SIGN_IN}`
 export const VERIFIED_REPLY = `Your comment is saved, but ${UNSIGNED}, so it did not go to the agent as your reply. ${SIGN_IN}`
 /** Said once when such a page opens with nobody signed in. */
-export const VERIFIED_NOBODY = `You can look around, but ${UNSIGNED}, so nothing you do here acts as you: answering approvals, moving cards and taking over a screen are refused. ${SIGN_IN}`
+export const VERIFIED_NOBODY = `You can look around, but ${UNSIGNED}, so nothing you do here acts as you: answering approvals and taking over a screen are refused, and a card you move does not stop its run. ${SIGN_IN}`
 
 const UNDER_VERIFIED: Record<string, string> = {
   [PERSON_CHECK_REFUSED]: VERIFIED_REFUSED,

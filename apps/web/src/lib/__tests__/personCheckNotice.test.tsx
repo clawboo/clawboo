@@ -191,6 +191,14 @@ describe('on a server that counts only a person its sign-in proxy signed for', (
     expect(messages()).toEqual([VERIFIED_NOBODY])
   })
 
+  it('says what the server does with an unsigned card move: it moves, its run keeps going', () => {
+    // The board takes the move as no one's (server/api/board.ts), so the
+    // opening notice must not call it refused, and must agree with VERIFIED_MOVE.
+    expect(VERIFIED_NOBODY).not.toMatch(/moving cards/i)
+    expect(VERIFIED_NOBODY).toMatch(/a card you move does not stop its run/)
+    expect(VERIFIED_MOVE).toMatch(/^The card moved, but /)
+  })
+
   it('keeps the usual notices on a server that reads the page, and says nothing at open', async () => {
     identity({ personCheck: 'page', person: null })
     await primePersonCheckMode()
