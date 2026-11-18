@@ -21,7 +21,7 @@ This page lists what does not work yet in Clawboo, or works with a catch. Each e
 - **Open**: no fix exists yet.
 - **Fixed on main**: the fix is in the source code but not in an npm release yet. It ships with the next release.
 
-The latest npm release is 0.8.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
+The latest npm release is 0.9.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
 
 ## Security and access
 
@@ -253,7 +253,7 @@ The latest npm release is 0.8.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** everyone who can open the dashboard sees every team, agent, task and memory fact.
 
-**What it affects:** Clawboo has no user accounts and keeps no data apart per person. Anyone with the access token gets the whole install.
+**What it affects:** Clawboo has no user accounts and keeps no data apart per person. Anyone with the access token gets the whole install. From 0.9.0, behind a sign-in proxy, [Roles](/guides/sso-proxy#roles) can decide what each person may do, and a guest then reaches only the teams their token lists. Every other role still sees the whole install.
 
 **What to do:** run one install per person, each under its own user account on the computer or in its own virtual machine. Separate data folders (`CLAWBOO_HOME`) under one account do not keep people apart: they share `~/.openclaw` and its saved keys, and coding agents can read any file that account can. With [`CLAWBOO_AGENT_USER`](/operating/agent-isolation), give each install an agent user of its own: Clawboo stops every process its agent user runs when it starts and when it stops. See [Data and state](/operating/data-and-state).
 
@@ -268,6 +268,24 @@ The latest npm release is 0.8.0. Run `clawboo --version` to see which one you ha
 **What to do:** behind a reverse proxy, limit concurrent connections there, and keep the access token on. See the [Observability API](/reference/rest-api/observability).
 
 **Status:** open.
+
+## Issues in 0.8.0 that are fixed in 0.9.0
+
+These problems affect the 0.8.0 release. They are fixed in 0.9.0, which the [changelog](/appendices/changelog) describes.
+
+| What you see on 0.8.0                                                                                                                                                                                                                                                              | Area       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| When Clawboo stops, the Hermes gateway gets SIGTERM, which Hermes takes for a crash                                                                                                                                                                                                | Hermes     |
+| A SIGTERM sent while the server is still starting can be taken by one part of the server, so the server keeps running and its later stop leaves the OpenClaw connection open                                                                                                       | Server     |
+| On a start that moves work folders, a stop sent during the start can let the routines resume, and possibly start a run, in the moment before the stop                                                                                                                              | Routines   |
+| On macOS and Linux, a process that started in the hour a daylight saving change repeats can be taken for another one                                                                                                                                                               | Server     |
+| After a server crashes, the `clawboo` command can hand the access token to another program that now holds the recorded port, and count it as a busy server holding that port (fixed for a server from 0.9.0, which writes a [start marker](/reference/configuration#start-marker)) | CLI        |
+| A request-bound identity token used before a restart is accepted once more after it                                                                                                                                                                                                | Security   |
+| A task that waits on or depends on a task of another team copies that task's title into its own comments, its waiting reason and its team's room                                                                                                                                   | Board      |
+| A dashboard page that was open when something else connected Clawboo to the OpenClaw Gateway has no Gateway connection of its own until you reload it, and OpenClaw 1:1 chats need one                                                                                             | OpenClaw   |
+| A runtime Clawboo installed reads as not installed once its Node.js is gone, such as when an app that runs Clawboo on a Node.js of its own is moved or renamed, even when Clawboo runs on the same Node.js version                                                                 | Runtimes   |
+| After a `brew upgrade` of Homebrew's `node` formula to a new major version, a runtime installed on it runs on that major version (a runtime installed on 0.8.0 or older keeps this until you install it again)                                                                     | Runtimes   |
+| The build of a connector's native part, such as `fsevents` for the browser connector, writes Python `__pycache__` folders into the folder of the npm that runs it                                                                                                                  | Connectors |
 
 ## Issues in 0.7.0 that are fixed in 0.8.0
 

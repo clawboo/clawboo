@@ -125,7 +125,7 @@ Below the screen, **View link** and **Control link** make a link to this one age
 
 ### Behind a sign-in proxy
 
-In releases after 0.8.0, an administrator who runs Clawboo behind a [sign-in proxy](/guides/sso-proxy) can ask more of the screen:
+From 0.9.0, an administrator who runs Clawboo behind a [sign-in proxy](/guides/sso-proxy) can ask more of the screen:
 
 - With [`personCheck: verified`](/guides/sso-proxy#only-signed-requests-act-as-a-person), watching an agent's screen, taking it over and typing need you to be signed in through the proxy, and a link needs that as well as the link. Your view is yours alone: nobody else can pick it up or type into it, though another signed-in person can still take over from a view of their own, as anywhere. Every few minutes the view reconnects by itself, which keeps your take over.
 - With [`proxyIdentityControlClaim: required`](/guides/sso-proxy#taking-over-a-screen), the proxy also decides who may take over which agent. Without its say-so, **Take over** answers "Your sign-in proxy has not allowed you to take over this agent", and if it stops allowing it while you have control, the screen goes back to the agent.

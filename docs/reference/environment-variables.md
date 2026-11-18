@@ -268,7 +268,7 @@ Clawboo starts the gateway on the first free port from this one, trying 40 in al
 
 ### CLAWBOO_HERMES_STOP_GRACE_MS
 
-In releases after 0.8.0: when Clawboo stops, how long the Hermes gateway gets to finish its planned stop after Clawboo sends it SIGINT, before Clawboo kills it and the processes it started.
+From 0.9.0: when Clawboo stops, how long the Hermes gateway gets to finish its planned stop after Clawboo sends it SIGINT, before Clawboo kills it and the processes it started.
 
 - Type: whole number of milliseconds, 0 to 8000
 - Default: `5000`
@@ -632,7 +632,7 @@ The claim with the person's role. A list is joined with commas. The role is reco
 - Default: `off`
 - Example: `CLAWBOO_PROXY_IDENTITY_ROLES=enforce`
 
-In releases after 0.8.0. With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
+From 0.9.0. With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
 
 ### CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM
 
@@ -640,7 +640,7 @@ In releases after 0.8.0. With `enforce`, the role in each token decides what its
 - Default: `off`
 - Example: `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM=required`
 
-In releases after 0.8.0. With `required`, taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent; a batch without it hands the screen back to the agent. See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen). It needs `CLAWBOO_PROXY_IDENTITY` on or required, and request binding; otherwise the server refuses to start. Operator file key: `proxyIdentityControlClaim`.
+From 0.9.0. With `required`, taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent; a batch without it hands the screen back to the agent. See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen). It needs `CLAWBOO_PROXY_IDENTITY` on or required, and request binding; otherwise the server refuses to start. Operator file key: `proxyIdentityControlClaim`.
 
 ### CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY
 
@@ -648,7 +648,7 @@ In releases after 0.8.0. With `required`, taking over an agent's screen, and eve
 - Default: unset
 - Example: `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY='{"kty":"OKP","crv":"Ed25519","x":"…"}'`
 
-In releases after 0.8.0. The public key of a program running beside Clawboo that makes its own background reads, such as one that watches for approvals. Its tokens travel in the `clawboo-reader-identity` header, name a `reader:` program, never a person, and reach only a short fixed list of reads, each workspace-wide; anything else answers `403` with `"reason": "reader"`. See [A program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo). It takes the same forms as [`CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`](#clawboo_proxy_identity_public_key) and refuses a private key the same way. It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off, or with a key that `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY` or [`CLAWBOO_APP_LINK_PUBLIC_KEY`](#clawboo_app_link_public_key) holds too, the server refuses to start. Operator file key: `proxyIdentityReaderPublicKey`.
+From 0.9.0. The public key of a program running beside Clawboo that makes its own background reads, such as one that watches for approvals. Its tokens travel in the `clawboo-reader-identity` header, name a `reader:` program, never a person, and reach only a short fixed list of reads, each workspace-wide; anything else answers `403` with `"reason": "reader"`. See [A program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo). It takes the same forms as [`CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`](#clawboo_proxy_identity_public_key) and refuses a private key the same way. It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off, or with a key that `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY` or [`CLAWBOO_APP_LINK_PUBLIC_KEY`](#clawboo_app_link_public_key) holds too, the server refuses to start. Operator file key: `proxyIdentityReaderPublicKey`.
 
 ### CLAWBOO_PERSON_CHECK
 
@@ -656,7 +656,7 @@ In releases after 0.8.0. The public key of a program running beside Clawboo that
 - Default: `page`
 - Example: `CLAWBOO_PERSON_CHECK=verified`
 
-In releases after 0.8.0. Who may act as a person on the routes that take [the person check](/operating/security#the-person-check). `page`: a person a verified token names, or the dashboard's own page. `verified`: only a person a verified token names, and the same for the Gateway WebSocket and every route of an agent's screen. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off the server refuses to start. `CLAWBOO_PROXY_IDENTITY=required` always works as `verified`. Operator file key: `personCheck`.
+From 0.9.0. Who may act as a person on the routes that take [the person check](/operating/security#the-person-check). `page`: a person a verified token names, or the dashboard's own page. `verified`: only a person a verified token names, and the same for the Gateway WebSocket and every route of an agent's screen. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off the server refuses to start. `CLAWBOO_PROXY_IDENTITY=required` always works as `verified`. Operator file key: `personCheck`.
 
 ## Provider keys
 
@@ -1064,7 +1064,7 @@ Runtimes Clawboo starts (Claude Code, Codex, Hermes) and the verification comman
 
 The removal works by name. Any other secret in the server's environment, including provider keys such as `OPENAI_API_KEY`, reaches every agent those runtimes run. Start Clawboo from a shell that holds only what agents may see. [What agents can do](/concepts/permissions) covers what else they can reach.
 
-With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, every process the agent host starts also loses the variables that describe your account and Clawboo's folders: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the `XDG_*` folders, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `DBUS_SESSION_BUS_ADDRESS`, `CLAWBOO_HOME`, `CLAWBOO_WORK_DIR` and the agent isolation variables, among others. The agent host fills in the agent user's own `HOME`, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`. In releases after 0.8.0, your `PYTHONPYCACHEPREFIX` is one of them, since an agent user's Python writing bytecode into your folder could plant code your own Python then runs; a process started as the agent user, such as a runtime, a connector or an approved command, gets `PYTHONDONTWRITEBYTECODE=1` in its place, unless Clawboo gives it a folder of its own or a `PYTHONDONTWRITEBYTECODE` is already set.
+With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, every process the agent host starts also loses the variables that describe your account and Clawboo's folders: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the `XDG_*` folders, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `DBUS_SESSION_BUS_ADDRESS`, `CLAWBOO_HOME`, `CLAWBOO_WORK_DIR` and the agent isolation variables, among others. The agent host fills in the agent user's own `HOME`, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`. From 0.9.0, your `PYTHONPYCACHEPREFIX` is one of them, since an agent user's Python writing bytecode into your folder could plant code your own Python then runs; a process started as the agent user, such as a runtime, a connector or an approved command, gets `PYTHONDONTWRITEBYTECODE=1` in its place, unless Clawboo gives it a folder of its own or a `PYTHONDONTWRITEBYTECODE` is already set.
 
 ## What connectors and approved commands inherit
 
@@ -1073,12 +1073,12 @@ Local connectors and the shell commands you approve for a Clawboo Native agent s
 - What a process needs to start: `PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME`, `TERM`, `TMPDIR`, `TZ`, `LANG`, `LC_ALL` and `LC_CTYPE`, and on Windows `SystemRoot`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `TEMP` and the other system folders.
 - Proxy settings: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, in either case.
 - npm's prefix, cache and update check: `npm_config_prefix`, `npm_config_cache` and `npm_config_update_notifier`, in lower or upper case (`NPM_CONFIG_PREFIX` and so on). No other npm setting arrives, so npm credentials such as `npm_config__authToken` stay out.
-- In releases after 0.8.0, Python's bytecode settings: `PYTHONDONTWRITEBYTECODE` and `PYTHONPYCACHEPREFIX`. No other Python setting arrives, so `PYTHONPATH` and `PYTHONSTARTUP` stay out.
+- From 0.9.0, Python's bytecode settings: `PYTHONDONTWRITEBYTECODE` and `PYTHONPYCACHEPREFIX`. No other Python setting arrives, so `PYTHONPATH` and `PYTHONSTARTUP` stay out.
 - For a connector, the keys you entered for that connector.
 
-A connector also gets `npm_config_update_notifier=false` when neither spelling is set, so its `npx` start does not ask the registry for a newer npm. In releases after 0.8.0, a connector started through npm (its command is `npx`, `npm` or `node`, wherever that program is, and on Windows also `npx.cmd`, `npm.cmd` or `node.exe`) also gets `PYTHONDONTWRITEBYTECODE=1` when neither Python setting is set. Starting a connector through `npx` can build a native part of one of its packages, such as `fsevents` for the browser connector, and that build runs Python, which would otherwise write `__pycache__` folders into the folder of the npm that runs it: nvm's, Homebrew's, or the npm of a Node.js bundled inside an app that runs Clawboo. A connector any other program starts, such as `uvx`, `python` or `docker`, gets no Python setting of Clawboo's, so uv keeps the bytecode it caches between starts. Either setting you make passes through as it is, for every connector, with nothing added: to keep Python's bytecode, set `PYTHONPYCACHEPREFIX` to a folder of your own before you start Clawboo, and Python writes it there. With agents as their own user, a process started as the agent user never gets that folder (see above). An approved command runs npm and Python as you configured them.
+A connector also gets `npm_config_update_notifier=false` when neither spelling is set, so its `npx` start does not ask the registry for a newer npm. From 0.9.0, a connector started through npm (its command is `npx`, `npm` or `node`, wherever that program is, and on Windows also `npx.cmd`, `npm.cmd` or `node.exe`) also gets `PYTHONDONTWRITEBYTECODE=1` when neither Python setting is set. Starting a connector through `npx` can build a native part of one of its packages, such as `fsevents` for the browser connector, and that build runs Python, which would otherwise write `__pycache__` folders into the folder of the npm that runs it: nvm's, Homebrew's, or the npm of a Node.js bundled inside an app that runs Clawboo. A connector any other program starts, such as `uvx`, `python` or `docker`, gets no Python setting of Clawboo's, so uv keeps the bytecode it caches between starts. Either setting you make passes through as it is, for every connector, with nothing added: to keep Python's bytecode, set `PYTHONPYCACHEPREFIX` to a folder of your own before you start Clawboo, and Python writes it there. With agents as their own user, a process started as the agent user never gets that folder (see above). An approved command runs npm and Python as you configured them.
 
-The npm that installs a runtime into the [runtimes folder](/operating/data-and-state#the-runtimes-folder) (OpenClaw, Claude Code's Agent SDK, Codex, 1Password's SDK) gets `PYTHONDONTWRITEBYTECODE=1` on the same terms in releases after 0.8.0, since a native part's build runs Python there too.
+The npm that installs a runtime into the [runtimes folder](/operating/data-and-state#the-runtimes-folder) (OpenClaw, Claude Code's Agent SDK, Codex, 1Password's SDK) gets `PYTHONDONTWRITEBYTECODE=1` on the same terms from 0.9.0, since a native part's build runs Python there too.
 
 <Accordion title="Source of truth">
 

@@ -326,7 +326,7 @@ A task-runner run reached its turn limit or filled its context, and continued in
 
 ## Home events
 
-In releases after 0.8.0. What agents and people change on a team's [Home](/reference/rest-api/home). The envelope names the team, and the agent when one wrote it. None carries words: no update body, page text or KPI note.
+From 0.9.0. What agents and people change on a team's [Home](/reference/rest-api/home). The envelope names the team, and the agent when one wrote it. None carries words: no update body, page text or KPI note.
 
 - `kpi_reported`: `{ kpiId, value, asOf, executionId?, actor? }`, with the bound task as the envelope's task.
 - `goal_update_drafted` and `goal_update_published`: `{ goalId, updateId, health?, executionId?, actor? }`. A published update that names a health set the goal's health.

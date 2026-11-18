@@ -102,7 +102,7 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `secrets/keyless-providers.json`        | Whether you chose or removed keyless Ollama                                                                                                          | No                                      |
 | `proxy-device-identity.json`            | The key pair Clawboo uses to sign in to the OpenClaw Gateway as a device                                                                             | Yes                                     |
 | `api-port.txt`                          | The port the server listens on; removed at shutdown if it still names that port                                                                      | No                                      |
-| `api-port.json`                         | In releases after 0.8.0: the [start marker](#start-marker), which names the server process behind that port                                          | No                                      |
+| `api-port.json`                         | From 0.9.0: the [start marker](#start-marker), which names the server process behind that port                                                       | No                                      |
 | `server.log`, `server.log.1`            | Output of a server the CLI started                                                                                                                   | No                                      |
 | `gateway.log`, `gateway.pid`            | Output and process record of an OpenClaw Gateway that Clawboo started                                                                                | No                                      |
 | `connector-pids.json`                   | Connector processes Clawboo started, so leftovers from a crash are stopped at the next start                                                         | No                                      |
@@ -119,7 +119,7 @@ The database files, `settings.json` and secrets are owner-only (mode 0600) in an
 
 ### Start marker
 
-In releases after 0.8.0, the server writes `api-port.json` next to `api-port.txt`, right after it, once it is listening. `api-port.txt` still holds only the port number, so older readers keep working. The marker also names the process that wrote the port. A server that crashed or was killed leaves both files behind, and any program may take its port afterwards; the marker lets a reader tell that record from a running server's.
+From 0.9.0, the server writes `api-port.json` next to `api-port.txt`, right after it, once it is listening. `api-port.txt` still holds only the port number, so older readers keep working. The marker also names the process that wrote the port. A server that crashed or was killed leaves both files behind, and any program may take its port afterwards; the marker lets a reader tell that record from a running server's.
 
 ```json
 {

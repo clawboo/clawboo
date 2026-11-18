@@ -110,14 +110,14 @@ Click an agent to open its page: its chat on the left, and cards on the right th
 
 ## Keyboard shortcuts
 
-| Keys                  | What they do                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------- |
-| `Cmd/Ctrl + 1` to `4` | Open the Org chart, Board, Connectors or Memory                                                           |
-| `Cmd/Ctrl + ,`        | Open Settings                                                                                             |
-| `Cmd/Ctrl + \`        | Hide or show the sidebar                                                                                  |
-| `Cmd/Ctrl + [`        | Go back a page, in an [app's own window](/guides/app-window) with the slim top bar (releases after 0.8.0) |
-| `Cmd/Ctrl + ]`        | Go forward again, in the same window                                                                      |
-| `Escape`              | Close Settings; otherwise go from an agent page, Boo Zero's page or a team chat to the welcome screen     |
+| Keys                  | What they do                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `Cmd/Ctrl + 1` to `4` | Open the Org chart, Board, Connectors or Memory                                                       |
+| `Cmd/Ctrl + ,`        | Open Settings                                                                                         |
+| `Cmd/Ctrl + \`        | Hide or show the sidebar                                                                              |
+| `Cmd/Ctrl + [`        | Go back a page, in an [app's own window](/guides/app-window) with the slim top bar (from 0.9.0)       |
+| `Cmd/Ctrl + ]`        | Go forward again, in the same window                                                                  |
+| `Escape`              | Close Settings; otherwise go from an agent page, Boo Zero's page or a team chat to the welcome screen |
 
 Shortcuts other than `Cmd/Ctrl + \` don't fire while you type in a text field. The welcome screen has buttons for the Org chart, the Marketplace and **Cost**, which opens **Tokens Used**. [Keyboard shortcuts](/reference/keyboard-shortcuts) also lists the Board and graph keys.
 

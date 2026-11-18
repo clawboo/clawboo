@@ -42,43 +42,44 @@ Every surface talks to the same server, so a feature the server has can reach ev
 
 - **npm install**: `npx clawboo` or `npm install -g clawboo`, with the dashboard in a browser on the same computer, or reached from another one as in [Reach Clawboo from another machine](/guides/self-host-securely).
 - **Desktop app**: an app that runs this same server, unchanged, with its own Node.js. It is not available to download yet.
-- **Phone web app**: the dashboard, installed to a phone's home screen. It does not exist yet. A phone browser can already open the dashboard through a reverse proxy, but the layout is made for a computer screen.
+- **Phone web app**: the npm install's own dashboard, installed to a phone's home screen from a secure address, as in [Put the dashboard on your phone](/guides/self-host-securely#put-the-dashboard-on-your-phone). It is a web app, not an app from an app store, and keeps nothing for offline use. Being the same dashboard, it has what the npm install has, so the table gives it no column of its own. On a phone's width, the sidebar, the Board, chats and Home are laid out for the screen; other pages, such as Settings, the Org chart, Memory and Routines, open but are not laid out for one yet (see [On a phone](/using/index#on-a-phone)).
 
 **Supported** means released on that surface. **Beta** means released, with behavior that may still change. **Planned** means not released on that surface yet.
 
-| Feature                                               | Flag                                                                               | npm install                                        | Desktop app | Phone web app |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------- | ----------- | ------------- |
-| Clawboo Native agents                                 | `runtime.clawboo-native`                                                           | Supported                                          | Planned     | Planned       |
-| Claude Code, Codex and Hermes agents                  | `runtime.claude-code`, `runtime.codex`, `runtime.hermes`                           | Supported                                          | Planned     | Planned       |
-| OpenClaw agents                                       | `runtime.openclaw`                                                                 | Supported                                          | Planned     | Planned       |
-| Team chat and chat rooms                              | `chat.rooms`                                                                       | Supported                                          | Planned     | Planned       |
-| 1:1 chats                                             | `chat.direct`                                                                      | Supported                                          | Planned     | Planned       |
-| Board, with checks on finished work                   | `board.verification`, `board.checkHold`, `board.reportResult`, `board.parentWaits` | Supported                                          | Planned     | Planned       |
-| A person's inbox, with read state on the server       | `board.inbox`                                                                      | Supported                                          | Planned     | Planned       |
-| A person's request as one main task                   | `board.mainTasks`                                                                  | Supported                                          | Planned     | Planned       |
-| Comments that reach a running task                    | `board.steering`                                                                   | Supported                                          | Planned     | Planned       |
-| Readable task ids                                     | `board.readableIds`                                                                | Supported                                          | Planned     | Planned       |
-| Team labels on tasks                                  | `board.labels`                                                                     | Supported                                          | Planned     | Planned       |
-| Agents that wake on what happens to their task        | `board.wakes`                                                                      | Supported                                          | Planned     | Planned       |
-| Agents waking each other, once you allow it           | `board.agentWakes`                                                                 | Supported                                          | Planned     | Planned       |
-| A job waits for a person at its limit of runs         | `board.jobLimit`                                                                   | Supported                                          | Planned     | Planned       |
-| Plans, and asking before one starts                   | `board.planDocuments`, `board.planApproval`                                        | Supported                                          | Planned     | Planned       |
-| Reopen, tasks for a person, questions to a person     | `board.reopen`, `board.personAssignees`, `board.questions`                         | Supported                                          | Planned     | Planned       |
-| The person check on person writes                     | `board.personCheck`                                                                | Supported                                          | Planned     | Planned       |
-| Workspace view and page preview                       | `workspace.view`, `workspace.preview`                                              | Supported                                          | Planned     | Planned       |
-| Agent browser screenshots                             | `agent.screenshots`                                                                | Supported                                          | Planned     | Planned       |
-| An agent's live screen, take over and links           | `agent.computer`                                                                   | Supported                                          | Planned     | Planned       |
-| Shell commands for Clawboo Native agents              | `agent.nativeShell`                                                                | Supported                                          | Planned     | Planned       |
-| Routines                                              | `routines`                                                                         | Supported                                          | Planned     | Planned       |
-| Shared memory and similarity search                   | `memory`, `memory.embeddings`                                                      | Supported                                          | Planned     | Planned       |
-| Connectors, custom connectors and brokered apps       | `connectors`, `connectors.custom`, `connectors.broker`                             | Supported                                          | Planned     | Planned       |
-| Live streams that resume after a dropped connection   | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume`        | Supported                                          | Planned     | Planned       |
-| Update from inside the app                            | `system.selfUpdate`                                                                | Supported for a global install                     | Planned     | Planned       |
-| Names from a sign-in proxy's identity tokens          | `auth.proxyIdentity`                                                               | Supported, off by default                          | Planned     | Planned       |
-| Names from the app that started the server            | `auth.appLink`                                                                     | Supported, off by default                          | Planned     | Planned       |
-| Roles that decide what each signed-in person may do   | `auth.roles`                                                                       | Supported, off by default                          | Planned     | Planned       |
-| Person acts only from requests a sign-in proxy signed | `auth.personCheck`                                                                 | Supported, off by default, in releases after 0.8.0 | Planned     | Planned       |
-| Take over only with the sign-in proxy's say-so        | `computer.controlClaim`                                                            | Supported, off by default, in releases after 0.8.0 | Planned     | Planned       |
+| Feature                                               | Flag                                                                               | npm install                    | Desktop app |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------ | ----------- |
+| Clawboo Native agents                                 | `runtime.clawboo-native`                                                           | Supported                      | Planned     |
+| Claude Code, Codex and Hermes agents                  | `runtime.claude-code`, `runtime.codex`, `runtime.hermes`                           | Supported                      | Planned     |
+| OpenClaw agents                                       | `runtime.openclaw`                                                                 | Supported                      | Planned     |
+| Team chat and chat rooms                              | `chat.rooms`                                                                       | Supported                      | Planned     |
+| 1:1 chats                                             | `chat.direct`                                                                      | Supported                      | Planned     |
+| Board, with checks on finished work                   | `board.verification`, `board.checkHold`, `board.reportResult`, `board.parentWaits` | Supported                      | Planned     |
+| A person's inbox, with read state on the server       | `board.inbox`                                                                      | Supported                      | Planned     |
+| A person's request as one main task                   | `board.mainTasks`                                                                  | Supported                      | Planned     |
+| Comments that reach a running task                    | `board.steering`                                                                   | Supported                      | Planned     |
+| Readable task ids                                     | `board.readableIds`                                                                | Supported                      | Planned     |
+| Team labels on tasks                                  | `board.labels`                                                                     | Supported                      | Planned     |
+| Agents that wake on what happens to their task        | `board.wakes`                                                                      | Supported                      | Planned     |
+| Agents waking each other, once you allow it           | `board.agentWakes`                                                                 | Supported                      | Planned     |
+| A job waits for a person at its limit of runs         | `board.jobLimit`                                                                   | Supported                      | Planned     |
+| Plans, and asking before one starts                   | `board.planDocuments`, `board.planApproval`                                        | Supported                      | Planned     |
+| Reopen, tasks for a person, questions to a person     | `board.reopen`, `board.personAssignees`, `board.questions`                         | Supported                      | Planned     |
+| The person check on person writes                     | `board.personCheck`                                                                | Supported                      | Planned     |
+| Workspace view and page preview                       | `workspace.view`, `workspace.preview`                                              | Supported                      | Planned     |
+| Agent browser screenshots                             | `agent.screenshots`                                                                | Supported                      | Planned     |
+| An agent's live screen, take over and links           | `agent.computer`                                                                   | Supported                      | Planned     |
+| Shell commands for Clawboo Native agents              | `agent.nativeShell`                                                                | Supported                      | Planned     |
+| Routines                                              | `routines`                                                                         | Supported                      | Planned     |
+| Home: team goals, KPIs, pages and status line         | `home.goals`                                                                       | Supported                      | Planned     |
+| Shared memory and similarity search                   | `memory`, `memory.embeddings`                                                      | Supported                      | Planned     |
+| Connectors, custom connectors and brokered apps       | `connectors`, `connectors.custom`, `connectors.broker`                             | Supported                      | Planned     |
+| Live streams that resume after a dropped connection   | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume`        | Supported                      | Planned     |
+| Update from inside the app                            | `system.selfUpdate`                                                                | Supported for a global install | Planned     |
+| Names from a sign-in proxy's identity tokens          | `auth.proxyIdentity`                                                               | Supported, off by default      | Planned     |
+| Names from the app that started the server            | `auth.appLink`                                                                     | Supported, off by default      | Planned     |
+| Roles that decide what each signed-in person may do   | `auth.roles`                                                                       | Supported, off by default      | Planned     |
+| Person acts only from requests a sign-in proxy signed | `auth.personCheck`                                                                 | Supported, off by default      | Planned     |
+| Take over only with the sign-in proxy's say-so        | `computer.controlClaim`                                                            | Supported, off by default      | Planned     |
 
 A flag being on means the server has the feature. It does not mean the surface you use shows it yet.
 
