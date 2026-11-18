@@ -8,7 +8,7 @@ Release history of the `clawboo` npm package, newest first. Each entry starts wi
 
 <Note>
 
-These docs follow the main branch. The latest npm release is 0.8.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
+These docs follow the main branch. The latest npm release is 0.9.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
 
 </Note>
 
@@ -16,6 +16,7 @@ These docs follow the main branch. The latest npm release is 0.8.0; anything on 
 
 | Version | Released   | Highlights                                                                                                      |
 | ------- | ---------- | --------------------------------------------------------------------------------------------------------------- |
+| 0.9.0   | 2026-11-17 | Home with team goals, KPIs and pages, roles behind a sign-in proxy, a new dashboard frame and dark mode         |
 | 0.8.0   | 2026-11-15 | Run Clawboo from your own app, an OpenClaw Gateway that sleeps until needed, a user per agent on Linux          |
 | 0.7.0   | 2026-11-14 | Readable task ids, plans and an Inbox, pause, agents on their own user, a computer you can watch for each agent |
 | 0.6.0   | 2026-11-04 | Rooms, steering, a rebuilt workspace, a dashboard that locks itself, a phone-ready web app, Ollama with no key  |
@@ -36,6 +37,60 @@ These docs follow the main branch. The latest npm release is 0.8.0; anything on 
 | 0.1.0   | 2026-02-28 | Name placeholder                                                                                                |
 
 Every 0.1.x release is deprecated on npm. That line ran on OpenClaw only and does not work reliably with current OpenClaw. Install a supported release with `npm install -g clawboo@latest`, or run `npx clawboo@latest`. Keep the `@latest`: a bare `npx clawboo` can reuse an old copy from npm's cache.
+
+<Update label="0.9.0" description="2026-11-17">
+
+0.9.0 turns Home into a working page. Each team can keep goals, KPIs and pages, and Home shows how a team, or all of them, is doing, with every number saying where it came from. Behind a sign-in proxy, an administrator can now let each person's role decide what they may do, let only requests the proxy signed act as a person, and give a program beside Clawboo a key of its own for its reads. The dashboard gets a new frame and a near-black dark mode, and Clawboo now stops the Hermes gateway the way Hermes expects.
+
+**Home**
+
+- **Home is a working page.** It is the first row in the sidebar's nav, and its picker works like the Board's: **All teams**, then each team. Clicking a team in the team rail opens Home on it. A team's Home shows its status line, what needs you, its goals, its KPIs, the requests in flight, spend against its budget, upcoming routines, pinned pages and the files its agents made. **All teams** shows totals, one Needs you list for every team and a card per team. Every number says where it came from: computed from the board, reported by an agent (named, with its run), or typed by a person. See [Home](/using/home).
+- **Goals.** Each team can keep goals, each optionally under one parent goal, with an owner, a target date, a status and a health a person sets. A goal's page shows the tasks linked to it, its KPIs, its updates and its cost. A task counts toward a goal when it or its request names one, and progress is done tasks over linked ones. Done and dropped goals fold under the goal list and can be reopened. See [Goals](/using/home#goals).
+- **KPIs.** A person defines each KPI once: name, unit, target, period and where its value comes from. Its value can be computed from the board (such as tasks done, spend or run success rate), reported by an agent, or typed by a person. A value older than the KPI allows is marked stale. Agents can suggest a KPI, which a person accepts or dismisses. See [KPIs](/using/home#kpis).
+- **Goal updates.** Agents draft updates, and only a person publishes or discards one. A team's Home settings can turn on a weekly team routine that asks the lead to draft an update for each active goal.
+- **Pages.** Markdown pages per team, linked to a goal or not, with every revision kept and a way to restore an old one. Agents may write them within limits of their own; a person is never limited. See [Pages](/using/home#pages).
+- **A status line.** A sentence made from the board, such as "2 requests in flight, 1 needs you, 3 done this week, $12 of $60 spent". A team can have its lead write it instead, which costs model calls and so is off until a person turns it on. That is not possible with an OpenClaw lead, or a Clawboo Native lead whose board access is read-only (the default) or off. See [The status line](/using/home#the-status-line).
+- **Goals on the Board.** Board cards and team chat task cards show the goal a task counts toward, its own or one it inherits from its request. The task drawer, **New task** and a request sent from team chat can pick a goal, and the Board's filter can show one goal's work, or only work toward no goal. See [On the Board](/using/home#on-the-board).
+
+**Behind a sign-in proxy**
+
+- **Roles.** Set `proxyIdentityRoles` to `enforce` (or `CLAWBOO_PROXY_IDENTITY_ROLES=enforce`) together with `proxyIdentity: required`, and the role in each person's identity token decides what they may do. An `owner` sees and does the work, answers approvals, and alone may answer one with "Allow always". An `operator` sets up and runs the install but never answers an approval. A `member` sees and does the work, and answers approvals only when the token says `"approve": true`. A `guest` reaches only the teams the token lists, until its `access_until`. Give the operator role only to people you trust with the server. Roles are off by default. See [Roles](/guides/sso-proxy#roles).
+- **Only signed requests act as a person.** Set `personCheck` to `verified` (or `CLAWBOO_PERSON_CHECK=verified`) with the proxy identity lane on, and answering approvals, **Retry**, pausing and the other person writes need a token your proxy signed: the dashboard page's own marks no longer count. A card moved without one still moves, but as no one, so it stops no run. The same setting opens Clawboo's Gateway WebSocket, and every route of an agent's screen, only for such a person. It is off by default. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person).
+- **Take over only with the proxy's say-so.** With `proxyIdentityControlClaim: required` (or `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM=required`), taking over an agent's screen, and every batch of input after, needs a `control` claim naming the agent in a request-bound token. A batch without it hands the screen back to the agent. It is off by default. See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen).
+- **A key of its own for a program beside Clawboo.** A program running beside Clawboo, such as one that watches for approvals, can make its own background reads with a key you set in `proxyIdentityReaderPublicKey` (or `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY`). Its token reaches a short fixed list of reads and nothing else, and it never acts as a person. See [A program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo).
+- **A used token stays used across a restart.** The ids of the request-bound identity tokens Clawboo accepted are kept in its database until the token could no longer be accepted, so a token used before a restart is no longer accepted once more after it. When the database will not take a record, such as on a full disk, the token is checked against memory alone, as before, and the server logs an error.
+
+**The dashboard**
+
+- **A new frame.** An account bar runs along the bottom of the sidebar, with the person a sign-in proxy verified (or "You" on a local install), the theme switch and the Settings gear, which moved there from the agent column. The team rail is 72 px wide with larger icons, and its add-team button sits at the end of the team icons and scrolls with them.
+- **A near-black dark mode.** Dark mode moves to a neutral near-black palette on every screen. The brand red, mint and amber stay, and light mode is unchanged.
+- **A slim top bar in an app's own window.** An app that shows the dashboard in its own window can set `data-clawboo-embed-titlebar` on the page for a slim top bar: the sidebar's hide button, back and forward through the dashboard's own pages, the team or page name, Needs you and help. In a browser tab, nothing about the top of the page changes. See [Ask for the slim top bar](/guides/app-window#ask-for-the-slim-top-bar).
+
+**Runtimes**
+
+- **Connect this page to OpenClaw.** A dashboard page that was already open when something else connected Clawboo to the OpenClaw Gateway, such as a routine for an OpenClaw agent or OpenClaw opened in another tab, can now connect itself without a reload. OpenClaw's row in **Settings** > **Runtimes** reads **Connected** and offers **Connect this page** beside **Manage** while the page has no Gateway connection of its own, which OpenClaw 1:1 chats need. See [Manage OpenClaw](/runtimes/openclaw#manage-openclaw).
+- **Hermes gets its planned stop.** When Clawboo stops, it sends the Hermes gateway SIGINT and gives it up to `CLAWBOO_HERMES_STOP_GRACE_MS` (5 seconds by default, at most 8) to exit before it kills it and its processes. It used to get SIGTERM, which Hermes takes for a crash. `clawboo stop` now waits up to 15 seconds after its SIGTERM (it was 4) before it kills the server. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+- **A runtime follows a moved Node.js.** When the Node.js a runtime Clawboo installed ran on is gone, such as when an app that runs Clawboo on a Node.js of its own is moved or renamed, the runtime now moves to the Node.js Clawboo runs on, when that is the same version or a later release of the same major version on the same kind of processor. A runtime installed by 0.8.0 or older recorded no processor, so for it the processor is not checked: install it again if Clawboo now runs on a Node.js for another kind of processor. On any other Node.js it still reads as not installed until you install it again. See [Which copy Clawboo uses](/operating/data-and-state#which-copy-clawboo-uses).
+- **Homebrew upgrades no longer change a runtime's major version.** A runtime installed on Homebrew's `node` formula now names that Node.js by its versioned folder, so a `brew upgrade` to a new major version no longer moves it. A runtime installed this way before keeps the link: install it again after such an upgrade.
+- **No Python bytecode from npm.** Connectors started through npm, and the npm that installs a runtime into Clawboo's runtimes folder, now start with `PYTHONDONTWRITEBYTECODE=1`, so a native part's build no longer writes Python `__pycache__` folders into the npm's folder.
+
+**If you script the API**
+
+- **Home routes.** `GET /api/home` reads a team's Home, or the all-teams view, in one read, and the Home API has routes for goals, KPIs, goal updates, pages and Home settings. `POST /api/board`, a person's board patch and a person's team chat message take `goalId`. See [Home API](/reference/rest-api/home).
+- **Home tools for agents.** New Tasks MCP tools: `list_goals`, `get_goal`, `list_kpis`, `list_pages` and `read_page` to read, and, when their session is bound to them, `report_kpi`, `suggest_kpi`, `write_page`, `draft_goal_update` and, for the lead, `write_home_summary`. No tool lets an agent publish an update, set a goal's health, define a KPI or change a target. See [Home tools](/reference/mcp-tools#home-tools).
+- **A start marker.** The server writes `api-port.json` next to `api-port.txt`, naming its process and version, so a reader can tell a running server from the record of one that crashed. The `clawboo` command checks it before it trusts the recorded port. `api-port.txt` is unchanged. See [Start marker](/reference/configuration#start-marker).
+- **Is the server up.** `GET /api/system/live` (and `HEAD`) answers `{ "ok": true }` with no access token and no identity token, and says nothing else about the install. See [The liveness probe](/guides/sso-proxy#the-liveness-probe).
+- `GET /api/access/identity` now says whether roles are enforced and what the person may do, and answers `personCheck`, `controlClaim` and `readerKey`. New capability flags: `auth.roles`, `auth.personCheck`, `auth.readerKey`, `computer.controlClaim`, `system.live`, `ui.embedTitlebar` and `home.goals`. See [Feature flags](/reference/rest-api/system#feature-flags).
+- Four new event kinds record agent KPI reports, update drafts, publishing and page revisions. See [Home events](/reference/events-and-errors#home-events).
+
+**Fixes**
+
+- A SIGTERM sent while the server was still starting could be taken by one part of the server, so the server kept running and its later stop left the OpenClaw connection open. A SIGINT or SIGTERM sent during the start is now kept, as the shutdown message already was, and runs once the server has started.
+- On a start that moves work folders, a stop sent during the start no longer lets the routines resume, and possibly start a run, in the moment before the stop.
+- On macOS and Linux, process start times are now read in UTC, so a process that started in the hour a daylight saving change repeats is no longer taken for another one.
+- A task that waits on or depends on a task of another team no longer copies that task's title into its own comments, its waiting reason or its team's room.
+
+</Update>
 
 <Update label="0.8.0" description="2026-11-15">
 

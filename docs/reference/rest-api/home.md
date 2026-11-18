@@ -15,7 +15,7 @@ keywords:
   ]
 ---
 
-In releases after 0.8.0. Home is one page for each team, plus one for all teams. It joins what Clawboo already knows about a team (its requests in flight, what needs you, its spend) with what a person sets for it: goals, KPIs and pages. The capability flag `home.goals` (see [System](/reference/rest-api/system#get-%2Fapi%2Fsystem%2Fcapabilities)) says the engine has these routes. The typed client is `home.ts` in `@clawboo/control-client`.
+From 0.9.0. Home is one page for each team, plus one for all teams. It joins what Clawboo already knows about a team (its requests in flight, what needs you, its spend) with what a person sets for it: goals, KPIs and pages. The capability flag `home.goals` (see [System](/reference/rest-api/system#get-%2Fapi%2Fsystem%2Fcapabilities)) says the engine has these routes. The typed client is `home.ts` in `@clawboo/control-client`.
 
 Every write here is a person's. A request that may not act as the person (see [the person check](/operating/security#the-person-check)) gets `403` with `"error": "person_only"`. Agents reach Home only through the [Tasks MCP tools](/reference/mcp-tools#home-tools), and only to report a KPI value, suggest a KPI, write a page or draft a goal update. No route or tool lets an agent define a KPI, change a target, set a goal's health or publish an update.
 

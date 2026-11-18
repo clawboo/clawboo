@@ -146,7 +146,7 @@ When you connect a connector, Clawboo is the MCP client. The server's connector 
   `PYTHONDONTWRITEBYTECODE` and `PYTHONPYCACHEPREFIX` (`CONNECTOR_ENV_ALLOWLIST`), and the credentials you gave that
   connector, so it never inherits your provider keys or npm credentials. It sets `npm_config_update_notifier=false`
   unless that is already set; pass `npmUpdateCheck: 'inherit'` to leave it as the operator configured it, as approved
-  shell commands do. In releases after 0.8.0, given the connector's `command`, it also sets `PYTHONDONTWRITEBYTECODE=1` unless either
+  shell commands do. From 0.9.0, given the connector's `command`, it also sets `PYTHONDONTWRITEBYTECODE=1` unless either
   Python setting is already set, for a connector started through npm only (`launchesThroughNpm`: the command's file
   name is `npx`, `npm` or `node`, plus `npx.cmd`, `npm.cmd` and `node.exe` on Windows), so a native build that `npx`
   runs writes no `__pycache__` into npm's own folder. Any other command, such as `uvx`, gets no Python setting added.

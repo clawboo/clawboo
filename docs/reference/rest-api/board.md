@@ -146,7 +146,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     runnerInputs: string | null // JSON: what the task runner ran it with; null if it never did (see retry below)
     checkHeldSince: number | null // when its team-chat check began waiting for the team folder; null otherwise
     isMainTask: number // 1: it holds a person's request, with the helpers' work filed under it. See below
-    // In releases after 0.8.0: the team goal the task names itself, the goal it counts toward
+    // From 0.9.0: the team goal the task names itself, the goal it counts toward
     // (its own, else its request's or a parent's), and how that one reaches it. See Home.
     goalId: string | null
     goalCleared: number // 1: a person took it off every goal, its request's included

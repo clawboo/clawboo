@@ -30,17 +30,17 @@ Set it on `<html>`, or on any element above the dashboard: the dashboard reads i
 
 ## Ask for the slim top bar
 
-In releases after 0.8.0, set `data-clawboo-embed-titlebar` on `<html>` as well, and the strip becomes a slim bar in the dashboard's own frame colour, the same as the team rail's:
+From 0.9.0, set `data-clawboo-embed-titlebar` on `<html>` as well, and the strip becomes a slim bar in the dashboard's own frame colour, the same as the team rail's:
 
 - **Left**, after the window buttons: the button that hides and shows the sidebar, then back and forward through the dashboard's own pages. Back and forward are greyed out until there is somewhere to go.
 - **Middle**: the team the page belongs to, with its icon, or the page's name, such as **Board**.
 - **Right**: **Needs you**, which opens the Board's Needs you, and **Help**, which opens these docs in a new tab.
 
-| Set on `<html>`               | What it does                                                                                                          | Unset           |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------- |
-| `--clawboo-titlebar-inset`    | The strip's height, and the bar's. The sidebar and the page start below it.                                           | `0`             |
-| `--clawboo-titlebar-left`     | The width the window buttons take from the left edge. The bar's buttons start after it. Releases after 0.8.0.         | `0`             |
-| `data-clawboo-embed-titlebar` | Draws the slim top bar in the strip. You can set it or remove it at any time; the page follows. Releases after 0.8.0. | No bar is drawn |
+| Set on `<html>`               | What it does                                                                                                | Unset           |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------- |
+| `--clawboo-titlebar-inset`    | The strip's height, and the bar's. The sidebar and the page start below it.                                 | `0`             |
+| `--clawboo-titlebar-left`     | The width the window buttons take from the left edge. The bar's buttons start after it. From 0.9.0.         | `0`             |
+| `data-clawboo-embed-titlebar` | Draws the slim top bar in the strip. You can set it or remove it at any time; the page follows. From 0.9.0. | No bar is drawn |
 
 For example, on macOS with an inset title bar:
 

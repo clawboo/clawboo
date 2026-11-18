@@ -564,7 +564,7 @@ Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
 
 ## Home
 
-In releases after 0.8.0. A team's goals, KPIs, pages and status line (see the [Home API](/reference/rest-api/home)). People and agents in these rows are JSON `{ kind: 'person' | 'agent', id, name }`. A team's Home settings live in `settings`, as `team-home:<teamId>`: JSON `{ leadWritesStatus, weeklyUpdatesRoutineId, statusAsks, statusWrites, onSeq, lastAskSeq, pendingAskAt }`: the times of the lead's asks and lines in the last day, the board's position when the line was turned on and at the last ask, and the newest ask until a line answers it.
+From 0.9.0. A team's goals, KPIs, pages and status line (see the [Home API](/reference/rest-api/home)). People and agents in these rows are JSON `{ kind: 'person' | 'agent', id, name }`. A team's Home settings live in `settings`, as `team-home:<teamId>`: JSON `{ leadWritesStatus, weeklyUpdatesRoutineId, statusAsks, statusWrites, onSeq, lastAskSeq, pendingAskAt }`: the times of the lead's asks and lines in the last day, the board's position when the line was turned on and at the last ask, and the newest ask until a line answers it.
 
 ### team_goals
 
