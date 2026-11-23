@@ -31,7 +31,10 @@ vi.mock('../../desktop/displays', () => ({
 // rest of the spawn path runs as the test's own user. The refusal itself is
 // checked at the end.
 const policy = vi.hoisted(() => ({ refusal: null as string | null }))
-vi.mock('../../desktop/driverPolicy', () => ({ desktopDriverRefusal: () => policy.refusal }))
+vi.mock('../../desktop/driverPolicy', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../desktop/driverPolicy')>()),
+  desktopDriverRefusal: () => policy.refusal,
+}))
 
 const { connectConnector, resetConnectorsForTests } = await import('../supervisor')
 type Def = Parameters<typeof connectConnector>[1]

@@ -25,6 +25,11 @@
 // agent's own home and every process here runs as that agent's user, so the
 // display is walled off from the other agents too.
 //
+// WHERE ITS FILES ARE. In the runtime folder of the user who runs it, when
+// that user has one (see runtimeDir.ts): in memory, closed to everyone else,
+// gone at reboot. Otherwise under the data folder (agents on the server's own
+// user) or in the agent user's home, as before.
+//
 // LIFETIME. A display exists while something holds it: the agent's browser, its
 // desktop driver, or a person who started it by hand. When the last holder lets
 // go it stops after `STOP_GRACE_MS`, so a browser closed and reopened a moment
@@ -43,15 +48,17 @@ import { createLogger } from '@clawboo/logger'
 
 import { agentMkdir, agentRemove, agentWriteFile } from '../agentUser/agentFs'
 import { isAgentPoolMode, isAgentUserMode } from '../agentUser/config'
-import { agentUserHome } from '../agentUser/poolRoute'
-import { agentHomeDir } from '../agentUser/state'
+import { agentUserHome, poolUserForAgent } from '../agentUser/poolRoute'
+import { agentHomeDir, peekAgentHost } from '../agentUser/state'
 import { findExecutable } from '../platform'
 import { buildChildEnv } from '../runtimes/childEnv'
 import { killProcessTree } from '../runtimes/killTree'
 import { spawnAgentProcess, type AgentProcess } from '../runtimes/spawner'
 import { registerRuntimeChild, unregisterRuntimeChild } from '../runtimes/subprocess'
 import { RfbClient } from './rfb'
-import { desktopToolsPlan, markDesktopToolsInUse, ownedXvnc, systemXvnc } from './tools'
+import { displayRuntimeRoot } from './runtimeDir'
+import { maxAgentDisplays } from './screenSettings'
+import { desktopToolsPlan, markDesktopToolsInUse, ownedXvnc, xvncProgram } from './tools'
 import { makeXauthority } from './xauth'
 
 const log = createLogger('agent-displays')
@@ -61,10 +68,6 @@ export const STOP_GRACE_MS = 30_000
 
 /** How long Xvnc may take to come up. */
 const START_TIMEOUT_MS = 15_000
-
-/** No more displays than browsers: each display exists for an agent's browser or
- *  driver, and those are capped by the same number. */
-const MAX_DISPLAYS = Number(process.env['CLAWBOO_MAX_AGENT_BROWSERS']) || 4
 
 /**
  * The window manager, when Openbox is installed: and only Openbox, started with
@@ -162,16 +165,20 @@ export type DisplaySupport =
 export const NO_SESSION_BUS = 'unix:path=/dev/null/clawboo-no-session-bus'
 
 /**
- * Where a program is. Xvnc from the system's own package comes first (its
- * package brings the libraries it loads), then the one Clawboo installed into
- * its runtimes folder. Overridable by tests.
+ * Where a program is. For Xvnc, the one an administrator named and no other
+ * when they named one; else Xvnc from the system's own package (its package
+ * brings the libraries it loads), then the one Clawboo installed into its
+ * runtimes folder (see `xvncProgram`). Overridable by tests.
  */
 const defaultLookup = (name: string): string | null =>
-  name === 'Xvnc' ? (systemXvnc() ?? ownedXvnc()) : findExecutable(name)
+  name === 'Xvnc' ? xvncProgram().path : findExecutable(name)
 let findBinary: (name: string) => string | null = defaultLookup
+/** The Xvnc to run, or why the one an administrator named may not run. */
+let findXvnc: () => { path: string | null; problem: string | null } = () => xvncProgram()
 
 export function setDisplayBinaryLookupForTests(fn: ((name: string) => string | null) | null): void {
   findBinary = fn ?? defaultLookup
+  findXvnc = fn ? () => ({ path: fn('Xvnc'), problem: null }) : () => xvncProgram()
 }
 
 /** Why the last display failed to start, in words a person can act on, or null. */
@@ -304,7 +311,16 @@ export function displaySupport(
       reason: 'Agent displays are turned off (CLAWBOO_AGENT_DISPLAYS).',
     }
   }
-  const xvnc = findBinary('Xvnc')
+  const { path: xvnc, problem: namedProblem } = findXvnc()
+  if (!xvnc && namedProblem) {
+    // The administrator named an Xvnc that may not run: said as it is, and no
+    // other Xvnc is used in its place.
+    return {
+      ok: false,
+      code: 'no-xvnc',
+      reason: `Agents' displays cannot start: the Xvnc your administrator named (CLAWBOO_XVNC_PATH) may not run. ${namedProblem}`,
+    }
+  }
   if (!xvnc) {
     // Clawboo installs TigerVNC's own build, which exists for x86_64 only.
     const fix = desktopToolsPlan(platform, arch).tigervnc
@@ -382,12 +398,43 @@ export function displayFor(agentId: string): AgentDisplay | null {
   return entries.get(agentId)?.display ?? null
 }
 
-/** The display's folder for an agent: hashed, because an agent id is not
- *  guaranteed to be a safe path segment. */
+/** The uid that runs this agent's display: the server's, or its agent user's. */
+function displayUid(agentId: string, inAgentSpace: boolean): number | null {
+  if (!inAgentSpace) return typeof process.getuid === 'function' ? process.getuid() : null
+  if (isAgentPoolMode()) return poolUserForAgent(agentId).uid
+  return peekAgentHost()?.hello.uid ?? null
+}
+
+/** Where the runtime folder for a display's files is looked for. Tests. */
+let runtimeRootFor: (uid: number | null, serverUser: boolean) => string | null = (
+  uid,
+  serverUser,
+) => displayRuntimeRoot(uid, { serverUser })
+
+export function setDisplayRuntimeRootForTests(
+  fn: ((uid: number | null, serverUser: boolean) => string | null) | null,
+): void {
+  runtimeRootFor = fn ?? ((uid, serverUser) => displayRuntimeRoot(uid, { serverUser }))
+}
+
+/**
+ * The display's folder for an agent: hashed, because an agent id is not
+ * guaranteed to be a safe path segment.
+ *
+ * In the runtime folder of the user who runs the display when it has one
+ * (`<runtime>/clawboo-<install>/desktops/<agent>`; the install's part keeps two
+ * Clawboo installs of one user apart). Otherwise, as before, under the data
+ * folder, or in the agent user's home (with a user per agent, that agent's own,
+ * so no other agent can reach its cookie or its VNC socket). Looked up at each
+ * start, so a runtime folder that went away (its user logged out) is not used.
+ */
 export function displayDirFor(agentId: string, inAgentSpace: boolean = isAgentUserMode()): string {
   const stem = createHash('sha256').update(agentId).digest('hex').slice(0, 16)
-  // With a user per agent, in that agent's own home: no other agent can reach
-  // its cookie or its VNC socket.
+  const runtime = runtimeRootFor(displayUid(agentId, inAgentSpace), !inAgentSpace)
+  if (runtime) {
+    const install = createHash('sha256').update(resolveClawbooDir()).digest('hex').slice(0, 8)
+    return path.posix.join(runtime, `clawboo-${install}`, 'desktops', stem)
+  }
   const root = !inAgentSpace
     ? resolveClawbooDir()
     : isAgentPoolMode()
@@ -709,9 +756,10 @@ export async function acquireDisplay(
     return d
   }
   // A display only waiting out its stop grace gives up its place first.
-  if (runningCount() >= MAX_DISPLAYS) stopOldestUnheld(agentId)
-  if (runningCount() >= MAX_DISPLAYS) {
-    log.warn({ agentId, max: MAX_DISPLAYS }, 'every display slot is taken; going on without one')
+  const max = maxAgentDisplays()
+  if (runningCount() >= max) stopOldestUnheld(agentId)
+  if (runningCount() >= max) {
+    log.warn({ agentId, max }, 'every display slot is taken; going on without one')
     entry.holders.delete(holder)
     return null
   }

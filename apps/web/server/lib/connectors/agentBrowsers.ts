@@ -54,7 +54,7 @@ import {
   onDisplayChange,
   releaseDisplay,
 } from '../desktop/displays'
-import { desktopDriverRefusal } from '../desktop/driverPolicy'
+import { desktopDriverRefusal, desktopDriverToolRefusal } from '../desktop/driverPolicy'
 import { markDesktopToolsInUse } from '../desktop/tools'
 import { killProcessTree, killProcessTreeByPid } from '../runtimes/killTree'
 import { spawnAgentProcess } from '../runtimes/spawner'
@@ -123,6 +123,8 @@ interface AgentBrowser {
    */
   process: ChildProcess | null
   profileDir: string
+  /** A desktop driver's child (its refused tools are never called on it). */
+  desktopDriver: boolean
   /**
    * This browser's hold on its agent's display (Linux), or null when it runs
    * without one. Unique per browser, so a late close of an old browser never
@@ -629,9 +631,11 @@ async function spawnReservedBrowser(
   )
   if (plan.unresolved) {
     throw new Error(
-      spec.ownedBinary
-        ? `${spec.displayName ?? spec.command} is not installed. Install it on an agent's Screen view.`
-        : `cannot resolve ${spec.command}`,
+      plan.problem
+        ? `${spec.displayName ?? spec.command} cannot start: ${plan.problem}`
+        : spec.ownedBinary
+          ? `${spec.displayName ?? spec.command} is not installed. Install it on an agent's Screen view.`
+          : `cannot resolve ${spec.command}`,
     )
   }
 
@@ -720,6 +724,7 @@ async function spawnReservedBrowser(
     pid,
     process: agentProcess,
     profileDir,
+    desktopDriver: spec.requiresDisplay === true,
     displayHold: heldDisplay,
     calls: 0,
     lastUsedAt: Date.now(),
@@ -813,6 +818,11 @@ export async function callIfRunning(
 ): Promise<{ text: string; images?: { data: string; mimeType: string }[] } | null> {
   const browser = browsers.get(connectorId)?.get(agentId)
   if (!browser) return null
+  // Not even from inside the server: a desktop driver's refused tools never run.
+  const refused = browser.desktopDriver
+    ? desktopDriverToolRefusal('The desktop driver', rawToolName)
+    : null
+  if (refused) throw new Error(refused)
   noteCallStart(connectorId, agentId)
   try {
     return await browser.session.callTool(rawToolName, args)

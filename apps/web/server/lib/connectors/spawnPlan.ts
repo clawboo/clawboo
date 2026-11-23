@@ -26,6 +26,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync } from 'node:fs
 import os from 'node:os'
 import path from 'node:path'
 
+import { operatorProgramForLauncher } from '../desktop/screenSettings'
 import { findExecutable, isWindows } from '../platform'
 import { ownedRuntimeBin } from '../runtimeFolder'
 import { resolveWindowsSpawn } from '../runtimes/winSpawn'
@@ -50,6 +51,9 @@ export interface ConnectorSpawnPlan {
   display: string
   /** True when the binary could not be found on PATH. */
   unresolved: boolean
+  /** Why it cannot start, when that is more than "not found": the program an
+   *  administrator named failed its check. */
+  problem?: string
 }
 
 /** Quote a token for DISPLAY only. Never fed to a shell. Exported for tests. */
@@ -310,6 +314,23 @@ export function planConnectorSpawn(
   // the catalog's tool lists and refusals are checked against that release, so
   // a copy of another version found on PATH is not a stand-in for it.
   if (launch.ownedBinary) {
+    // An administrator named the program: that one, once it passes its check
+    // (screenSettings), and never Clawboo's own copy in its place.
+    const named = operatorProgramForLauncher(launch.command)
+    if (named) {
+      const args = [...launch.args]
+      const command = named.problem ? launch.command : named.path
+      return {
+        command,
+        args,
+        env,
+        display: displayOf(command, args),
+        unresolved: named.problem !== null,
+        ...(named.problem
+          ? { problem: `the program your administrator named may not run. ${named.problem}` }
+          : {}),
+      }
+    }
     const owned = ownedRuntimeBin(launch.command)
     const command = owned ?? launch.command
     const args = [...launch.args]

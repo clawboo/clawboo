@@ -99,7 +99,11 @@ vi.mock('../../agentUser/agentFs', () => ({
     agentWrites.push({ file, data, ...(opts?.mode !== undefined ? { mode: opts.mode } : {}) })
   },
 }))
-vi.mock('../../agentUser/state', () => ({ agentHomeDir: () => '/var/lib/clawboo-agent' }))
+const agentHost = vi.hoisted(() => ({ uid: null as number | null }))
+vi.mock('../../agentUser/state', () => ({
+  agentHomeDir: () => '/var/lib/clawboo-agent',
+  peekAgentHost: () => (agentHost.uid === null ? null : { hello: { uid: agentHost.uid } }),
+}))
 
 const displays = await import('../displays')
 
@@ -131,6 +135,10 @@ beforeEach(() => {
   spawned.failXvnc = false
   spawned.nextDisplay = 7
   agentWrites.length = 0
+  agentHost.uid = null
+  // No runtime folder unless a test gives one: the machine running these may
+  // have its own, which is not what these look at.
+  displays.setDisplayRuntimeRootForTests(() => null)
   displays.setDisplayBinaryLookupForTests((name) =>
     name === 'Xvnc' ? '/opt/tigervnc/Xvnc' : name === 'openbox' ? '/usr/bin/openbox' : null,
   )
@@ -138,6 +146,9 @@ beforeEach(() => {
 afterEach(() => {
   displays.stopAllDisplays()
   displays.setDisplayBinaryLookupForTests(null)
+  displays.setDisplayRuntimeRootForTests(null)
+  delete process.env['CLAWBOO_MAX_AGENT_DISPLAYS']
+  delete process.env['CLAWBOO_XVNC_PATH']
   Object.defineProperty(process, 'platform', { value: realPlatform })
   vi.useRealTimers()
 })
@@ -422,5 +433,79 @@ describe.skipIf(onWindows)('acquireDisplay', () => {
     expect(relay.args.at(-1)).toBe(d!.socketPath)
     // Nothing of the display was made by this server in the agent's home.
     expect(fs.existsSync(d!.dir)).toBe(false)
+  })
+})
+
+describe.skipIf(onWindows)("the administrator's settings for displays", () => {
+  it('caps displays by CLAWBOO_MAX_AGENT_DISPLAYS, apart from the browser cap', async () => {
+    process.env['CLAWBOO_MAX_AGENT_DISPLAYS'] = '1'
+    expect(await displays.acquireDisplay('a', 'browser')).not.toBeNull()
+    expect(await displays.acquireDisplay('b', 'browser')).toBeNull()
+    displays.stopAllDisplays()
+    // Above the browser cap (4 by default) too: the cap is its own.
+    process.env['CLAWBOO_MAX_AGENT_DISPLAYS'] = '5'
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      expect(await displays.acquireDisplay(id, 'browser')).not.toBeNull()
+    }
+    expect(await displays.acquireDisplay('f', 'browser')).toBeNull()
+  })
+
+  it('refuses a named Xvnc that fails its check, and starts no other in its place', async () => {
+    const dir = fs.mkdtempSync('/tmp/cbx-')
+    try {
+      const file = path.join(dir, 'Xvnc')
+      fs.writeFileSync(file, '#!/bin/sh\n', { mode: 0o755 })
+      process.env['CLAWBOO_XVNC_PATH'] = file
+      displays.setDisplayBinaryLookupForTests(null)
+      const support = displays.displaySupport('linux', {}, 'x64')
+      expect(support).toMatchObject({ ok: false, code: 'no-xvnc' })
+      expect(support.ok ? '' : support.reason).toMatch(/CLAWBOO_XVNC_PATH/)
+      expect(support.ok ? '' : support.reason).not.toMatch(/Install the desktop tools/)
+      expect(await displays.acquireDisplay('agent-1', 'browser:1')).toBeNull()
+      expect(spawned.calls).toHaveLength(0)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps a display's files in the runtime folder of the user running it, where there is one", async () => {
+    const runtime = fs.mkdtempSync('/tmp/cbr-')
+    fs.chmodSync(runtime, 0o700)
+    try {
+      const asked: [number | null, boolean][] = []
+      displays.setDisplayRuntimeRootForTests((uid, serverUser) => {
+        asked.push([uid, serverUser])
+        return runtime
+      })
+      const d = await displays.acquireDisplay('agent-1', 'browser:1')
+      expect(d).not.toBeNull()
+      expect(d!.dir).toMatch(new RegExp(`^${runtime}/clawboo-[0-9a-f]{8}/desktops/[0-9a-f]{16}$`))
+      expect(d!.socketPath.startsWith(d!.dir + '/')).toBe(true)
+      expect(d!.xauthFile.startsWith(d!.dir + '/')).toBe(true)
+      expect(fs.statSync(d!.dir).mode & 0o777).toBe(0o700)
+      expect(asked[0]).toEqual([
+        typeof process.getuid === 'function' ? process.getuid() : null,
+        true,
+      ])
+    } finally {
+      displays.stopAllDisplays()
+      fs.rmSync(runtime, { recursive: true, force: true })
+    }
+  })
+
+  it("uses an agent user's own runtime folder, never the server's, and falls back to its home", async () => {
+    spawned.agentMode = true
+    agentHost.uid = 2001
+    displays.setDisplayRuntimeRootForTests((uid, serverUser) =>
+      !serverUser && uid === 2001 ? '/run/user/2001' : null,
+    )
+    const d = await displays.acquireDisplay('agent-1', 'browser:1')
+    expect(d!.dir.startsWith('/run/user/2001/clawboo-')).toBe(true)
+    expect(agentWrites.map((w) => w.file)).toContain(d!.xauthFile)
+    displays.stopAllDisplays()
+
+    agentHost.uid = 2002
+    const e = await displays.acquireDisplay('agent-1', 'browser:1')
+    expect(e!.dir.startsWith('/var/lib/clawboo-agent/desktops/')).toBe(true)
   })
 })

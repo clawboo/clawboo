@@ -4,7 +4,9 @@
 // them take it over (to type their own password into a site the agent uses, say).
 // Each reaches this one agent only, expires, and can be revoked at any time;
 // revoking closes every view open through it at once. The link is shown once,
-// when it is made: Clawboo keeps only a fingerprint of it.
+// when it is made: Clawboo keeps only a fingerprint of it. An administrator can
+// turn control links, or all links, off (CLAWBOO_COMPUTER_LINKS); the buttons
+// then say so instead of failing.
 
 import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '@clawboo/control-client'
@@ -28,7 +30,10 @@ export function linkUrl(token: string): string {
 
 export function ComputerLinks({ agentId }: { agentId: string }) {
   const [links, setLinks] = useState<LinkRow[]>([])
-  // Why control links cannot be made here (agents on the server's own user), or null.
+  // Why view links cannot be made here (turned off by an administrator), or null.
+  const [viewRefusal, setViewRefusal] = useState<string | null>(null)
+  // Why control links cannot be made here (turned off, or agents on the server's
+  // own user), or null.
   const [controlRefusal, setControlRefusal] = useState<string | null>(null)
   const [fresh, setFresh] = useState<{ kind: 'view' | 'control'; url: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -40,9 +45,15 @@ export function ComputerLinks({ agentId }: { agentId: string }) {
         if (!r.ok) return
         const body = (await r.json()) as {
           links?: LinkRow[]
+          viewLinks?: { allowed?: boolean; reason?: string | null }
           controlLinks?: { allowed?: boolean; reason?: string | null }
         }
         setLinks(Array.isArray(body.links) ? body.links : [])
+        setViewRefusal(
+          body.viewLinks?.allowed === false
+            ? (body.viewLinks.reason ?? 'View links are not available here.')
+            : null,
+        )
         setControlRefusal(
           body.controlLinks?.allowed === false
             ? (body.controlLinks.reason ?? 'Control links are not available here.')
@@ -109,7 +120,13 @@ export function ComputerLinks({ agentId }: { agentId: string }) {
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           Links
         </span>
-        <button type="button" className={btn} onClick={() => void make('view')}>
+        <button
+          type="button"
+          className={`${btn} disabled:cursor-not-allowed disabled:opacity-50`}
+          disabled={viewRefusal !== null}
+          title={viewRefusal ?? undefined}
+          onClick={() => void make('view')}
+        >
           View link
         </button>
         <button
@@ -131,6 +148,11 @@ export function ComputerLinks({ agentId }: { agentId: string }) {
           </button>
         )}
       </div>
+      {viewRefusal && (
+        <p className="text-[12px] text-muted-foreground" data-testid="computer-links-off">
+          {viewRefusal}
+        </p>
+      )}
       {fresh && (
         <div className="flex flex-col gap-1 rounded-md border border-border bg-card/50 p-2">
           <span className="text-[12px] text-muted-foreground">

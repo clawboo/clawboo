@@ -28,6 +28,7 @@ vi.mock('../../desktop/tools', () => ({
   ownedCuaDriver: () => null,
   ownedXvnc: () => null,
   systemXvnc: () => null,
+  xvncProgram: () => ({ path: null, problem: null }),
 }))
 vi.mock('../../secretsVault', () => ({
   secretValuesForExposureCheck: () => [],

@@ -65,6 +65,10 @@ interface KindValue {
   text: string | null
   /** A whole number of seconds from the key's `min` to its `max`. File: a JSON number. */
   seconds: number
+  /** An absolute path, written plainly: no `.` or `..` part, no doubled or trailing slash. */
+  path: string | null
+  /** A whole number from the key's `min` to its `max`. File: a JSON number. */
+  count: number | null
 }
 type Kind = keyof KindValue
 
@@ -75,7 +79,7 @@ interface KeySpec {
   userEditable: boolean
   /** The words a `choice` key takes. */
   choices?: readonly string[]
-  /** The range of a `seconds` key. */
+  /** The range of a `seconds` or `count` key. */
   min?: number
   max?: number
   /** A `text` key that may span lines. */
@@ -168,6 +172,34 @@ export const OPERATOR_KEYS = {
   togetherBaseUrl: { kind: 'url', env: 'TOGETHER_BASE_URL', userEditable: false },
   cerebrasBaseUrl: { kind: 'url', env: 'CEREBRAS_BASE_URL', userEditable: false },
   moonshotBaseUrl: { kind: 'url', env: 'MOONSHOT_BASE_URL', userEditable: false },
+  // Agents' screens on Linux (lib/desktop/screenSettings). Only an
+  // administrator sets these: they decide who outside the dashboard can watch
+  // or drive an agent's screen, and which programs run as the agents.
+  /** Links to an agent's screen: `on` (view and control), `view` (view only) or `off`. */
+  computerLinks: {
+    kind: 'choice',
+    env: 'CLAWBOO_COMPUTER_LINKS',
+    userEditable: false,
+    choices: ['on', 'view', 'off'],
+  },
+  /** The Xvnc agents' displays run on, instead of one Clawboo finds or installs. */
+  xvncPath: { kind: 'path', env: 'CLAWBOO_XVNC_PATH', userEditable: false },
+  /** The Cua Driver agents use, instead of the one Clawboo installs. */
+  cuaDriverPath: { kind: 'path', env: 'CLAWBOO_CUA_DRIVER_PATH', userEditable: false },
+  /** No download of the desktop tools from the dashboard. */
+  disableDesktopToolsInstall: {
+    kind: 'flag',
+    env: 'CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL',
+    userEditable: false,
+  },
+  /** How many agent displays may run at once. Unset: as many as agent browsers. */
+  maxAgentDisplays: {
+    kind: 'count',
+    env: 'CLAWBOO_MAX_AGENT_DISPLAYS',
+    userEditable: false,
+    min: 1,
+    max: 64,
+  },
 } as const satisfies Record<string, KeySpec>
 
 export type OperatorKey = keyof typeof OPERATOR_KEYS
@@ -197,6 +229,11 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   togetherBaseUrl: null,
   cerebrasBaseUrl: null,
   moonshotBaseUrl: null,
+  computerLinks: 'on',
+  xvncPath: null,
+  cuaDriverPath: null,
+  disableDesktopToolsInstall: false,
+  maxAgentDisplays: null,
 }
 
 /** TypeScript resolves DEFAULTS to a plain object, so `DEFAULTS[K]` loses its tie to K. */
@@ -305,7 +342,54 @@ function parseSeconds(spec: KeySpec, raw: number, where: string): number {
   return raw
 }
 
+/** Longer than any real program's path, short enough to read in a message. */
+const MAX_PATH_CHARS = 1024
+
+/**
+ * An absolute path, written the one plain way: `path.normalize` leaves it as it
+ * is and it ends in no separator. So a value names the file it reads as, and
+ * no `..` part or doubled slash can make it name another. Not echoed back: a
+ * path is not a secret, but the rule is the same for every refusal here.
+ */
+function parsePath(raw: string, where: string): string {
+  const value = raw.trim()
+  if (
+    value.length > MAX_PATH_CHARS ||
+    // eslint-disable-next-line no-control-regex
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    !path.isAbsolute(value) ||
+    path.normalize(value) !== value ||
+    (value.length > 1 && (value.endsWith('/') || value.endsWith(path.sep)))
+  ) {
+    throw new OperatorSettingsError(
+      `${where} must be an absolute path with no "." or ".." part and no doubled or trailing slash.`,
+    )
+  }
+  return value
+}
+
+function parseCount(spec: KeySpec, raw: number, where: string): number {
+  const min = spec.min ?? 0
+  const max = spec.max ?? Number.MAX_SAFE_INTEGER
+  if (!Number.isInteger(raw) || raw < min || raw > max) {
+    throw new OperatorSettingsError(`${where} must be a whole number from ${min} to ${max}.`)
+  }
+  return raw
+}
+
 function parseFileValue(spec: KeySpec, raw: unknown, where: string): PinValue {
+  if (spec.kind === 'path') {
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      throw new OperatorSettingsError(`${where} must be an absolute path.`)
+    }
+    return parsePath(raw, where)
+  }
+  if (spec.kind === 'count') {
+    if (typeof raw !== 'number') {
+      throw new OperatorSettingsError(`${where} must be a whole number.`)
+    }
+    return parseCount(spec, raw, where)
+  }
   if (spec.kind === 'flag') {
     if (typeof raw !== 'boolean') {
       throw new OperatorSettingsError(`${where} must be true or false.`)
@@ -342,6 +426,13 @@ function parseFileValue(spec: KeySpec, raw: unknown, where: string): PinValue {
 function parseEnvValue(spec: KeySpec, raw: string | undefined, name: string): PinValue | null {
   const value = raw?.trim() ?? ''
   if (value === '') return null
+  if (spec.kind === 'path') return parsePath(value, name)
+  if (spec.kind === 'count') {
+    if (!/^\d+$/.test(value)) {
+      throw new OperatorSettingsError(`${name} must be a whole number.`)
+    }
+    return parseCount(spec, Number(value), name)
+  }
   if (spec.kind === 'flag') {
     const lower = value.toLowerCase()
     if (lower === '1' || lower === 'true') return true
@@ -524,8 +615,10 @@ function readUserValue<K extends OperatorKey>(db: ClawbooDb, key: K): OperatorVa
     const parsed = JSON.parse(raw) as unknown
     const kind: Kind = OPERATOR_KEYS[key].kind
     if (kind === 'flag' && typeof parsed === 'boolean') return parsed as OperatorValue<K>
-    if (kind === 'seconds' && typeof parsed === 'number') return parsed as OperatorValue<K>
-    if (kind !== 'flag' && kind !== 'seconds' && typeof parsed === 'string') {
+    if ((kind === 'seconds' || kind === 'count') && typeof parsed === 'number') {
+      return parsed as OperatorValue<K>
+    }
+    if (kind !== 'flag' && kind !== 'seconds' && kind !== 'count' && typeof parsed === 'string') {
       return parsed as OperatorValue<K>
     }
   } catch {

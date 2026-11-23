@@ -37,6 +37,7 @@ import { readdirSync, statSync } from 'node:fs'
 import { isAgentUserMode } from '../lib/agentUser/config'
 import { displaySupport } from '../lib/desktop/displays'
 import { desktopDriverRefusal } from '../lib/desktop/driverPolicy'
+import { operatorProgramForLauncher } from '../lib/desktop/screenSettings'
 import { ownedRuntimeBin } from '../lib/runtimeFolder'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -361,7 +362,12 @@ export function connectorPlaceRefusal(
   platform: NodeJS.Platform = process.platform,
   agentUserMode: boolean = isAgentUserMode(),
 ): {
-  reason: 'unsupported-platform' | 'needs-agent-user' | 'not-installed' | 'no-display'
+  reason:
+    | 'unsupported-platform'
+    | 'needs-agent-user'
+    | 'not-installed'
+    | 'named-program-refused'
+    | 'no-display'
   error: string
 } | null {
   if (def.launch.transport !== 'stdio') return null
@@ -377,11 +383,21 @@ export function connectorPlaceRefusal(
     const refusal = desktopDriverRefusal(def.displayName, agentUserMode)
     if (refusal) return { reason: 'needs-agent-user', error: refusal }
   }
-  // Clawboo's own install only: a copy on PATH may be another version.
-  if (def.launch.ownedBinary && !ownedRuntimeBin(def.launch.command)) {
-    return {
-      reason: 'not-installed',
-      error: `${def.displayName} is not installed. Install it on an agent's Screen view, then connect it.`,
+  // Clawboo's own install only (a copy on PATH may be another version), or
+  // the program an administrator named in its place, once it passes its check.
+  if (def.launch.ownedBinary) {
+    const named = operatorProgramForLauncher(def.launch.command)
+    if (named?.problem) {
+      return {
+        reason: 'named-program-refused',
+        error: `${def.displayName} cannot start: the program your administrator named may not run. ${named.problem}`,
+      }
+    }
+    if (!named && !ownedRuntimeBin(def.launch.command)) {
+      return {
+        reason: 'not-installed',
+        error: `${def.displayName} is not installed. Install it on an agent's Screen view, then connect it.`,
+      }
     }
   }
   // It works only on an agent's own screen: where agents get none (displays

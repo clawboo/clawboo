@@ -56,6 +56,14 @@ describe('ownerOfPath and shareSpot (paths alone)', () => {
     expect(ownerOfPath('/homes/a1', deps)).toEqual({ kind: 'user', user: 'a1' })
     expect(ownerOfPath('/homes/a10/x', deps)).toBeNull()
     expect(ownerOfPath('/homes/a1/../a2/secret', deps)).toEqual({ kind: 'user', user: 'a2' })
+    // A pool user's runtime folder, where its agent's display keeps its files.
+    expect(ownerOfPath('/run/user/2/clawboo-0a1b2c3d/desktops/x/vnc.sock', deps)).toEqual({
+      kind: 'user',
+      user: 'a2',
+    })
+    expect(ownerOfPath('/run/user/1', deps)).toEqual({ kind: 'user', user: 'a1' })
+    expect(ownerOfPath('/run/user/12/x', deps)).toBeNull()
+    expect(ownerOfPath('/run/user/3/x', deps)).toBeNull()
   })
 
   it('the work folder belongs to its shares, never as a whole', () => {

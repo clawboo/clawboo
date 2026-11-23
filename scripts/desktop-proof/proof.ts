@@ -198,10 +198,45 @@ async function main(): Promise<void> {
   if (!support.ok) return
   check('a window manager was found', support.tools.windowManager !== null, support.tools)
 
+  // ── What an administrator named (releases after 0.8.0) ─────────────────────
+  const namedXvnc = process.env['CLAWBOO_XVNC_PATH']
+  if (namedXvnc) {
+    check(
+      'the Xvnc an administrator named is the one used',
+      support.tools.xvnc === namedXvnc,
+      support.tools,
+    )
+  } else {
+    // A copy in /tmp, a folder others can write: refused, and none runs in its place.
+    const copy = '/tmp/clawboo-proof-Xvnc'
+    fs.copyFileSync(support.tools.xvnc, copy)
+    fs.chmodSync(copy, 0o755)
+    process.env['CLAWBOO_XVNC_PATH'] = copy
+    const refused = displaySupport()
+    check(
+      'a named Xvnc in a folder others can write is refused, and no other runs in its place',
+      !refused.ok &&
+        /CLAWBOO_XVNC_PATH/.test(refused.reason) &&
+        /a folder above/.test(refused.reason),
+      refused,
+    )
+    delete process.env['CLAWBOO_XVNC_PATH']
+    fs.rmSync(copy, { force: true })
+  }
+
   // ── The display ──────────────────────────────────────────────────────────
   const display = await acquireDisplay('agent-1', 'proof')
   check('the agent gets a display', display !== null)
   if (!display) return
+  // run.sh mounts a tmpfs at /run/user/<uid> for the user who runs the agents.
+  const runtimeDir = `/run/user/${AGENT_UID}`
+  check(
+    `the display keeps its files in ${runtimeDir}, a runtime folder in memory`,
+    display.dir.startsWith(`${runtimeDir}/clawboo-`) &&
+      display.socketPath.startsWith(display.dir + '/') &&
+      fs.statfsSync(runtimeDir).type === 0x01021994,
+    display.dir,
+  )
   const other = await acquireDisplay('agent-2', 'proof')
   check(
     'another agent gets a different display, folder and cookie',
@@ -431,6 +466,39 @@ async function main(): Promise<void> {
   )
   const listWindows = connector.descriptors.find((d) => d.name.endsWith('__list_windows'))
   check('the driver offers its tools through Clawboo', !!listWindows, connector.descriptors.length)
+  // Its browser, scripting, install and settings tools, as the real 0.38.0 lists them.
+  const refused0380 = [
+    'browser_click',
+    'browser_dialog',
+    'browser_download',
+    'browser_navigate',
+    'browser_pointer',
+    'browser_prepare',
+    'browser_select',
+    'browser_set_input_files',
+    'browser_type',
+    'check_for_update',
+    'get_browser_state',
+    'get_config',
+    'install_extension',
+    'install_ffmpeg',
+    'page',
+    'replay_trajectory',
+    'run_script',
+    'run_steps',
+    'set_config',
+  ]
+  const heldBack = connector.skipped
+    .filter((t) => t.reason === 'refused-on-agent-screens')
+    .map((t) => t.name)
+    .sort()
+  check(
+    "the real driver's browser, scripting, install and settings tools are held back, and only those",
+    JSON.stringify(heldBack) === JSON.stringify(refused0380) &&
+      !connector.descriptors.some((d) => refused0380.some((t) => d.name.endsWith(`__${t}`))) &&
+      connector.descriptors.length + heldBack.length >= 66,
+    { heldBack, offered: connector.descriptors.length },
+  )
   if (listWindows && mode !== 'agent') {
     // Connected anyway (as an earlier setting might have), it still starts no
     // driver for an agent.

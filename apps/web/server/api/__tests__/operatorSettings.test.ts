@@ -102,6 +102,11 @@ describe('/api/system/operator-settings', () => {
           ['togetherBaseUrl', null, 'TOGETHER_BASE_URL'],
           ['cerebrasBaseUrl', null, 'CEREBRAS_BASE_URL'],
           ['moonshotBaseUrl', null, 'MOONSHOT_BASE_URL'],
+          ['computerLinks', 'on', 'CLAWBOO_COMPUTER_LINKS'],
+          ['xvncPath', null, 'CLAWBOO_XVNC_PATH'],
+          ['cuaDriverPath', null, 'CLAWBOO_CUA_DRIVER_PATH'],
+          ['disableDesktopToolsInstall', false, 'CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL'],
+          ['maxAgentDisplays', null, 'CLAWBOO_MAX_AGENT_DISPLAYS'],
         ] as const
       ).map(([key, value, env]) => ({
         key,
