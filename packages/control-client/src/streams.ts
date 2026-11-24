@@ -35,6 +35,9 @@ export const chatMessageFrameSchema = z.object({
   person: z
     .object({ id: z.string(), name: z.string().nullable(), role: z.string().nullable() })
     .optional(),
+  /** The `entryId` of the message whose turn wrote this row (a one-to-one chat's reply
+   *  and its notices). Absent on the message itself and on turns the server started. */
+  inReplyTo: z.string().optional(),
 })
 export type ChatMessageFrame = z.infer<typeof chatMessageFrameSchema>
 

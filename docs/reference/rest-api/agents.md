@@ -44,6 +44,7 @@ A per-agent route goes to the source that owns the agent; an unknown id goes to 
 | POST   | `/api/agents/:agentId/chat`               | Start one 1:1 chat turn, any runtime but OpenClaw (`202`)     | No      |
 | POST   | `/api/agents/:agentId/chat/stop`          | Stop the agent's running 1:1 turn                             | No      |
 | GET    | `/api/agents/:agentId/chat/stream`        | Live tail of the agent's 1:1 chat                             | SSE     |
+| GET    | `/api/agents/chat/heads`                  | The newest stored row id of each server-run 1:1 chat          | No      |
 | GET    | `/api/agents/:agentId/shell`              | Whether a native agent may ask to run commands                | No      |
 | POST   | `/api/agents/:agentId/shell`              | Turn that switch on or off (sensitive tier)                   | No      |
 
@@ -1113,6 +1114,10 @@ Starts one turn of the 1:1 chat of a `clawboo-native`, `claude-code`, `codex` or
 
 Each turn resumes the session the agent's previous 1:1 turn saved, so the conversation carries over. The pointer is one setting per agent, `native-chat-session:<agentId>`, whatever the runtime. `/reset` in the chat clears it, and so does a failed Claude Code, Codex or Hermes turn that tried to resume, so the next turn starts a fresh session. One agent's turns run one at a time: a second message waits for the turn in front of it. On Clawboo Native, Codex and Hermes it also waits for that agent's team-chat runs and routines, and a turn that cannot start within 10 minutes leaves the notice "This agent was busy with another run and did not pick the message up in time. Send it again." Claude Code, Codex and Hermes get the agent's `SOUL.md` as a persona block on every turn.
 
+**One turn per message.** A message's `entryId` is unique across every chat. The first request with an id stores the message and starts its turn. The same id sent again to the same chat stores nothing and starts no turn, however the first turn ended, and answers `202` with `duplicate: true`. To try again after a turn failed or was refused, send the message with a new id. Two requests with one id at the same moment start one turn between them. An id another chat holds answers `409`. If the message cannot be stored at all, its turn still runs. Without an `entryId` the server makes one, `user-<Date.now()>` (with a short suffix when another message took that id in the same millisecond), and returns it.
+
+**The rows that answer it.** Every row the turn writes carries `inReplyTo`, the message's `entryId`: the reply, and any notice it leaves (a paused agent, a budget, a failed run, a turn too large for the model, an agent too busy to pick the message up, a hand-off that did not start). Two messages waiting for the same agent are not always answered in the order they arrived, so match a reply to its message by this field rather than by order. A turn the server starts by itself, such as Boo Zero's chat reading results a team sent back, writes no `inReplyTo`. A Stop writes nothing, so a stopped turn leaves no row to match, and a pause that stops several of one agent's turns at once writes one notice with no `inReplyTo`.
+
 Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_no-team` for an agent on no team), created `0700` before the run. If the folder cannot be created, the turn ends with a notice instead of starting anywhere else. A native agent gets its file tools there, and `run_command` when its shell switch is on. A turn that fails before it writes any reply leaves a notice with the reason, including a run ended after `CLAWBOO_RUN_SILENT_TIMEOUT_MS` (30 minutes by default) with no events. A turn that fails partway keeps the text it had written.
 
 - **Path params**: `agentId`.
@@ -1124,8 +1129,9 @@ Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_
                         // text delivered to the model.
   displayText?: string  // what the transcript shows; defaults to `message`. The two
                         // differ when the client prepends a rules block / @team brief.
-  entryId?: string      // idempotency key for the persisted user turn; defaults to
-                        // `user-<Date.now()>`. Re-posting one inserts nothing (the
+  entryId?: string      // your id for this message, unique across every chat; the
+                        // server makes one when it is missing or empty. Sent again
+                        // to this chat, it stores nothing and starts no turn (the
                         // optimistic client bubble and the SSE replay share the id).
                         // In Boo Zero's chat it also names the request: what the
                         // message hands out goes under one main task per team.
@@ -1137,10 +1143,16 @@ Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_
 
 ### Responses
 
-**`202 Accepted`**: the user turn was persisted and the reply run started:
+**`202 Accepted`**: the message was stored and its turn started. `entryId` is the message's id, yours or the one the server made:
 
 ```json
-{ "ok": true }
+{ "ok": true, "entryId": "user-1718450000000" }
+```
+
+**`202 Accepted`**: this chat already holds a message with that `entryId`. Nothing was stored and no turn started:
+
+```json
+{ "ok": true, "entryId": "user-1718450000000", "duplicate": true }
 ```
 
 **`400 Bad Request`**: missing `agentId` segment:
@@ -1159,6 +1171,12 @@ Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_
 
 ```json
 { "error": "agent does not chat through the server" }
+```
+
+**`409 Conflict`**: another chat holds a message with that `entryId`. Nothing was stored and no turn started:
+
+```json
+{ "error": "entry_id_in_use" }
 ```
 
 **`500 Internal Server Error`**: any other failure:
@@ -1262,13 +1280,69 @@ then sends a `: connected` comment, a `cursor` event with the row id it starts f
 | `event: handOffs` | On open, and when it changes            | `{ on }`: whether this chat acts on a hand-off in a reply                                           |
 | `: keepalive`     | Every 20 s while open                   | SSE comment (keeps the connection warm)                                                             |
 
-The `cursor` event gives an `EventSource` a resume point before any row arrives, so a connection that drops first still reconnects from where it started instead of the newest row at that moment. A client needs no listener for it. `delta`, `status`, `board` and `handOffs` frames carry no `id:` line, so they never move the resume cursor. `board` frames are read from the task rows: every connection gets the chat's cards again, up to its newest 200, so one missed while no stream was open is right after a reconnect. The stored rows are the record; the deltas only let a reply appear as it is written.
+The `cursor` event gives an `EventSource` a resume point before any row arrives, so a connection that drops first still reconnects from where it started instead of the newest row at that moment. A client needs no listener for it. `delta`, `status`, `board` and `handOffs` frames carry no `id:` line, so they never move the resume cursor. `board` frames are read from the task rows: every connection gets the chat's cards again, up to its newest 200, so one missed while no stream was open is right after a reconnect. The stored rows are the record; the deltas only let a reply appear as it is written. Each stored row is one transcript entry (see [Chat history API](/reference/rest-api/chat-history#sessions-and-entries)); the reply and notices of a message's turn carry its `entryId` as `inReplyTo`.
+
+To know where a chat's stream would pick up without opening it, read `GET /api/agents/chat/heads`.
 
 ### Example
 
 ```bash
 curl -N http://localhost:18790/api/agents/<agent-id>/chat/stream
 curl -N 'http://localhost:18790/api/agents/<agent-id>/chat/stream?since=4187'
+```
+
+---
+
+## `GET /api/agents/chat/heads`
+
+The newest stored row id of each 1:1 chat the server runs: the same head `GET /api/agents/:agentId/chat/stream` starts from. Open that stream with `?since=<head>` and it sends exactly the rows stored after it. A client that follows many chats can read this to see which have new rows, and open only those streams.
+
+Only `clawboo-native`, `claude-code`, `codex` and `hermes` agents are listed. An OpenClaw agent, whose 1:1 chat goes through the Gateway, is left out, and so is an id no agent has. A chat with no rows reads `0`. With [roles](/guides/sso-proxy) enforced it needs `see`, and a guest reads only the agents of the teams their token lists.
+
+- **Query params**:
+
+| Param    | Type   | Notes                                                                                                                                                                    |
+| -------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agents` | string | Comma-separated agent ids, at most 200. Without it, every agent the server chats for that is not archived. An archived agent named here is listed. Empty, it lists none. |
+
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: each listed agent's head:
+
+```json
+{ "heads": { "native-researcher-3f2a1c": 4187, "claude-code-builder-9b0e44": 0 } }
+```
+
+**`400 Bad Request`**: more than 200 ids:
+
+```json
+{ "error": "too_many_agents", "max": 200 }
+```
+
+**`400 Bad Request`**: an id an agent cannot have (up to 200 letters, digits, `.`, `_`, `:`, `@` and `-`, starting with a letter or digit):
+
+```json
+{ "error": "invalid_agent_id" }
+```
+
+**`400 Bad Request`**: `agents` sent more than once:
+
+```json
+{ "error": "invalid_agents" }
+```
+
+**`500 Internal Server Error`**: any other failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl 'http://localhost:18790/api/agents/chat/heads?agents=<agent-id>,<agent-id>'
 ```
 
 ---
@@ -1406,6 +1480,7 @@ Most error bodies are `{ "error": "<message>" }`. The exceptions:
 - The two screenshot routes answer `{ "ok": false, "error": "..." }`.
 - The two shell routes add `runtime` to their wrong-runtime `400`, naming the runtime they found.
 - `GET /api/agents/:agentId/chat/stream` has no JSON error: its only failure before the stream opens is a bare `400` with no body.
+- `GET /api/agents/chat/heads` adds `max` to its too-many-ids `400`.
 
 A `503 { "error": "gateway_disconnected" }` means the route needed the OpenClaw Gateway for an OpenClaw agent and the server's connection is down. The list and single-agent reads never answer it: they serve SQLite.
 

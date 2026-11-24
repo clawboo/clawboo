@@ -337,6 +337,10 @@ export type TranscriptEntry = {
   fromCaller?: boolean
   /** Who sent a user-role entry, when a sign-in proxy vouched for them. */
   person?: PersonRef
+  /** The `entryId` of the message whose turn wrote this entry: the reply and every
+   *  notice of a one-to-one chat turn a message started. Absent on the message itself
+   *  and on what a turn the server started by itself writes. */
+  inReplyTo?: string
 }
 
 export const AGENT_FILE_NAMES = [

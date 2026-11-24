@@ -490,9 +490,23 @@ export function handOffRefusal(
 
 // ─── Starting them ───────────────────────────────────────────────────────────
 
-/** Say something plainly in the chat, with no reply from the agent behind it. */
-function note(db: ClawbooDb, agentId: string, sessionKey: string, text: string): void {
-  persistNativeChatEntry(db, agentId, text, { sessionKey, kind: 'meta', role: 'system' })
+/** Say something plainly in the chat, with no reply from the agent behind it. With
+ *  `inReplyTo`, it names the message whose turn it is about. */
+function note(
+  db: ClawbooDb,
+  agentId: string,
+  sessionKey: string,
+  text: string,
+  inReplyTo?: string,
+): void {
+  persistNativeChatEntry(db, agentId, text, { sessionKey, kind: 'meta', role: 'system', inReplyTo })
+}
+
+/** A turn of a chat: whose, its key, and the message it answers when one started it. */
+interface ChatTurnRef {
+  agentId: string
+  sessionKey: string
+  inReplyTo?: string
 }
 
 /** Something a reply asked for did not start, and neither side may think it did. */
@@ -510,12 +524,8 @@ interface NotStarted {
 /** Say so in the chat, and keep it for Boo Zero's next turn: its session still holds
  *  the tag it wrote, so without this it could tell the person the work is under way.
  *  It waits for that turn, and wakes no one. */
-function sayNotStarted(
-  db: ClawbooDb,
-  turn: { agentId: string; sessionKey: string },
-  what: NotStarted,
-): void {
-  if (what.person) note(db, turn.agentId, turn.sessionKey, what.person)
+function sayNotStarted(db: ClawbooDb, turn: ChatTurnRef, what: NotStarted): void {
+  if (what.person) note(db, turn.agentId, turn.sessionKey, what.person, turn.inReplyTo)
   const item: ReportUp = {
     toAgentId: turn.agentId,
     by: what.by ?? 'Clawboo',
@@ -572,7 +582,7 @@ function unnamedTeamNote(team: ActiveTeam, count: number): { person: string; hea
  *  `ask` it is never false: what could not be asked about does not start. */
 async function askAboutBatch(
   db: ClawbooDb,
-  turn: { agentId: string; sessionKey: string },
+  turn: ChatTurnRef,
   route: ChatHandOffRoute,
   team: ActiveTeam,
   targets: Array<{ agentId: string; agentName: string; task: string }>,
@@ -700,7 +710,12 @@ export async function startHandOffsFromReply(
 ): Promise<void> {
   const { db, agentId } = params
   const sessionKey = agentChatSessionKey(db, agentId)
-  const turn = { agentId, sessionKey }
+  // A results turn carries no message id, so what it says names no message.
+  const turn: ChatTurnRef = {
+    agentId,
+    sessionKey,
+    ...(params.messageId ? { inReplyTo: params.messageId } : {}),
+  }
   const { delegates, plans, shownDelegates, shownPlans } = findActionableHandOffs(reply)
   if (plans.length > 0)
     sayNotStarted(db, turn, {
@@ -828,7 +843,7 @@ export async function startHandOffsFromReply(
       fromAgentId: agentId,
       turnId,
       chatSessionKey: sessionKey,
-      onTold: (said: string) => note(db, agentId, sessionKey, said),
+      onTold: (said: string) => note(db, agentId, sessionKey, said, turn.inReplyTo),
       ...person,
       ...message,
       ...(parentTaskId ? { parentTaskId } : {}),
@@ -962,11 +977,15 @@ export async function runChatTurn(
   } | null = null,
 ): Promise<void> {
   const { db, agentId, message, mcpBaseUrl, makeAdapter } = params
+  // Every row a message's turn writes names that message. A turn the server started by
+  // itself, carrying results back, answers none.
+  const inReplyTo = carrying ? undefined : params.messageId
   const seam = {
     ...(makeAdapter ? { makeAdapter } : {}),
     ...(params.budgetScopes ? { budgetScopes: params.budgetScopes } : {}),
     ...(params.background ? { background: true } : {}),
     ...(params.countJobs ? { countJobs: params.countJobs } : {}),
+    ...(inReplyTo ? { inReplyTo } : {}),
   }
   // A person's message lifts the hold their Stop left, and carries what waited. One that
   // failed the person check does neither.
@@ -1068,7 +1087,7 @@ export async function runChatTurn(
       endCarrying()
       if (findActionableHandOffs(ending.reply).delegates.length > 0) {
         // The person who pressed Stop knows, and wants no more from this chat.
-        const turn = { agentId, sessionKey }
+        const turn = { agentId, sessionKey, ...(inReplyTo ? { inReplyTo } : {}) }
         if (ending.how === 'stopped')
           sayNotStarted(db, turn, {
             heard: 'This reply was stopped before it ended, so its hand-offs did not start.',

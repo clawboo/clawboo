@@ -49,10 +49,13 @@ interface TranscriptEntry {
   origin?: { kind: 'routine'; routineId: string; routineName: string } // posted by a routine
   fromCaller?: boolean // sent by a caller that did not pass the person check
   person?: { id: string; name: string | null; role: string | null } // who sent a user entry, through a verified sign-in proxy
+  inReplyTo?: string // the entryId of the message whose 1:1 chat turn wrote this entry
 }
 ```
 
 Only the server sets `person`, on the team chat and 1:1 chat routes that store a message themselves, when a [sign-in proxy](/guides/sso-proxy) vouched for the sender. `POST /api/chat-history` drops a `person` from the entries it is sent.
+
+The server sets `inReplyTo` on the reply and notices of a 1:1 chat turn it runs for a message (see `POST /api/agents/:agentId/chat` in the [Agents API](/reference/rest-api/agents)). A turn it starts by itself writes none.
 
 ### Three ways a conversation ends
 

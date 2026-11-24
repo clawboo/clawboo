@@ -1119,6 +1119,65 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
     })
   })
 
+  describe('the message each row answers', () => {
+    type Row = { kind: string; text: string; inReplyTo?: string }
+    const answers = (): Array<[string, string | undefined]> =>
+      (chatRows() as Row[]).map((r) => [r.kind, r.inReplyTo])
+
+    it("a message's reply and the notes about its hand-offs name it", async () => {
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Nowhere/Coder">fix it</delegate> <plan><step to="@Growth/Coder">one</step></plan>',
+          ),
+        ],
+      ])
+      await turn('fix it', { messageId: 'msg-1' })
+      expect(listTasks(db)).toEqual([])
+      expect(notes().length).toBeGreaterThanOrEqual(2)
+      expect(answers()).toContainEqual(['assistant', 'msg-1'])
+      expect(answers().every(([, inReplyTo]) => inReplyTo === 'msg-1')).toBe(true)
+    })
+
+    it('so does the note of a reply that ended early', async () => {
+      boo = new ScriptedAdapter([
+        [delta('<delegate to="@Growth/Coder">fix the parser</delegate>'), failed('down')],
+      ])
+      await turn('fix it, on Growth', { messageId: 'msg-2' })
+      expect(notes().at(-1)).toMatch(/ended early/)
+      expect(answers().every(([, inReplyTo]) => inReplyTo === 'msg-2')).toBe(true)
+    })
+
+    it('a turn carrying results back names no message', async () => {
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+      workers.set(CODER, new ScriptedAdapter([[done('parser fixed')]]))
+      await turn('fix the parser, on Growth', { messageId: 'msg-3' })
+      await vi.waitFor(() => expect(listPendingChatReportUps(db, CHAT)).toHaveLength(1))
+      const before = chatRows().length
+
+      boo = new ScriptedAdapter([[done('Coder fixed the parser.')]])
+      await flushChatReportUps(db, CHAT, opts())
+      const carried = (chatRows() as Row[]).slice(before)
+      expect(carried.map((r) => r.text)).toContain('Coder fixed the parser.')
+      for (const row of carried) expect(row).not.toHaveProperty('inReplyTo')
+    })
+
+    it("another agent's plain chat names the message too", async () => {
+      boo = new ScriptedAdapter([[done('Sure.')]])
+      await runChatTurn({
+        db,
+        agentId: CODER,
+        message: 'hi',
+        words: 'hi',
+        messageId: 'msg-4',
+        ...opts(),
+      })
+      expect(
+        (chatRows(directChatSessionKey(CODER, 'codex')) as Row[]).map((r) => [r.text, r.inReplyTo]),
+      ).toEqual([['Sure.', 'msg-4']])
+    })
+  })
+
   describe('a tag it could not read', () => {
     it('beside one it could, the first starts and the chat says the other did not', async () => {
       workers.set(CODER, new ScriptedAdapter(['hang']))

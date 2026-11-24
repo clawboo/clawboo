@@ -118,11 +118,11 @@ describe('POST /api/agents/:agentId/chat hands the turn what hand-offs need', ()
     ])
   })
 
-  it('the message id, which makes one main task per team across a retry of it', () => {
+  it('the message id, and a retry of the message starts no second turn', () => {
     post({ message: 'fix it', entryId: 'entry-1' })
     post({ message: 'fix it', entryId: 'entry-1' })
 
-    expect(turns().map((t) => t['messageId'])).toEqual(['entry-1', 'entry-1'])
+    expect(turns().map((t) => t['messageId'])).toEqual(['entry-1'])
   })
 
   it('who asked, from the dashboard: the local person', () => {

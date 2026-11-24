@@ -144,11 +144,14 @@ async function nativeResumeCanShrink(
 /** agentId → the live conversational run, so a Stop can abort it. Module-level: an
  *  agent has exactly one 1:1 chat, and its turns run one at a time (see the lock in
  *  `driveAgentChat`), so at most one run per agent is in flight. */
-const abortMap = new Map<string, { adapter: RuntimeAdapter; run: RunHandle }>()
+const abortMap = new Map<
+  string,
+  { adapter: RuntimeAdapter; run: RunHandle; inReplyTo?: string | undefined }
+>()
 
 /** agentId → its turns waiting for a run slot (see runSlots), so a Stop takes them
- *  out of the queue too. */
-const queuedTurns = new Map<string, Set<AbortController>>()
+ *  out of the queue too, each with the message it answers. */
+const queuedTurns = new Map<string, Map<AbortController, string | undefined>>()
 
 /** agentId → its 1:1 turns from the moment they are asked for until they end. */
 const turnsUnderWay = new Map<string, number>()
@@ -210,18 +213,24 @@ export async function stopPausedAgentChats(
       const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
         { runtime?: string | null; teamId?: string | null } | undefined
       if (!covers({ agentId, teamId: row?.teamId ?? null })) return
+      // The one note names the message whose turn it stopped, when it stopped one.
+      const stopping = [
+        ...(abortMap.has(agentId) ? [abortMap.get(agentId)?.inReplyTo] : []),
+        ...(queuedTurns.get(agentId)?.values() ?? []),
+      ]
       void stopAgentChat(agentId)
       persistNativeChatEntry(db, agentId, note, {
         sessionKey: directChatSessionKey(agentId, row?.runtime ?? null),
         kind: 'meta',
         role: 'system',
+        ...(stopping.length === 1 ? { inReplyTo: stopping[0] } : {}),
       })
     }),
   )
 }
 
 export async function stopAgentChat(agentId: string): Promise<void> {
-  for (const queued of queuedTurns.get(agentId) ?? []) queued.abort()
+  for (const queued of queuedTurns.get(agentId)?.keys() ?? []) queued.abort()
   const entry = abortMap.get(agentId)
   if (!entry) return
   abortMap.delete(agentId)
@@ -258,6 +267,10 @@ export interface DriveAgentChatParams {
   background?: boolean
   /** A turn nobody asked for: these jobs count it, once its run has started. */
   countJobs?: string[]
+  /** The `entryId` of the message this turn answers. Every row the turn writes (its
+   *  reply and its notices) carries it as `inReplyTo`. Absent for a turn the server
+   *  started by itself. */
+  inReplyTo?: string
 }
 
 /** How a 1:1 turn ended. `reply` is the text it produced, for a turn that ended
@@ -343,6 +356,7 @@ async function driveTurn(
   const persist = (text: string, meta = false): void =>
     persistNativeChatEntry(db, agentId, text, {
       sessionKey,
+      inReplyTo: params.inReplyTo,
       ...(meta ? { kind: 'meta' as const, role: 'system' as const } : {}),
     })
 
@@ -476,6 +490,8 @@ async function driveTurn(
       },
       ...(homeDir ? { homeDir } : {}),
       ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
+      // The native driver writes its own reply, which names the message it answers.
+      ...(params.inReplyTo ? { chatInReplyTo: params.inReplyTo } : {}),
     }
     let adapter: RuntimeAdapter
     if (params.makeAdapter) {
@@ -521,7 +537,7 @@ async function driveTurn(
       persist(runFailureText(err instanceof Error ? err.message : String(err), runtime), true)
       return
     }
-    abortMap.set(agentId, { adapter, run })
+    abortMap.set(agentId, { adapter, run, inReplyTo: params.inReplyTo })
     for (const job of params.countJobs ?? []) {
       try {
         noteJobRun(db, job)
@@ -789,8 +805,8 @@ async function driveTurn(
   // A run slot first (see runSlots), then the agent's lock. A Stop while the turn
   // waits for its slot takes it out of the queue, and it never starts.
   const queue = new AbortController()
-  const waiting = queuedTurns.get(agentId) ?? new Set<AbortController>()
-  waiting.add(queue)
+  const waiting = queuedTurns.get(agentId) ?? new Map<AbortController, string | undefined>()
+  waiting.set(queue, params.inReplyTo)
   queuedTurns.set(agentId, waiting)
   const leaveQueue = (): void => {
     waiting.delete(queue)

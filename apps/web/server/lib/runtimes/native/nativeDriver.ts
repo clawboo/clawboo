@@ -41,12 +41,18 @@ let lastChatSequence = 0
  *  narrative, never load-bearing. `opts` lets a caller persist a user-facing
  *  META notice instead (e.g. driveAgentChat surfacing a failed run's reason —
  *  a keyless/errored turn must never just silently not respond), or write into
- *  another runtime's 1:1 key (`opts.sessionKey`, see directChatSessionKey). */
+ *  another runtime's 1:1 key (`opts.sessionKey`, see directChatSessionKey).
+ *  `opts.inReplyTo` names the message whose turn wrote the row. */
 export function persistNativeChatEntry(
   db: ClawbooDb,
   agentId: string,
   text: string,
-  opts?: { kind?: 'assistant' | 'meta'; role?: 'assistant' | 'system'; sessionKey?: string },
+  opts?: {
+    kind?: 'assistant' | 'meta'
+    role?: 'assistant' | 'system'
+    sessionKey?: string
+    inReplyTo?: string | null
+  },
 ): void {
   try {
     if (!text.trim()) return
@@ -75,6 +81,7 @@ export function persistNativeChatEntry(
           sequenceKey: lastChatSequence,
           confirmed: true,
           fingerprint: entryId,
+          ...(opts?.inReplyTo ? { inReplyTo: opts.inReplyTo } : {}),
         }),
       })
       .run()
@@ -111,9 +118,10 @@ export function createNativeDriver(
     // the 1:1 key rather than ruling out the shapes we happen to know about is
     // what keeps a person's chat a conversation: a boo working three board tasks
     // in parallel would otherwise drop three replies into it, unprompted, with no
-    // question in front of them.
+    // question in front of them. The reply names the message it answers, when one
+    // started the turn.
     if (ev.type === 'result' && ev.ok && opts.sessionKey === nativeChatSessionKey(opts.agentId))
-      persistNativeChatEntry(db, opts.agentId, ev.summary)
+      persistNativeChatEntry(db, opts.agentId, ev.summary, { inReplyTo: ctx.chatInReplyTo })
     if (!subscribed) {
       buffered.push(ev)
       return
