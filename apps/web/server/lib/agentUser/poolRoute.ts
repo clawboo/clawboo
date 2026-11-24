@@ -16,6 +16,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 // paths must not change meaning under another platform's rules (in tests too).
 import { posix as path } from 'node:path'
 
+import { userRuntimeDir } from '../desktop/runtimeDir'
 import type { AgentHostClient } from './client'
 import {
   AgentPoolShortError,
@@ -159,6 +160,8 @@ export interface PathRouteDeps {
 /**
  * Whose `p` is, read from the path alone (and the task a checkout is for):
  * - `<pool home>/...`: that user;
+ * - `/run/user/<uid>/...`, the runtime folder of a pool user (where its
+ *   agent's display keeps its files, see desktop/runtimeDir.ts): that user;
  * - `<work>/teams/<share>/...`, `<work>/mirrors/<share>/...`,
  *   `<work>/team-history/<share>.git/...`,
  *   `<work>/reviews/<install>/<share>/...`: that share;
@@ -170,6 +173,7 @@ export function ownerOfPath(p: string, deps: PathRouteDeps): PathOwner | null {
   const abs = path.resolve(p)
   for (const u of deps.users) {
     if (under(abs, path.resolve(u.home))) return { kind: 'user', user: u.name }
+    if (under(abs, userRuntimeDir(u.uid))) return { kind: 'user', user: u.name }
   }
   const work = path.resolve(deps.workDir)
   if (!under(abs, work)) return null

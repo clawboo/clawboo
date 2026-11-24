@@ -54,6 +54,7 @@ import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn, type ConnectorSpawnPlan } from './spawnPlan'
 import { browserGuardArgs } from './dashboardGuard'
 import { isPersonInControl, personInControlMessage } from '../desktop/control'
+import { desktopDriverToolRefusal } from '../desktop/driverPolicy'
 import { markDesktopToolsInUse } from '../desktop/tools'
 
 /** What the catalog gives us, narrowed to what a connection needs. */
@@ -187,6 +188,13 @@ function toDescriptor(
       // grant gate already trusts it, and it is not model-supplied - over HTTP
       // it is HMAC-verified before it is believed, and on the native path it
       // comes from the run.
+      // A desktop driver's browser, scripting, install and settings tools never
+      // run here. They are not offered either (see performConnect); this is the
+      // same rule for a call that names one anyway.
+      const refused = isDesktopDriver(def)
+        ? desktopDriverToolRefusal(def.displayName, tool.name)
+        : null
+      if (refused) throw new Error(refused)
       // Before anything starts: a read-only tool of some servers writes a file
       // anywhere it is told when given one of these, through links too.
       const writes = fileWritingArgIn(args, def.fileWritingArgs)
@@ -257,6 +265,11 @@ function toDescriptor(
       }
     },
   })
+}
+
+/** A desktop driver: one child per agent, on that agent's own display. */
+function isDesktopDriver(def: ConnectableDefinition): boolean {
+  return def.launch.transport === 'stdio' && def.launch.perAgentDisplay === true
 }
 
 /** Deeper than any real call nests; past it a call is refused, not read. */
@@ -444,9 +457,11 @@ async function performConnect(
       : planConnectorSpawn(launch, { asAgentUser: asAgent !== null })
   if (plan.unresolved) {
     throw new Error(
-      launch.transport === 'stdio' && launch.ownedBinary
-        ? `${def.displayName} is not installed. Install it on an agent's Screen view, then connect it.`
-        : `cannot find ${plan.command} on PATH. Is Node installed?`,
+      plan.problem
+        ? `${def.displayName} cannot start: ${plan.problem}`
+        : launch.transport === 'stdio' && launch.ownedBinary
+          ? `${def.displayName} is not installed. Install it on an agent's Screen view, then connect it.`
+          : `cannot find ${plan.command} on PATH. Is Node installed?`,
     )
   }
   // The one shared child of a desktop driver only lists the tools: every call
@@ -589,6 +604,13 @@ async function performConnect(
       // not just this connector, until someone disconnects it.
       if (claimed.has(named.name)) {
         skipped.push({ name: tool.name, reason: 'duplicate-name' })
+        continue
+      }
+      // A desktop driver's refused tools are never offered: no descriptor, no
+      // grant, nothing in any agent's tool list. Recorded, so the operator can
+      // see what was held back and why.
+      if (isDesktopDriver(def) && desktopDriverToolRefusal(def.displayName, tool.name)) {
+        skipped.push({ name: tool.name, reason: 'refused-on-agent-screens' })
         continue
       }
       claimed.add(named.name)

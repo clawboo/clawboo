@@ -33,6 +33,12 @@ import {
   ownedRuntimeLaunch,
   withInstallUmask,
 } from '../runtimeFolder'
+import {
+  desktopToolDownloadRefusal,
+  desktopToolsInstallRefusal,
+  operatorProgram,
+  type DesktopTool,
+} from './screenSettings'
 
 /** The runtimes-folder id the desktop tools install under. */
 export const DESKTOP_TOOLS_ID = 'desktop'
@@ -48,7 +54,16 @@ export interface PinnedArtifact {
   maxBytes: number
   /** The folder inside the archive that is the install (stripped), if any. */
   stripPrefix?: string
+  /**
+   * When the release was published, as its release page says (ISO 8601). A
+   * release younger than `MIN_RELEASE_AGE_MS` is not installed: a release that
+   * turns out to be bad is usually pulled or flagged within days.
+   */
+  publishedAt: string
 }
+
+/** How old a pinned release must be before Clawboo installs it: 14 days. */
+export const MIN_RELEASE_AGE_MS = 14 * 24 * 60 * 60_000
 
 type Arch = 'x64' | 'arm64'
 
@@ -61,21 +76,29 @@ const TIGERVNC: Partial<Record<Arch, PinnedArtifact>> = {
     url: `https://downloads.sourceforge.net/project/tigervnc/stable/${TIGERVNC_VERSION}/tigervnc-${TIGERVNC_VERSION}.x86_64.tar.gz`,
     sha256: '5b70c84baefc09a030cfc78315c34ccb55b2a0dde4092b7da67a1962c5f0dea6',
     maxBytes: 20 * 1024 * 1024,
+    publishedAt: '2026-03-26T20:49:14Z',
     stripPrefix: `tigervnc-${TIGERVNC_VERSION}.x86_64`,
   },
 }
 
-/** Cua Driver's release archives; the hashes are its own SHA256SUMS. */
+/**
+ * Cua Driver's release archives; the hashes are its own SHA256SUMS. Each also
+ * matches the digest its Sigstore bundle (`<archive>.sigstore.json`, signed by
+ * the release workflow `cd-rust-cua-driver.yml` at the release's tag) records
+ * in Rekor. Clawboo does not check that bundle itself yet.
+ */
 const CUA_DRIVER: Partial<Record<Arch, PinnedArtifact>> = {
   x64: {
     url: `https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_DRIVER_VERSION}/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-x86_64-binary.tar.gz`,
     sha256: '31ab9709dd91ce73677e49b9f3e75c6f0d3e4d9625c286c9e58262bfbea698dd',
     maxBytes: 48 * 1024 * 1024,
+    publishedAt: '2026-10-21T05:26:13Z',
   },
   arm64: {
     url: `https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_DRIVER_VERSION}/cua-driver-rs-${CUA_DRIVER_VERSION}-linux-arm64-binary.tar.gz`,
     sha256: '80c9ae66bc7322052dd426c6133c96086b33894bf06c972bca8215384400b33d',
     maxBytes: 48 * 1024 * 1024,
+    publishedAt: '2026-10-21T05:26:13Z',
   },
 }
 
@@ -86,7 +109,13 @@ export class DesktopToolsError extends Error {
   constructor(
     message: string,
     readonly code:
-      'UNSUPPORTED' | 'DOWNLOAD_FAILED' | 'CHECKSUM' | 'UNPACK_FAILED' | 'INSTALL_FAILED',
+      | 'UNSUPPORTED'
+      | 'TURNED_OFF'
+      | 'TOO_NEW'
+      | 'DOWNLOAD_FAILED'
+      | 'CHECKSUM'
+      | 'UNPACK_FAILED'
+      | 'INSTALL_FAILED',
   ) {
     super(message)
     this.name = 'DesktopToolsError'
@@ -102,6 +131,17 @@ export function desktopToolsPlan(
     return { tigervnc: null, cuaDriver: null }
   }
   return { tigervnc: TIGERVNC[arch] ?? null, cuaDriver: CUA_DRIVER[arch] ?? null }
+}
+
+/**
+ * Why `art` is too new to install at `now`, or null when it has been public for
+ * at least `MIN_RELEASE_AGE_MS`. A date that cannot be read counts as too new.
+ */
+export function releaseAgeRefusal(art: PinnedArtifact, name: string, now: number): string | null {
+  const published = Date.parse(art.publishedAt)
+  if (Number.isFinite(published) && now - published >= MIN_RELEASE_AGE_MS) return null
+  const day = Number.isFinite(published) ? new Date(published).toISOString().slice(0, 10) : '?'
+  return `${name} was published on ${day}. Clawboo installs a release only once it has been public for 14 days. Try again later, or update Clawboo.`
 }
 
 /** Whether each Xvnc found so far is TigerVNC's, by path. */
@@ -138,6 +178,29 @@ export function systemXvnc(
     if (file && isTiger(file)) return file
   }
   return null
+}
+
+/**
+ * The Xvnc agents' displays run on, or why there is none to run.
+ *
+ * The one an administrator named (`xvncPath`) when they named one, and then no
+ * other: it must pass the trust check (screenSettings) before Clawboo runs it
+ * even to ask its version, and must be TigerVNC's, whose options displays are
+ * started with. Otherwise the system's own TigerVNC, then Clawboo's copy.
+ */
+export function xvncProgram(): { path: string | null; problem: string | null } {
+  const named = operatorProgram('xvncPath')
+  if (named) {
+    if (named.problem) return { path: null, problem: named.problem }
+    if (!isTigerVnc(named.path)) {
+      return {
+        path: null,
+        problem: `${named.path} is not TigerVNC's Xvnc (its -version does not say "Xvnc TigerVNC"), and agents' displays are started with TigerVNC's options.`,
+      }
+    }
+    return { path: named.path, problem: null }
+  }
+  return { path: systemXvnc() ?? ownedXvnc(), problem: null }
 }
 
 /** Clawboo's own Xvnc, or null when it is not installed (or not safe to run). */
@@ -196,6 +259,12 @@ export interface DesktopToolsDeps {
   plan?: { tigervnc: PinnedArtifact | null; cuaDriver: PinnedArtifact | null }
   /** The system's own Xvnc, when it has one (then TigerVNC is not downloaded). */
   systemXvnc?: () => string | null
+  /** The time now, for the release-age rule. */
+  now?: () => number
+  /** Why no tool may be downloaded (an administrator turned it off), or null. */
+  installRefusal?: () => string | null
+  /** Why one tool may not be downloaded (an administrator named its program), or null. */
+  downloadRefusal?: (tool: DesktopTool) => string | null
 }
 
 /** How long one download may take in all. */
@@ -479,11 +548,26 @@ export function installDesktopTools(deps: DesktopToolsDeps = {}): Promise<Deskto
 
 async function runInstall(deps: DesktopToolsDeps): Promise<DesktopToolsInstall> {
   const env = deps.env ?? process.env
+  // Turned off outright by an administrator: nothing is fetched, whatever is
+  // missing. Checked first, before the platform, so the answer is the setting.
+  const off = (deps.installRefusal ?? desktopToolsInstallRefusal)()
+  if (off) throw new DesktopToolsError(off, 'TURNED_OFF')
+  const refusal = deps.downloadRefusal ?? desktopToolDownloadRefusal
   const pinned = deps.plan ?? desktopToolsPlan(deps.platform, deps.arch)
   // An Xvnc from the system's own package is used first (its package brings the
-  // libraries it loads), so a second one is not downloaded beside it.
-  const hasSystemXvnc = (deps.systemXvnc ?? (() => systemXvnc()))() !== null
-  const plan = { ...pinned, tigervnc: hasSystemXvnc ? null : pinned.tigervnc }
+  // libraries it loads), so a second one is not downloaded beside it. A tool
+  // whose program an administrator named is never downloaded.
+  // Asked only when TigerVNC could be downloaded: finding the system's Xvnc runs
+  // it (`-version`), and a named Xvnc means no other is run, even for that.
+  const tigerRefused = refusal('tigervnc')
+  const hasSystemXvnc =
+    !tigerRefused &&
+    pinned.tigervnc !== null &&
+    (deps.systemXvnc ?? (() => systemXvnc()))() !== null
+  const plan = {
+    tigervnc: hasSystemXvnc || tigerRefused ? null : pinned.tigervnc,
+    cuaDriver: refusal('cuaDriver') ? null : pinned.cuaDriver,
+  }
   if (!pinned.tigervnc && !pinned.cuaDriver) {
     throw new DesktopToolsError(
       'A screen of its own for each agent needs Linux on x86_64 or arm64.',
@@ -491,10 +575,22 @@ async function runInstall(deps: DesktopToolsDeps): Promise<DesktopToolsInstall> 
     )
   }
   if (!plan.tigervnc && !plan.cuaDriver) {
+    const named = [refusal('tigervnc'), refusal('cuaDriver')].filter((r): r is string => r !== null)
     throw new DesktopToolsError(
-      "Nothing to install: this system's own Xvnc is used.",
+      named.length > 0
+        ? `Nothing to install: ${hasSystemXvnc ? "this system's own Xvnc is used. " : ''}${named.join(' ')}`
+        : "Nothing to install: this system's own Xvnc is used.",
       'UNSUPPORTED',
     )
+  }
+  // A pinned release is installed only once it has been public long enough.
+  const now = (deps.now ?? Date.now)()
+  for (const [art, name] of [
+    [plan.tigervnc, `TigerVNC ${TIGERVNC_VERSION}`],
+    [plan.cuaDriver, `Cua Driver ${CUA_DRIVER_VERSION}`],
+  ] as const) {
+    const tooNew = art ? releaseAgeRefusal(art, name, now) : null
+    if (tooNew) throw new DesktopToolsError(tooNew, 'TOO_NEW')
   }
   const ctx = {
     download: deps.download ?? httpsDownload,

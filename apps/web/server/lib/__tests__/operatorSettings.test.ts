@@ -268,3 +268,90 @@ describe("a person's own setting", () => {
     expect(statSync(operatorFile()).mtimeMs).toBe(before.mtime)
   })
 })
+
+describe("agents' screens: a path and a count", () => {
+  const refusal = (): string => {
+    try {
+      initOperatorSettings()
+    } catch (err) {
+      expect(err).toBeInstanceOf(OperatorSettingsError)
+      return (err as Error).message
+    }
+    throw new Error('expected a refusal')
+  }
+
+  it('pins the screen settings from the file and the environment', () => {
+    writeOperator({
+      computerLinks: 'view',
+      xvncPath: '/usr/bin/Xtigervnc',
+      disableDesktopToolsInstall: true,
+      maxAgentDisplays: 3,
+    })
+    vi.stubEnv('CLAWBOO_CUA_DRIVER_PATH', '/opt/cua/cua-driver')
+    expect(effectiveSetting('computerLinks')).toMatchObject({ value: 'view', source: 'file' })
+    expect(effectiveSetting('xvncPath').value).toBe('/usr/bin/Xtigervnc')
+    expect(effectiveSetting('cuaDriverPath')).toMatchObject({
+      value: '/opt/cua/cua-driver',
+      source: 'environment',
+    })
+    expect(effectiveSetting('disableDesktopToolsInstall').value).toBe(true)
+    expect(effectiveSetting('maxAgentDisplays').value).toBe(3)
+  })
+
+  it('defaults to links on, nothing named, downloads allowed, and no display cap of its own', () => {
+    expect(effectiveSetting('computerLinks').value).toBe('on')
+    expect(effectiveSetting('xvncPath').value).toBeNull()
+    expect(effectiveSetting('cuaDriverPath').value).toBeNull()
+    expect(effectiveSetting('disableDesktopToolsInstall').value).toBe(false)
+    expect(effectiveSetting('maxAgentDisplays').value).toBeNull()
+  })
+
+  it.each([
+    ['relative/Xvnc'],
+    ['/usr/bin/../bin/Xvnc'],
+    ['/usr//bin/Xvnc'],
+    ['/usr/bin/./Xvnc'],
+    ['/usr/bin/'],
+    ['/usr/bin/X\tvnc'],
+  ])('refuses to start on a path not written plainly (%j)', (value) => {
+    writeOperator({ xvncPath: value })
+    expect(refusal()).toMatch(/must be an absolute path with no "\." or "\.\." part/)
+  })
+
+  it('refuses a path from the environment the same way, and a path that is not a string', () => {
+    vi.stubEnv('CLAWBOO_CUA_DRIVER_PATH', 'cua-driver')
+    expect(refusal()).toMatch(/CLAWBOO_CUA_DRIVER_PATH must be an absolute path/)
+    vi.stubEnv('CLAWBOO_CUA_DRIVER_PATH', '')
+    writeOperator({ cuaDriverPath: 7 })
+    expect(refusal()).toMatch(/must be an absolute path/)
+  })
+
+  it('refuses a count out of range or not whole, in the file and the environment', () => {
+    for (const value of [0, 65, 2.5, '3']) {
+      writeOperator({ maxAgentDisplays: value })
+      expect(refusal()).toMatch(/maxAgentDisplays/)
+    }
+    writeOperator({})
+    vi.stubEnv('CLAWBOO_MAX_AGENT_DISPLAYS', 'four')
+    expect(refusal()).toMatch(/CLAWBOO_MAX_AGENT_DISPLAYS must be a whole number/)
+    vi.stubEnv('CLAWBOO_MAX_AGENT_DISPLAYS', '99')
+    expect(refusal()).toMatch(/from 1 to 64/)
+  })
+
+  it('refuses a links value it does not know', () => {
+    writeOperator({ computerLinks: 'control' })
+    expect(refusal()).toMatch(/must be one of: on, view, off/)
+  })
+
+  it('offers none of them in the dashboard: only an administrator sets them', () => {
+    for (const key of [
+      'computerLinks',
+      'xvncPath',
+      'cuaDriverPath',
+      'disableDesktopToolsInstall',
+      'maxAgentDisplays',
+    ] as const) {
+      expect(() => saveUserSetting(key, null as never)).toThrow(PinnedSettingError)
+    }
+  })
+})

@@ -40,12 +40,16 @@ fail=0
 
 echo
 echo "== agents on the server's own user"
-docker run "${COMMON[@]}" "$IMAGE" node /proof/proof.cjs plain || fail=1
+# A runtime folder in memory for the user who runs the agents' displays, as
+# systemd-logind makes one: the display keeps its files there.
+docker run "${COMMON[@]}" --tmpfs /run/user/10001:rw,nosuid,nodev,mode=0700,uid=10001,gid=10001 \
+  -e XDG_RUNTIME_DIR=/run/user/10001 "$IMAGE" node /proof/proof.cjs plain || fail=1
 
 echo
 echo "== agents on their own OS user (CLAWBOO_AGENT_USER)"
 docker run "${COMMON[@]}" -e CLAWBOO_AGENT_USER=clawboo-agent -e STUDIO_ACCESS_TOKEN=proof-token-0123456789abcdef \
-  "$IMAGE" node /proof/proof.cjs agent || fail=1
+  --tmpfs /run/user/10002:rw,nosuid,nodev,mode=0700,uid=10002,gid=10002 \
+  -e CLAWBOO_XVNC_PATH=/usr/bin/Xtigervnc "$IMAGE" node /proof/proof.cjs agent || fail=1
 
 echo
 echo "== the desktop tools install, from the real releases (x86_64, so TigerVNC is included)"
