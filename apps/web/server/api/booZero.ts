@@ -14,6 +14,7 @@ import type { Request, Response } from 'express'
 import { booZeroTeamBriefs, getSetting, setSetting } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../lib/db'
+import { SETTING_BOO_ZERO_DISPLAY_NAME_PREFIX } from '../lib/teamChat/booZero'
 
 /**
  * Clawboo-side display-name override for Boo Zero. The user's primary
@@ -21,9 +22,10 @@ import { getDb } from '../lib/db'
  * picked in OpenClaw onboarding ("Mythos" was seen in production). Clawboo
  * offers an optional onboarding step that sets a friendlier display name
  * (default "Boo Zero"). The override is keyed by agent id so it survives
- * even if the Gateway-side identity is unchanged.
+ * even if the Gateway-side identity is unchanged. Boo Zero's rules read it too
+ * (`booZeroDisplayName`).
  */
-const DISPLAY_NAME_KEY_PREFIX = 'boo-zero:display-name:'
+const DISPLAY_NAME_KEY_PREFIX = SETTING_BOO_ZERO_DISPLAY_NAME_PREFIX
 
 interface TeamBriefBody {
   content?: string

@@ -29,8 +29,8 @@ export function runsChatOnServer(runtime: string | null | undefined): boolean {
 export interface SendNativeAgentParams {
   agentId: string
   sessionKey: string
-  /** The context-injected message delivered to the model (rules block + any @team
-   *  brief/history prepended by ChatPanel). */
+  /** The words the model reads. In Boo Zero's chat the server puts its rules and the
+   *  named team's activity before them. */
   message: string
   /** The original user text shown in the transcript. */
   displayText: string

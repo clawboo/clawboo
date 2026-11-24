@@ -27,13 +27,14 @@ import {
   runChatTurn,
   stopChatTurn,
 } from '../lib/agentChat/chatHandOffs'
+import { buildBooZeroTurn, type BooZeroTurn } from '../lib/agentChat/booZeroTurn'
 import { agentChatSessionKey, isServerChatAgent } from '../lib/agentChat/driveAgentChat'
 import { actingPerson, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { inRoleScope } from '../lib/roles/guard'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
-import { TEAM_ACTIVITY_OPENER } from '../lib/teamChat/teamActivitySummary'
+import { booZeroDisplayName } from '../lib/teamChat/booZero'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
 
 const STREAM_POLL_MS = 750
@@ -120,7 +121,7 @@ function persistUserEntry(
 }
 
 // POST /api/agents/:agentId/chat  { message, displayText?, entryId?, teamId? }
-export function agentChatIngestPOST(req: Request, res: Response): void {
+export async function agentChatIngestPOST(req: Request, res: Response): Promise<void> {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
     res.status(400).json({ error: 'agentId required' })
@@ -133,9 +134,10 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
     res.status(400).json({ error: 'message required' })
     return
   }
-  // `displayText` is what shows in the transcript; `message` is the context-injected
-  // text delivered to the model (the two differ when the client prepends the rules
-  // block / an @team brief). The persisted user turn shows the display text.
+  // `message` is the person's words, what the model reads after anything the server adds
+  // (Boo Zero's rules and the named team's activity). `displayText` is what shows in the
+  // transcript, when it differs: the dashboard drops a leading @Team from the words the
+  // model reads, and keeps it on screen.
   const displayText =
     typeof body?.displayText === 'string' && body.displayText.trim()
       ? body.displayText.trim()
@@ -143,12 +145,18 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
   // The caller's id for this message. Sent again, it starts no second turn.
   const given = typeof body?.entryId === 'string' && body.entryId !== '' ? body.entryId : null
   let entryId = given ?? `user-${Date.now()}`
+  const namedTeamId = typeof body?.teamId === 'string' ? body.teamId : null
   try {
     const db = getDb()
     if (!isServerChatAgent(db, agentId)) {
       res.status(404).json({ error: 'agent does not chat through the server' })
       return
     }
+    // Boo Zero's chat: the server writes its rules, and the named team's activity, into
+    // the turn. Read before the message is stored, so nothing between storing it and
+    // starting its turn can fail.
+    const handOffs = chatHandsOff(db, agentId)
+    const booZeroName = handOffs ? booZeroDisplayName(db, agentId) : null
     const byPerson = actsAsPerson(req)
     const sessionKey = agentChatSessionKey(db, agentId)
     const store = (): UserEntryWrite =>
@@ -172,15 +180,25 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       return
     }
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
+    // A guest gets the activity of their own teams only, as its own route gives it.
+    const turn: BooZeroTurn | null =
+      booZeroName === null
+        ? null
+        : await buildBooZeroTurn(db, {
+            displayName: booZeroName,
+            handOffs,
+            words: message,
+            teamId: namedTeamId && inRoleScope(req, namedTeamId) ? namedTeamId : null,
+          })
     // Detached (the 202 returns now): the reply streams via the SSE + is persisted
     // server-side. Not aborted on client disconnect (a slow reply survives).
     void runChatTurn({
       db,
       agentId,
-      message,
+      message: turn?.message ?? message,
       mcpBaseUrl,
       // The team the person named with @Team, which Boo Zero's chat hands work to.
-      namedTeamId: typeof body?.teamId === 'string' ? body.teamId : null,
+      namedTeamId,
       words: displayText,
       // The message's own id: what it hands out goes under one main task per team, and
       // every row its turn writes names it (`inReplyTo`).
@@ -188,9 +206,10 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       requestedBy: byPerson ? actingPerson(req) : null,
       // A caller that failed the person check keeps its chat and can start no work from
       // it. A person's message that carries what a team has been doing runs under the
-      // fence, since those words are not theirs (see chatHandOffs).
+      // fence, since those words are not theirs (see chatHandOffs). The server knows,
+      // since it adds them (booZeroTurn reads an older dashboard's message as before).
       ...(byPerson
-        ? { carriesTeamActivity: message.includes(TEAM_ACTIVITY_OPENER) }
+        ? { carriesTeamActivity: turn?.carriesTeamActivity ?? false }
         : { readingResultsFrom: [] }),
     })
     res.status(202).json({ ok: true, entryId })

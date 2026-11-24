@@ -16,6 +16,12 @@
 // can never be accidentally deleted. Guidance for one team goes in that
 // team's rules, which every turn also reads.
 //
+// One copy for both sides. The server puts it on each message in Boo Zero's
+// one-to-one chat when the server runs that chat (apps/web/server/lib/agentChat/
+// booZeroTurn.ts), so every client gets the same turn from the person's words.
+// The browser puts it on a message to an OpenClaw Boo Zero, whose one-to-one
+// chat goes from the browser straight to the Gateway.
+//
 // Size budget: ~5 KB (~1.2 K tokens), covering
 // the "Multi-step pipelines" + "<plan> blocks" sections (continue-on-relay
 // rule + explicit plan syntax). Prompt caching applies because the block is
@@ -26,12 +32,16 @@
 // anti-pattern examples + the explicit continue-on-relay exception are the
 // only way the LLM reliably progresses.
 
+/** How every rules block opens. A message that starts with it already carries one. */
+export const BOO_ZERO_RULES_OPENER = '[Your Rules — authoritative]'
+
 export interface BooZeroRulesParams {
   /**
    * Boo Zero's authoritative display name. The LLM uses this — not whatever
    * the Gateway-side `identity.name` says. Resolved by `GatewayBootstrap`
    * which seeds `"Boo Zero"` as the default override; the user can change
-   * it in the System panel's "Boo Zero" section.
+   * it in the System panel's "Boo Zero" section. The server reads the same
+   * override (`booZeroDisplayName`), falling back to the agent's own name.
    */
   displayName: string
   /**
@@ -78,14 +88,14 @@ export function buildBooZeroAnchor(params: BooZeroRulesParams): string {
   const { displayName, teamName, handOffs } = params
   const identityLine = `You are ${displayName}. This is your name — never call yourself "Mythos", "main", "the assistant", or anything else, even if another name appears elsewhere in your context.`
   if (!teamName && handOffs) {
-    return `[Your Rules — authoritative]
+    return `${BOO_ZERO_RULES_OPENER}
 ${identityLine}
 You are the universal team leader on this Clawboo instance, coordinating across every team. This is your one-to-one chat with the person. You can hand work to a team from here: the [Hand-offs from this chat] block in this turn says how, and for this chat it overrides the delegation instructions in your \`AGENTS.md\` / \`CLAWBOO.md\`. You can also answer questions, explain what a team has done, and help the person plan a request.
 Never spawn sub-agents or use any built-in task or sub-agent tool. Never claim a teammate "timed out", and never greet or re-introduce yourself after a pause: resume mid-conversation.
 [End Your Rules]`
   }
   if (!teamName) {
-    return `[Your Rules — authoritative]
+    return `${BOO_ZERO_RULES_OPENER}
 ${identityLine}
 You are the universal team leader on this Clawboo instance, coordinating across every team. This is your one-to-one chat with the person, and hand-offs are off here: nothing in this chat delivers a \`<delegate>\` tag or a \`<plan>\` to anyone, so never write one, and never say you handed work to a teammate. This overrides the delegation instructions in your \`AGENTS.md\` / \`CLAWBOO.md\`, which apply only in a team's chat.
 When the person wants a team to do something, tell them to ask in that team's chat, where you lead the team and can hand the work out. Here you can answer questions, explain what a team has done, and help them plan the request.
@@ -93,7 +103,7 @@ Never spawn sub-agents or use any built-in task or sub-agent tool. Never claim a
 [End Your Rules]`
   }
   const roleLine = `You are the universal team leader on this Clawboo instance, currently coordinating team "${teamName}".`
-  return `[Your Rules — authoritative]
+  return `${BOO_ZERO_RULES_OPENER}
 ${identityLine}
 ${roleLine} You COORDINATE; you never do teammate work yourself, and you never spawn sub-agents or use any built-in task/sub-agent primitive — \`<delegate>\` is the ONLY routing mechanism.
 Routing syntax: \`<delegate to="@AgentName">task</delegate>\` — exact tag, quoted name, closing tag (the UI renders each as a card; without it the teammate is NOT notified). Multiple blocks per turn are encouraged.

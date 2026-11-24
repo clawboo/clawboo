@@ -1,8 +1,10 @@
 // Boo Zero's own chat. On a runtime the server runs, its hand-offs are real: an @Team
 // goes to the server with the message, the work shows as the team chat's card, and the
-// reply carries no "not handed off" note. On OpenClaw the chat runs in the Gateway, and
-// the server only forwards its replies, unread: no team work starts, the rules say
-// hand-offs are off, and a tag in the reply shows as the note.
+// reply carries no "not handed off" note. The server adds Boo Zero's rules and the
+// team's activity there, so the browser sends the words alone. On OpenClaw the chat runs
+// in the Gateway, and the server only forwards its replies, unread: no team work starts,
+// the browser adds rules that say hand-offs are off, and a tag in the reply shows as the
+// note.
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
@@ -105,14 +107,19 @@ const renderPanel = () =>
   )
 
 let posted: Array<Record<string, unknown>>
+let activityReads: number
 
 beforeEach(() => {
   posted = []
+  activityReads = 0
   server.use(
     http.get('/api/chat-history', () => HttpResponse.json({ entries: [] })),
     http.post('/api/chat-history', () => HttpResponse.json({ ok: true })),
     http.get('/api/board/:taskId', () => HttpResponse.json({ task: {}, comments: [] })),
-    http.get('/api/teams/:id/activity-summary', () => HttpResponse.json({ content: 'recent' })),
+    http.get('/api/teams/:id/activity-summary', () => {
+      activityReads += 1
+      return HttpResponse.json({ content: 'recent' })
+    }),
     http.post('/api/agents/:agentId/chat', async ({ request }) => {
       posted.push((await request.json()) as Record<string, unknown>)
       return HttpResponse.json({ ok: true }, { status: 202 })
@@ -252,7 +259,7 @@ describe.each(['clawboo-native', 'claude-code', 'codex', 'hermes'])(
       expect(screen.queryByTestId('board-task-card')).toBeNull()
     })
 
-    it('tells the server which team an @Team names, and the rules say it can hand off', async () => {
+    it('tells the server which team an @Team names, and sends the words alone: the server adds the rules and the activity', async () => {
       seed(runtime, key, null)
       renderPanel()
       const input = screen.getByTestId('chat-composer-input')
@@ -262,11 +269,11 @@ describe.each(['clawboo-native', 'claude-code', 'codex', 'hermes'])(
       await waitFor(() => expect(posted).toHaveLength(1))
       expect(posted[0]!['teamId']).toBe('team-1')
       expect(posted[0]!['displayText']).toBe('@Growth fix the parser')
-      expect(posted[0]!['message']).toContain('You can hand work to a team from here')
-      expect(posted[0]!['message']).not.toMatch(/hand-offs are off/i)
+      expect(posted[0]!['message']).toBe('fix the parser')
+      expect(activityReads).toBe(0)
     })
 
-    it('with no @Team, names no team', async () => {
+    it('with no @Team, names no team and sends the words as written', async () => {
       seed(runtime, key, null)
       renderPanel()
       const input = screen.getByTestId('chat-composer-input')
@@ -275,6 +282,7 @@ describe.each(['clawboo-native', 'claude-code', 'codex', 'hermes'])(
 
       await waitFor(() => expect(posted).toHaveLength(1))
       expect(posted[0]).not.toHaveProperty('teamId')
+      expect(posted[0]!['message']).toBe('fix the parser')
     })
   },
 )
@@ -294,6 +302,8 @@ describe('an OpenClaw Boo Zero: the honest exception', () => {
     await waitFor(() => expect(call).toHaveBeenCalledWith('chat.send', expect.anything()))
     const sent = JSON.stringify(call.mock.calls.find((c) => c[0] === 'chat.send'))
     expect(sent).toMatch(/hand-offs are off here/i)
+    // The browser still reads the team's activity for it, since no server turn does.
+    expect(sent).toContain('recent')
     expect(posted).toEqual([])
   })
 
@@ -330,7 +340,7 @@ describe("another agent's one-to-one chat", () => {
 describe('when the browser and the server disagree about who Boo Zero is', () => {
   const key = 'agent:bz:codex'
 
-  it('the browser thinks so and the server does not: nothing hides, and the rules say off', async () => {
+  it('the browser thinks so and the server does not: nothing hides, and the words go as written', async () => {
     seed('codex', key, null, false)
     useChatStore
       .getState()
@@ -343,8 +353,8 @@ describe('when the browser and the server disagree about who Boo Zero is', () =>
     fireEvent.change(input, { target: { value: 'fix it' } })
     fireEvent.keyDown(input, { key: 'Enter' })
     await waitFor(() => expect(posted).toHaveLength(1))
-    expect(posted[0]!['message']).toMatch(/hand-offs are off here/i)
-    expect(posted[0]!['message']).not.toContain('Hand-offs from this chat')
+    // The server decides who gets Boo Zero's rules, and this agent is not its Boo Zero.
+    expect(posted[0]!['message']).toBe('fix it')
   })
 
   it('the server says so and the browser does not: an @Team still names the team', async () => {

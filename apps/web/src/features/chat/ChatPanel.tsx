@@ -35,7 +35,7 @@ import {
 import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
 import { nextSeq } from '@/lib/sequenceKey'
-import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
+import { buildBooZeroRulesBlock } from '@clawboo/team-orchestration'
 import { BoardTaskCard } from '@/features/group-chat/BoardTaskCard'
 import { QuestionAnswer } from '@/features/board/QuestionAnswer'
 import { openQuestionOf } from '@/features/board/boardStatus'
@@ -365,8 +365,9 @@ export function ChatPanel({
       }
 
       // Transport: server-run agents run server-side + stream over SSE; OpenClaw agents
-      // ride the Gateway. `outbound` is the (context-injected) text delivered to the
-      // model; `display` is what shows in the transcript (undefined = same as outbound).
+      // ride the Gateway. `outbound` is the text sent for the model (an OpenClaw Boo
+      // Zero's carries its rules, added below); `display` is what shows in the
+      // transcript (undefined = same as outbound).
       const deliver = async (
         outbound: string,
         display: string | undefined,
@@ -392,25 +393,34 @@ export function ChatPanel({
         }
       }
 
-      // In Boo Zero's individual chat, inject the rules block + (when the
-      // user `@TeamName`-mentions) the matching team brief. The rules block
-      // carries identity + load-bearing behavioral rules (delegate first,
-      // don't do work yourself, no Task tool, no resume greetings) and
-      // fires on EVERY message so the LLM stays consistent. Outside Boo
-      // Zero's chat (regular agent 1:1), this path is bypassed — team
-      // agents have their own AGENTS.md / SOUL.md identity.
+      // Boo Zero's individual chat. An @TeamName at the start names a team, and Boo
+      // Zero reads what that team has been doing this turn. Outside Boo Zero's chat
+      // (a regular agent's 1:1), this path is bypassed: team agents have their own
+      // AGENTS.md / SOUL.md identity.
       if (isBooZeroChat) {
-        // No teamName in the 1:1 chat path — Boo Zero coordinates across
-        // every team here, not within any single team's scope.
+        const teamCandidates = teams.map((t) => ({ id: t.id, name: t.name }))
+        const mention = parseTeamOrAgentMention(message, teamCandidates)
+        const teamId = mention.kind === 'team' && mention.targetId ? mention.targetId : undefined
+
+        // A chat the server runs: the server puts Boo Zero's rules and the team's
+        // activity before the words, so this sends the words alone and the team's id.
+        // The @Team stays on screen and out of the words the model reads, as before.
+        if (isServerChat) {
+          await deliver(teamId ? mention.cleanedMessage || message : message, message, teamId)
+          return
+        }
+
+        // An OpenClaw Boo Zero, whose chat goes from here straight to the Gateway: the
+        // rules block is added here. It carries identity and the load-bearing rules
+        // (delegate first, don't do work yourself, no Task tool, no resume greetings)
+        // on EVERY message so the model stays consistent. No teamName in the 1:1 chat:
+        // Boo Zero coordinates across every team here.
         const identityBlock = buildBooZeroRulesBlock({
           displayName: agent.name,
           handOffs: handOffsWork,
         })
 
-        const teamCandidates = teams.map((t) => ({ id: t.id, name: t.name }))
-        const mention = parseTeamOrAgentMention(message, teamCandidates)
-
-        if (mention.kind === 'team' && mention.targetId) {
+        if (teamId) {
           // Pull the team's REAL recent activity from the SERVER on demand: its
           // Boo-Zero brief + board state + recent team chat, composed + capped
           // server-side (`buildTeamActivitySummary`). This works regardless of what
@@ -421,9 +431,7 @@ export function ChatPanel({
           // Best-effort: a miss injects nothing.
           let activityBlock: string | null = null
           try {
-            const res = await apiFetch(
-              `/api/teams/${encodeURIComponent(mention.targetId)}/activity-summary`,
-            )
+            const res = await apiFetch(`/api/teams/${encodeURIComponent(teamId)}/activity-summary`)
             if (res.ok) {
               const body = (await res.json()) as { content?: string | null }
               if (typeof body.content === 'string' && body.content.trim()) {
@@ -438,7 +446,7 @@ export function ChatPanel({
           const sections = [identityBlock, activityBlock, mention.cleanedMessage].filter(
             (s): s is string => Boolean(s),
           )
-          await deliver(sections.join('\n\n'), message, mention.targetId)
+          await deliver(sections.join('\n\n'), message, teamId)
           return
         }
 

@@ -242,8 +242,8 @@ export interface DriveAgentChatParams {
   agentId: string
   /** The person whose message started this turn, when one did (see runPerson.ts). */
   startedBy?: PersonRef | null
-  /** The context-injected message delivered to the model (rules block + any @team
-   *  brief/history are prepended client-side, exactly as the Gateway path did). */
+  /** The message delivered to the model. In Boo Zero's chat it already carries the
+   *  rules and any @Team activity, which the ingest puts before the words (booZeroTurn). */
   message: string
   mcpBaseUrl: string | null
   /** TEST seam: inject the adapter, bypassing the runtime guard + the real driver
