@@ -137,9 +137,8 @@ describe('programTrustProblem', () => {
       ['/', rootDir(0o757)],
     ] as const) {
       const fsx = { ...good(), [dir]: entry }
-      expect(programTrustProblem('/opt/vnc/Xvnc', fakeFs(fsx))).toMatch(
-        new RegExp(`^${dir.replace(/\//g, '\\/')}, a folder above`),
-      )
+      const problem = programTrustProblem('/opt/vnc/Xvnc', fakeFs(fsx)) ?? '(no problem found)'
+      expect(problem.startsWith(`${dir}, a folder above`), problem).toBe(true)
     }
   })
 })

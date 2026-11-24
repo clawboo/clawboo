@@ -384,10 +384,13 @@ function parseSeconds(spec: KeySpec, raw: number, where: string): number {
 const MAX_PATH_CHARS = 1024
 
 /**
- * An absolute path, written the one plain way: `path.normalize` leaves it as it
- * is and it ends in no separator. So a value names the file it reads as, and
- * no `..` part or doubled slash can make it name another. Not echoed back: a
- * path is not a secret, but the rule is the same for every refusal here.
+ * An absolute path, written the one plain way: `path.posix.normalize` leaves it
+ * as it is and it ends in no slash. So a value names the file it reads as, and
+ * no `..` part or doubled slash can make it name another. POSIX rules on every
+ * system: these settings name Linux programs, and the host's own rules would
+ * turn `/opt/x` into `\opt\x` on Windows and refuse to start over a setting
+ * that system never uses. Not echoed back: a path is not a secret, but the rule
+ * is the same for every refusal here.
  */
 function parsePath(raw: string, where: string): string {
   const value = raw.trim()
@@ -395,9 +398,9 @@ function parsePath(raw: string, where: string): string {
     value.length > MAX_PATH_CHARS ||
     // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f\u007f]/.test(value) ||
-    !path.isAbsolute(value) ||
-    path.normalize(value) !== value ||
-    (value.length > 1 && (value.endsWith('/') || value.endsWith(path.sep)))
+    !path.posix.isAbsolute(value) ||
+    path.posix.normalize(value) !== value ||
+    (value.length > 1 && value.endsWith('/'))
   ) {
     throw new OperatorSettingsError(
       `${where} must be an absolute path with no "." or ".." part and no doubled or trailing slash.`,
