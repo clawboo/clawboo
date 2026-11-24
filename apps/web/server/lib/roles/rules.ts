@@ -442,6 +442,8 @@ export const ROUTE_RULES: Readonly<Record<string, RouteRule>> = {
   // Connects to OpenClaw's Gateway, whose socket is the system's.
   'POST /api/agents/registry/connect': system,
   'POST /api/agents/cleanup-ghosts': setup,
+  // The handler keeps a guest to the agents of their teams.
+  'GET /api/agents/chat/heads': see(list),
   'GET /api/agents/:agentId': see(agent()),
   'PATCH /api/agents/:agentId/model': setup,
   'DELETE /api/agents/:agentId': setup,

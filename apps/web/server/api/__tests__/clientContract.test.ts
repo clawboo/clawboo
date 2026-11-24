@@ -266,6 +266,7 @@ const PINNED_ROUTES = [
   'GET /api/agents/registry/health',
   'POST /api/agents/registry/connect',
   'POST /api/agents/cleanup-ghosts',
+  'GET /api/agents/chat/heads',
   'GET /api/agents/:agentId',
   'PATCH /api/agents/:agentId/model',
   'DELETE /api/agents/:agentId',
@@ -461,6 +462,7 @@ const CHAT_MESSAGE_FIELDS = [
   'origin',
   'fromCaller',
   'person',
+  'inReplyTo',
 ]
 const CHAT_DELTA_FIELDS = ['sessionKey', 'runId', 'text']
 const CURSOR_FIELDS = ['cursor']

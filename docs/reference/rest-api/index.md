@@ -192,11 +192,11 @@ Something that stops or restarts a server (a stop script, an updater, a process 
 
 ## Route index
 
-The router registers 297 routes: 127 `GET`, 116 `POST`, 25 `DELETE`, 15 `PUT`, 14 `PATCH`. Each belongs to one page:
+The router registers 298 routes: 128 `GET`, 116 `POST`, 25 `DELETE`, 15 `PUT`, 14 `PATCH`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                                                                                                                         |
 | ---------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Agents](/reference/rest-api/agents)                 | 34     | `/api/agents*`: list, create, sync, delete, move, model, agent files, sessions, workspaces, browser screenshots, the live screen and take over, the native shell switch, 1:1 agent chats; `/api/computer-link/*`, `/api/computer/tools/install`        |
+| [Agents](/reference/rest-api/agents)                 | 36     | `/api/agents*`: list, create, sync, delete, move, model, agent files, sessions, workspaces, browser screenshots, the live screen and take over, the native shell switch, 1:1 agent chats; `/api/computer-link/*`, `/api/computer/tools/install`        |
 | [Teams](/reference/rest-api/teams)                   | 34     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat, task id letters, labels), `/api/team-rules/:teamId`, `/api/team-verify-command/:teamId`, `/api/team-plan-approval/:teamId`, `/api/team-agent-wakes/:teamId`, `/api/team-chat*` |
 | [Board](/reference/rest-api/board)                   | 40     | `/api/board*`: tasks, claim, status changes, comments, labels, read state, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview, a job's limit of runs; `/api/pauses*`                                              |
 | [Home](/reference/rest-api/home)                     | 32     | `/api/home*`: one team's Home or all teams, goals, goal updates, KPIs and their values, pages and their revisions, Home settings, weekly updates                                                                                                       |

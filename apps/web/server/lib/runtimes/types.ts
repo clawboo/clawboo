@@ -80,4 +80,11 @@ export interface RuntimeRunContext {
   } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>
+  /**
+   * The `entryId` of the message a one-to-one chat turn answers. A runtime that
+   * writes its own reply into the chat (Clawboo Native) puts it on that row as
+   * `inReplyTo`. Absent for a turn the server started by itself, and for any run
+   * that is not a one-to-one chat turn.
+   */
+  chatInReplyTo?: string | null
 }

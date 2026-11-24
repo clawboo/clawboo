@@ -2,17 +2,23 @@
 // Native (including the Boo-Zero personal chat), Claude Code, Codex and Hermes.
 // Mirrors the team-chat thin-client surface: POST ingest (persist the user turn +
 // drive ONE conversational turn detached → 202) + a GET SSE stream (a pure DB-tail
-// of the agent's 1:1 key + the live delta bus). OpenClaw agents keep the Gateway
+// of the agent's 1:1 key + the live delta bus) + a heads read (each chat's newest
+// row id, where its stream's `since` picks up). OpenClaw agents keep the Gateway
 // 1:1 path; the ingest 404s them.
 
+import { randomUUID } from 'node:crypto'
+
 import {
+  agents,
   chatMessages,
   latestChatMessageId,
   listChatHandOffTasks,
   listChatMessagesSince,
   type ClawbooDb,
 } from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import type { PersonRef } from '@clawboo/protocol'
+import { eq, inArray, isNull } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import {
@@ -25,6 +31,7 @@ import { agentChatSessionKey, isServerChatAgent } from '../lib/agentChat/driveAg
 import { actingPerson, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
+import { inRoleScope } from '../lib/roles/guard'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { TEAM_ACTIVITY_OPENER } from '../lib/teamChat/teamActivitySummary'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
@@ -32,9 +39,28 @@ import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
 const STREAM_POLL_MS = 750
 const STREAM_KEEPALIVE_MS = 20_000
 
+/** The most agents one heads read may name. */
+const HEADS_MAX_AGENTS = 200
+/** An agent id: what the server mints (`native-<name>-<hex>`), with room for others. */
+const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,199}$/
+
+const log = createLogger('agent-chat-route')
+
+/** How storing a message went. */
+type UserEntryWrite =
+  /** A new row: its turn runs. */
+  | 'stored'
+  /** This chat already holds a row with that id: the same message sent again. */
+  | 'duplicate'
+  /** Another chat holds a row with that id (ids are unique across every chat). */
+  | 'in_use'
+  /** The write failed. Not read as a duplicate: the turn runs, as it always has. */
+  | 'failed'
+
 /** Persist the user's message under the agent's 1:1 session so the SSE tail replays
- *  it AND it's durable. Idempotent on entryId (the optimistic client bubble + this
- *  replay share the id → the client dedups). */
+ *  it AND it's durable. The insert decides whether this is a new message: an id that
+ *  is already stored inserts nothing, and the row that holds it says whose it is (the
+ *  optimistic client bubble and this replay share the id, so the client dedups). */
 function persistUserEntry(
   db: ClawbooDb,
   sessionKey: string,
@@ -42,10 +68,12 @@ function persistUserEntry(
   entryId: string,
   person: PersonRef | null,
   byPerson: boolean,
-): void {
+): UserEntryWrite {
   const now = Date.now()
+  let changes: number
   try {
-    db.insert(chatMessages)
+    changes = db
+      .insert(chatMessages)
       .values({
         sessionKey,
         gatewayUrl: 'native',
@@ -70,9 +98,24 @@ function persistUserEntry(
         }),
       })
       .onConflictDoNothing()
-      .run()
-  } catch {
-    // best-effort
+      .run().changes
+  } catch (err) {
+    log.warn({ err, sessionKey }, 'could not store a chat message')
+    return 'failed'
+  }
+  if (changes > 0) return 'stored'
+  try {
+    const holder = db
+      .select({ sessionKey: chatMessages.sessionKey })
+      .from(chatMessages)
+      .where(eq(chatMessages.entryId, entryId))
+      .get()
+    // Gone again between the two statements: nothing to call it a duplicate of.
+    if (!holder) return 'failed'
+    return holder.sessionKey === sessionKey ? 'duplicate' : 'in_use'
+  } catch (err) {
+    log.warn({ err, sessionKey }, 'could not read which chat holds a message id')
+    return 'failed'
   }
 }
 
@@ -97,7 +140,9 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
     typeof body?.displayText === 'string' && body.displayText.trim()
       ? body.displayText.trim()
       : message
-  const entryId = typeof body?.entryId === 'string' ? body.entryId : `user-${Date.now()}`
+  // The caller's id for this message. Sent again, it starts no second turn.
+  const given = typeof body?.entryId === 'string' && body.entryId !== '' ? body.entryId : null
+  let entryId = given ?? `user-${Date.now()}`
   try {
     const db = getDb()
     if (!isServerChatAgent(db, agentId)) {
@@ -105,14 +150,27 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       return
     }
     const byPerson = actsAsPerson(req)
-    persistUserEntry(
-      db,
-      agentChatSessionKey(db, agentId),
-      displayText,
-      entryId,
-      personOf(req),
-      byPerson,
-    )
+    const sessionKey = agentChatSessionKey(db, agentId)
+    const store = (): UserEntryWrite =>
+      persistUserEntry(db, sessionKey, displayText, entryId, personOf(req), byPerson)
+    let write = store()
+    if (!given && (write === 'duplicate' || write === 'in_use')) {
+      // The server's own id met another message's from the same millisecond. That is
+      // no retry, so this message gets an id of its own.
+      entryId = `user-${Date.now()}-${randomUUID().slice(0, 8)}`
+      write = store()
+    }
+    if (write === 'in_use') {
+      res.status(409).json({ error: 'entry_id_in_use' })
+      return
+    }
+    // One run per message, ever: a message already stored here started its turn when
+    // it first arrived, whatever came of it. A caller retries a failed or refused
+    // turn with a new id.
+    if (write === 'duplicate') {
+      res.status(202).json({ ok: true, entryId, duplicate: true })
+      return
+    }
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Detached (the 202 returns now): the reply streams via the SSE + is persisted
     // server-side. Not aborted on client disconnect (a slow reply survives).
@@ -124,8 +182,8 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       // The team the person named with @Team, which Boo Zero's chat hands work to.
       namedTeamId: typeof body?.teamId === 'string' ? body.teamId : null,
       words: displayText,
-      // The message's own id: what it hands out goes under one main task per team, across
-      // a retry of this request too.
+      // The message's own id: what it hands out goes under one main task per team, and
+      // every row its turn writes names it (`inReplyTo`).
       messageId: entryId,
       requestedBy: byPerson ? actingPerson(req) : null,
       // A caller that failed the person check keeps its chat and can start no work from
@@ -135,7 +193,60 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
         ? { carriesTeamActivity: message.includes(TEAM_ACTIVITY_OPENER) }
         : { readingResultsFrom: [] }),
     })
-    res.status(202).json({ ok: true })
+    res.status(202).json({ ok: true, entryId })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// GET /api/agents/chat/heads?agents=a,b: each server-run chat's newest row id, the
+// same head its stream starts from, so `?since=<head>` on that stream sends exactly
+// what comes after. No `agents`: every agent the server chats for that is not
+// archived. OpenClaw agents and unknown ids are left out. A chat with no rows reads 0.
+export function agentChatHeadsGET(req: Request, res: Response): void {
+  const raw = req.query['agents']
+  if (raw !== undefined && typeof raw !== 'string') {
+    res.status(400).json({ error: 'invalid_agents' })
+    return
+  }
+  let named: string[] | null = null
+  if (raw !== undefined) {
+    named = raw
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id !== '')
+    if (named.length > HEADS_MAX_AGENTS) {
+      res.status(400).json({ error: 'too_many_agents', max: HEADS_MAX_AGENTS })
+      return
+    }
+    if (named.some((id) => !AGENT_ID.test(id))) {
+      res.status(400).json({ error: 'invalid_agent_id' })
+      return
+    }
+  }
+  try {
+    const db = getDb()
+    const rows =
+      named === null
+        ? db
+            .select({ id: agents.id, teamId: agents.teamId })
+            .from(agents)
+            .where(isNull(agents.archivedAt))
+            .all()
+        : named.length === 0
+          ? []
+          : db
+              .select({ id: agents.id, teamId: agents.teamId })
+              .from(agents)
+              .where(inArray(agents.id, [...new Set(named)]))
+              .all()
+    const heads: Record<string, number> = {}
+    for (const row of rows) {
+      // A guest reads only the chats of their own teams (lib/roles).
+      if (!isServerChatAgent(db, row.id) || !inRoleScope(req, row.teamId)) continue
+      heads[row.id] = latestChatMessageId(db, [agentChatSessionKey(db, row.id)])
+    }
+    res.json({ heads })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

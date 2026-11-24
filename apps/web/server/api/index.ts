@@ -98,7 +98,12 @@ import {
   agentScreenshotCapturePOST,
   agentScreenshotGET,
 } from './agents'
-import { agentChatIngestPOST, agentChatStopPOST, agentChatStreamGET } from './agentChat'
+import {
+  agentChatHeadsGET,
+  agentChatIngestPOST,
+  agentChatStopPOST,
+  agentChatStreamGET,
+} from './agentChat'
 import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
 import { teamActivitySummaryGET } from './teamActivity'
 import { teamMemberRolesGET } from './teamMemberRoles'
@@ -521,6 +526,8 @@ router.post('/api/agents/sync', agentsSyncPOST)
 router.get('/api/agents/registry/health', agentsRegistryHealthGET)
 router.post('/api/agents/registry/connect', agentsRegistryConnectPOST)
 router.post('/api/agents/cleanup-ghosts', agentsCleanupPOST)
+// Each server-run 1:1 chat's newest row id (see agentChat.ts).
+router.get('/api/agents/chat/heads', agentChatHeadsGET)
 router.get('/api/agents/:agentId', agentGET)
 router.patch('/api/agents/:agentId/model', agentModelPATCH)
 router.delete('/api/agents/:agentId', agentsDELETE)

@@ -38,6 +38,7 @@ import type {
 import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
 import { getDb, getDbPath, resetDb } from '../../db'
 import { homeDispatchMutex } from '../../executorRunner'
+import { TURN_TOO_LARGE_TEXT } from '../../runFailureText'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
@@ -1290,5 +1291,154 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     expect(ref).toBeTruthy()
     expect(during).toEqual({ person: ada, basis: 'started' })
     expect(runPersonForRef(ref, 'codex-p')).toBeNull()
+  })
+
+  // A client that posts into a chat reads the rows its message produced by this field:
+  // two queued messages to one agent are not always answered in the order they came.
+  describe('the message a turn answers', () => {
+    type Row = { kind: string; text: string; inReplyTo?: string }
+    const rows = (sk: string): Row[] =>
+      db
+        .select()
+        .from(chatMessages)
+        .where(eq(chatMessages.sessionKey, sk))
+        .all()
+        .map((r) => JSON.parse(r.data as string) as Row)
+    const CC = directChatSessionKey('cc-x', 'claude-code')
+    const once = (...events: Array<Record<string, unknown>>): FakeAdapter =>
+      new FakeAdapter((run) =>
+        (async function* () {
+          let seq = 0
+          for (const ev of events) yield { ...base(run.sessionKey, ++seq), ...ev } as RuntimeEvent
+        })(),
+      )
+    const turn = (adapter: FakeAdapter, inReplyTo?: string): Promise<void> =>
+      driveAgentChat({
+        db,
+        agentId: 'cc-x',
+        message: 'q',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+        ...(inReplyTo ? { inReplyTo } : {}),
+      })
+
+    it('the reply names it, and a turn no message started names none', async () => {
+      seedAgent('cc-x', 'claude-code')
+      await turn(once({ kind: 'done', reason: 'success', summary: 'Hello' }), 'msg-1')
+      await turn(once({ kind: 'done', reason: 'success', summary: 'Results are in' }))
+      expect(rows(CC)).toEqual([
+        expect.objectContaining({ kind: 'assistant', text: 'Hello', inReplyTo: 'msg-1' }),
+        expect.objectContaining({ kind: 'assistant', text: 'Results are in' }),
+      ])
+      expect(rows(CC)[1]).not.toHaveProperty('inReplyTo')
+    })
+
+    it('so does the notice of a turn that failed, or ran out of room', async () => {
+      seedAgent('cc-x', 'claude-code')
+      await turn(once({ kind: 'error', code: 'auth', message: 'no key', fatal: true }), 'msg-f')
+      const overflow = new ResumableFakeAdapter(
+        (run) =>
+          (async function* () {
+            yield {
+              ...base(run.sessionKey, 1),
+              kind: 'error',
+              code: 'context_overflow',
+              message: 'prompt is too long',
+              fatal: true,
+            } as RuntimeEvent
+          })(),
+        'sess-1',
+      )
+      await turn(overflow, 'msg-o')
+      expect(rows(CC).map((r) => [r.kind, r.inReplyTo])).toEqual([
+        ['meta', 'msg-f'],
+        ['meta', 'msg-o'],
+      ])
+      expect(rows(CC)[1]!.text).toBe(TURN_TOO_LARGE_TEXT)
+    })
+
+    it('so does the notice of a turn a budget or a pause refused', async () => {
+      seedAgent('cc-x', 'claude-code')
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 100, mode: 'cap' })
+      recordSpend(db, 'agent', 'cc-x', 150)
+      await turn(once({ kind: 'done', reason: 'success', summary: 'hi' }), 'msg-b')
+      placePause(db, { kind: 'agent', id: 'cc-x' })
+      await turn(once({ kind: 'done', reason: 'success', summary: 'hi' }), 'msg-p')
+      expect(rows(CC).map((r) => [r.kind, r.inReplyTo])).toEqual([
+        ['meta', 'msg-b'],
+        ['meta', 'msg-p'],
+      ])
+    })
+
+    it("hands it to the run, for the native driver's own reply", async () => {
+      seedAgent('native-x', 'clawboo-native')
+      const seen: Array<string | null | undefined> = []
+      for (const inReplyTo of ['msg-n', undefined]) {
+        await driveAgentChat({
+          db,
+          agentId: 'native-x',
+          message: 'q',
+          mcpBaseUrl: null,
+          ...(inReplyTo ? { inReplyTo } : {}),
+          makeAdapter: (_agentId: string, ctx: RuntimeRunContext) => {
+            seen.push(ctx.chatInReplyTo)
+            return once({ kind: 'done', reason: 'success', summary: 'ok' })
+          },
+        })
+      }
+      expect(seen).toEqual(['msg-n', undefined])
+    })
+
+    it("a pause's note names the turn it stopped, and none when it stopped several", async () => {
+      seedAgent('native-x', 'clawboo-native')
+      const NOTE = 'Stopped: this agent is paused.'
+      const notes = (): Row[] =>
+        rows(nativeChatSessionKey('native-x')).filter((r) => r.text === NOTE)
+      const hanging = (): FakeAdapter => {
+        const hold = deferred()
+        const adapter = new FakeAdapter((run) =>
+          (async function* () {
+            await hold.promise
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+          })(),
+        )
+        adapter.onAbort = hold.resolve
+        return adapter
+      }
+      const start = (adapter: FakeAdapter, inReplyTo: string): Promise<void> =>
+        driveAgentChat({
+          db,
+          agentId: 'native-x',
+          message: 'q',
+          mcpBaseUrl: null,
+          inReplyTo,
+          makeAdapter: () => adapter,
+        })
+      const covers = ({ agentId }: { agentId: string }): boolean => agentId === 'native-x'
+
+      const alone = hanging()
+      const one = start(alone, 'msg-1')
+      await untilRunning(alone)
+      await stopPausedAgentChats(db, covers, NOTE)
+      await one
+      expect(notes()).toEqual([expect.objectContaining({ inReplyTo: 'msg-1' })])
+
+      setRunSlotsForTests(createRunSlots(1))
+      try {
+        const running = hanging()
+        const first = start(running, 'msg-2')
+        await untilRunning(running)
+        const queued = hanging()
+        const second = start(queued, 'msg-3')
+        await tick()
+        await stopPausedAgentChats(db, covers, NOTE)
+        await Promise.all([first, second])
+        expect(queued.startCalls).toBe(0)
+      } finally {
+        setRunSlotsForTests(null)
+      }
+      expect(notes()).toHaveLength(2)
+      expect(notes()[1]).not.toHaveProperty('inReplyTo')
+    })
   })
 })

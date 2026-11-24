@@ -70,8 +70,11 @@ describe('native driver: what reaches the 1:1 chat', () => {
       .all()
   }
 
-  async function runToResult(opts: StartOpts): Promise<void> {
-    const ctx: RuntimeRunContext = { cwd, homeDir: path.join(sandbox, 'home') }
+  async function runToResult(
+    opts: StartOpts,
+    extra: Partial<RuntimeRunContext> = {},
+  ): Promise<void> {
+    const ctx: RuntimeRunContext = { cwd, homeDir: path.join(sandbox, 'home'), ...extra }
     const driver = createNativeDriver(opts, ctx, { client: textClient('All done.'), mcp: null, db })
     await new Promise<void>((resolve) => {
       driver.onEvent((ev: NativeEvent) => {
@@ -88,6 +91,22 @@ describe('native driver: what reaches the 1:1 chat', () => {
       message: 'do the thing',
     })
     expect(nativeRows('nat-solo')).toHaveLength(1)
+  })
+
+  it('names the message its reply answers, when a message started the turn', async () => {
+    await runToResult(
+      { agentId: 'nat-a', sessionKey: 'agent:nat-a:native', message: 'q' },
+      { chatInReplyTo: 'msg-1' },
+    )
+    await runToResult({ agentId: 'nat-b', sessionKey: 'agent:nat-b:native', message: 'q' })
+    const [answer] = nativeRows('nat-a').map(
+      (row) => JSON.parse((row as { data: string }).data) as TranscriptEntry,
+    )
+    const [unasked] = nativeRows('nat-b').map(
+      (row) => JSON.parse((row as { data: string }).data) as TranscriptEntry,
+    )
+    expect(answer).toMatchObject({ text: 'All done.', inReplyTo: 'msg-1' })
+    expect(unasked).not.toHaveProperty('inReplyTo')
   })
 
   it('two rows in one millisecond stay two rows for the client, in order', () => {
