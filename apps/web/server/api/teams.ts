@@ -9,12 +9,14 @@ import {
   closeRequestsOfTeam,
   closeWaitingPlans,
   detachAgentRoutinesFromTeam,
+  goalIsOnTeam,
   setSetting,
   teams,
   agents,
   listTasks,
   settings,
   teamAgentWakesSettingKey,
+  teamHomeSettingKey,
   stopTasksWaitingToStart,
   teamExists,
   planApprovalSettingKey,
@@ -26,6 +28,7 @@ import { releaseDeleted } from '../lib/agentUser/poolBoot'
 import { actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
+import { inRoleScope } from '../lib/roles/guard'
 import { emitEvent } from '../lib/obs'
 import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardChange'
 import { legacyTeamFolderPath, teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
@@ -104,13 +107,20 @@ export function teamsGET(req: Request, res: Response): void {
     // Tell the client which teams the SERVER orchestrator owns (native, Gateway-free)
     // so `GroupChatPanel` renders them via the REST + SSE thin-client path instead of
     // the browser board-orchestration path. OpenClaw teams read false → legacy path.
-    const teamsWithFlag = rows.map((t) => ({
-      ...t,
-      serverOrchestrated: resolveServerOrchestrated(db, t.id),
-      chatClearedAt: chatClearedAt(db, t.id),
-    }))
+    // A guest gets only the teams their role names (lib/roles), and only those
+    // teams' agents.
+    const teamsWithFlag = rows
+      .filter((t) => inRoleScope(req, t.id))
+      .map((t) => ({
+        ...t,
+        serverOrchestrated: resolveServerOrchestrated(db, t.id),
+        chatClearedAt: chatClearedAt(db, t.id),
+      }))
 
-    res.json({ teams: teamsWithFlag, assignments })
+    res.json({
+      teams: teamsWithFlag,
+      assignments: assignments.filter((a) => inRoleScope(req, a.teamId)),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -366,6 +376,7 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
           teamAgentWakesSettingKey(teamId),
           planApprovalSettingKey(teamId),
           chatClearedSettingKey(teamId),
+          teamHomeSettingKey(teamId),
         ]),
       )
       .run()
@@ -564,7 +575,14 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
     return
   }
   const body = req.body as
-    { message?: unknown; targetAgentId?: unknown; entryId?: unknown; roomId?: unknown } | undefined
+    | {
+        message?: unknown
+        targetAgentId?: unknown
+        entryId?: unknown
+        roomId?: unknown
+        goalId?: unknown
+      }
+    | undefined
   const message = typeof body?.message === 'string' ? body.message.trim() : ''
   if (!message) {
     res.status(400).json({ error: 'message required' })
@@ -602,6 +620,13 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
     } catch (err) {
       log.warn({ err, teamId }, 'could not clear the failure breaker')
     }
+    // A person may file the message under one of this team's goals: the request's
+    // main task, and the work under it, serve that goal.
+    const goalId = typeof body?.goalId === 'string' && body.goalId ? body.goalId : null
+    if (goalId && !goalIsOnTeam(db, goalId, teamId)) {
+      res.status(400).json({ error: 'goal_other_team' })
+      return
+    }
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Fire-and-forget: the orchestrator owns the long-running cascade. Not awaited
     // (the 202 returns now); not aborted on client disconnect.
@@ -612,6 +637,7 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
       person: personOf(req),
       // It still runs, with no person's name on it or on what it hands out.
       ...(byPerson ? {} : { notFromPerson: true }),
+      ...(goalId && byPerson ? { goalId } : {}),
     })
     res.status(202).json({ ok: true })
   } catch (err) {

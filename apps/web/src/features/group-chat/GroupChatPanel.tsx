@@ -26,6 +26,7 @@ import { parseMention } from './parseMention'
 import { useTeamChatStream } from './useTeamChatStream'
 import { inRoom } from './teamTasks'
 import { sendServerTeamMessage, stopServerTeam } from './serverTeamChatSend'
+import { RequestGoalPicker } from './RequestGoalPicker'
 import { appendRule, fetchTeamRules, parseRuleCommand, saveTeamRules } from '@/lib/teamRules'
 import { nextSeq } from '@/lib/sequenceKey'
 import { useToastStore } from '@/stores/toast'
@@ -154,6 +155,8 @@ export function GroupChatPanel({
   // through the pauses between delegated turns. Refreshed by `bumpActivity` on every
   // frame; cleared by the effect below once idle past the grace.
   const [serverBusy, setServerBusy] = useState(false)
+  /** The goal new requests from this chat count toward (null: none). */
+  const [requestGoalId, setRequestGoalId] = useState<string | null>(null)
   const lastActivityRef = useRef(0)
   const bumpActivity = useCallback(() => {
     lastActivityRef.current = Date.now()
@@ -777,9 +780,11 @@ export function GroupChatPanel({
         targetAgentId: targetId,
         targetSessionKey: targetSk,
         message,
+        goalId: requestGoalId,
       })
     },
     [
+      requestGoalId,
       teamId,
       roomId,
       team?.leaderAgentId,
@@ -815,7 +820,7 @@ export function GroupChatPanel({
 
       {/* Header is owned by `GroupChatViewHeader` when embedded. */}
       {!embedded && (
-        <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-border bg-page-header px-4 py-3">
           {team && (
             <span
               className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg text-[16px]"
@@ -1010,6 +1015,8 @@ export function GroupChatPanel({
       <InlineApprovalTray teamId={teamId} />
 
       {chatPause && <PausedNotice pause={chatPause} />}
+
+      <RequestGoalPicker teamId={teamId} goalId={requestGoalId} onChange={setRequestGoalId} />
 
       {/* Composer */}
       <MessageComposer

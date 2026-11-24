@@ -23,16 +23,23 @@
 import {
   agents,
   getActiveRoom,
+  getTask,
   latestChatMessageId,
   listChatMessagesSince,
   listRooms,
   type ClawbooDb,
 } from '@clawboo/db'
-import { buildTeamSessionKey, parseTeamSessionKey } from '@clawboo/team-orchestration'
+import {
+  buildTeamSessionKey,
+  parseTeamSessionKey,
+  type BoardChange,
+} from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { getDb } from '../lib/db'
+import { roleScopeOf } from '../lib/roles/guard'
+import { guestWaitingOnDetail, redactForGuest, titlesOnTeams } from '../lib/roles/redact'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
 import { subscribeBoardChange } from '../lib/teamChat/boardChangeBus'
 import { booZeroForTeam } from '../lib/teamChat/booZero'
@@ -167,10 +174,31 @@ export function teamChatStreamGET(req: Request, res: Response): void {
   // `id:` line (EPHEMERAL, off the resume cursor). The thin client applies each to
   // its board store and reconciles any gap-missed change with a `GET /api/board`
   // reload on (re)connect. So a server cascade's BoardTaskCards update live.
+  // A guest's frames keep no title of a task off their teams in what the board wrote
+  // (lib/roles/redact), as their other answers do. A frame that cannot be redacted is
+  // dropped (the bus isolates the throw), and the next reload brings the card back.
+  // The waited-on task's title goes through the check the REST board answer uses.
+  const scope = roleScopeOf(req)
+  const forGuest = (change: BoardChange, teams: ReadonlySet<string>): unknown => {
+    const card = change as BoardChange & {
+      waitingOn?: string | null
+      waitingOnDetail?: { taskTitle?: string } | null
+    }
+    const detail = card.waitingOnDetail
+    // Only a frame that names a waited-on task has anything to check.
+    let framed: unknown = change
+    if (detail?.taskTitle) {
+      const waitingOn = 'waitingOn' in card ? card.waitingOn : getTask(db, change.id)?.waitingOn
+      const scoped = guestWaitingOnDetail(db, waitingOn, detail, teams)
+      if (scoped !== detail) framed = { ...change, waitingOnDetail: scoped }
+    }
+    return redactForGuest(framed, () => titlesOnTeams(db, teams))
+  }
   const unsubBoard = subscribeBoardChange(teamId, (change) => {
     if (closed) return
+    const frame = scope ? forGuest(change, scope.teams) : change
     res.write('event: board\n')
-    res.write(`data: ${JSON.stringify(change)}\n\n`)
+    res.write(`data: ${JSON.stringify(frame)}\n\n`)
   })
 
   // Live agent working/idle signals — forwarded as named `status` events, also with

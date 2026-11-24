@@ -8,7 +8,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { childEnvFor } from '../../../agentHost/host'
-import { killProcessTree } from '../../runtimes/killTree'
+import { killProcessTree, killProcessTreeNow } from '../../runtimes/killTree'
 import { AgentHostError } from '../client'
 import { AGENT_HOST_PROTOCOL_VERSION, encodeFrame } from '../protocol'
 import {
@@ -20,6 +20,55 @@ import {
 } from './inProcessHost'
 
 const posix = process.platform !== 'win32'
+
+/**
+ * The pid a shell wrote to `file` with `echo $! > file`, once the whole line is
+ * there. The shell creates the file before it writes the number, so a read in
+ * between finds it empty, and `Number('')` is 0: `kill(0, 0)` then asks about
+ * this test's own process group, which always answers.
+ */
+async function pidWrittenTo(file: string): Promise<number> {
+  const deadline = Date.now() + 5_000
+  for (;;) {
+    let text = ''
+    try {
+      text = fs.readFileSync(file, 'utf8')
+    } catch {
+      /* not created yet */
+    }
+    if (/^\d+\n$/.test(text)) return Number(text)
+    if (Date.now() > deadline) throw new Error(`no pid in ${file}: ${JSON.stringify(text)}`)
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+/**
+ * Whether `pid` still runs. `kill(pid, 0)` also finds a zombie: a process that
+ * has exited and waits for its parent (or init, once orphaned) to reap it. On
+ * Linux `/proc` tells the two apart; a container whose first process never
+ * reaps keeps such a zombie for good. With no `/proc` to read (macOS), the
+ * answer is kill's alone.
+ */
+function stillRuns(pid: number): boolean {
+  const answers = (): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (!answers()) return false
+  let stat: string
+  try {
+    stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
+  } catch {
+    // No /proc here, or the zombie was reaped since: ask again.
+    return answers()
+  }
+  // The state follows the name, which is in parentheses and may hold spaces.
+  return !/^[ZX]/.test(stat.slice(stat.lastIndexOf(')') + 2))
+}
 
 describe.runIf(posix)('agent host protocol', () => {
   let h: InProcessHost
@@ -134,21 +183,55 @@ describe.runIf(posix)('agent host protocol', () => {
       group: true,
     })
     await new Promise<void>((resolve) => p.once('spawn', () => resolve()))
-    for (let i = 0; i < 100 && !fs.existsSync(pidFile); i++)
-      await new Promise((r) => setTimeout(r, 20))
-    const grandchild = Number(fs.readFileSync(pidFile, 'utf8').trim())
+    const grandchild = await pidWrittenTo(pidFile)
+    expect(grandchild).toBeGreaterThan(0)
     p.killTree(200)
     await closed(p)
-    let alive = true
-    for (let i = 0; i < 50 && alive; i++) {
-      try {
-        process.kill(grandchild, 0)
-        await new Promise((r) => setTimeout(r, 20))
-      } catch {
-        alive = false
-      }
+    const deadline = Date.now() + 5_000
+    let runs = stillRuns(grandchild)
+    while (runs && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20))
+      runs = stillRuns(grandchild)
     }
-    expect(alive).toBe(false)
+    expect(runs).toBe(false)
+  })
+
+  /** A process the host runs (`sleep`, in its own group or not), and how it exits. */
+  async function sleeper(group: boolean): Promise<{
+    p: ReturnType<InProcessHost['client']['spawn']>
+    exit: Promise<[number | null, NodeJS.Signals | null]>
+  }> {
+    const p = h.client.spawn({
+      command: '/bin/sh',
+      args: ['-c', 'exec sleep 30'],
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      group,
+    })
+    const exit = new Promise<[number | null, NodeJS.Signals | null]>((resolve) =>
+      p.once('exit', (code: number | null, signal: NodeJS.Signals | null) =>
+        resolve([code, signal]),
+      ),
+    )
+    await new Promise<void>((resolve) => p.once('spawn', () => resolve()))
+    return { p, exit }
+  }
+
+  it.each([true, false])(
+    'kills at once and sends no SIGTERM first when asked with no grace (group: %s)',
+    async (group) => {
+      // The exit stop's kill of the Hermes gateway, which reads a SIGTERM as a
+      // crash: a SIGTERM first would end `sleep` with SIGTERM, not SIGKILL.
+      const { p, exit } = await sleeper(group)
+      killProcessTreeNow(p)
+      expect(await exit).toEqual([null, 'SIGKILL'])
+    },
+  )
+
+  it('still sends SIGTERM first when asked with a grace', async () => {
+    const { p, exit } = await sleeper(true)
+    p.killTree(2_000)
+    expect(await exit).toEqual([null, 'SIGTERM'])
   })
 
   /** A group whose leader has closed while a member with output of its own

@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useSyncExternalStore } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { Cpu, RefreshCw, ChevronDown } from 'lucide-react'
 
 import { useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { isThinClient } from '@/lib/thinClient'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -23,7 +24,12 @@ import {
 
 import { RuntimeConnectList } from './RuntimeConnectList'
 import { OpenClawInlineSetup } from './OpenClawInlineSetup'
-import { openOpenClaw } from './openClawOnDemand'
+import {
+  connectThisPage,
+  isPageAttaching,
+  openOpenClaw,
+  subscribePageAttach,
+} from './openClawOnDemand'
 import { RuntimeDiagnosticsDrawer, type RuntimeDiagnosticsTarget } from './RuntimeDiagnosticsDrawer'
 import { useRuntimeProbeStore } from './runtimeProbeStore'
 import { RUNTIME_CATALOG, RUNTIME_ORDER, type RuntimeId } from './runtimeCatalog'
@@ -147,6 +153,16 @@ export function RuntimesPanel() {
   const [serverOpenclawInUse, setServerOpenclawInUse] = useState(true)
   const openclawConnected =
     (connStatus === 'connected' && client !== null) || serverOpenclawConnected
+  // The server is connected but this loaded page has no Gateway client of its
+  // own: something else connected the server after the page loaded (a routine,
+  // another page opening OpenClaw). OpenClaw's 1:1 chats on this page need one,
+  // so the connected row offers to connect the page. Never in a thin client,
+  // which has no page client by design.
+  const pageNeedsClient =
+    serverOpenclawConnected && connStatus === 'connected' && client === null && !isThinClient()
+  // A page dial already running (the watch after opening a Not in use row, or an
+  // earlier click) shows the action busy rather than idle.
+  const pageAttaching = useSyncExternalStore(subscribePageAttach, isPageAttaching)
   const openclawMessage = openclawConnected
     ? 'connected'
     : !serverOpenclawInUse
@@ -386,6 +402,8 @@ export function RuntimesPanel() {
               configured: openclawConfigured,
               inUse: serverOpenclawInUse,
               onOpen: handleOpenClawOpened,
+              onConnectPage: pageNeedsClient ? connectThisPage : undefined,
+              connectingPage: pageAttaching,
               extra: <McpAttach runtimeId="openclaw" />,
               setupOpen,
               setupContent: (

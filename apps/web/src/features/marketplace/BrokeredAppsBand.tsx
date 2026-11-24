@@ -249,7 +249,7 @@ export function BrokeredAppsBand({
               aria-label="Composio key"
               aria-invalid={keyError !== null}
               aria-describedby={keyError ? 'composio-key-error' : undefined}
-              className="w-full rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground aria-[invalid=true]:border-destructive"
+              className="w-full rounded-lg border border-border bg-field px-2.5 py-1.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground aria-[invalid=true]:border-destructive"
             />
             <Button size="sm" disabled={!key.trim() || saving} onClick={() => void saveKey()}>
               {saving ? 'Checking…' : 'Save'}

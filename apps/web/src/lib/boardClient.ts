@@ -290,6 +290,8 @@ export async function createTaskForMe(input: {
   title: string
   description?: string
   teamId: string
+  /** A goal on the same team the task counts toward. */
+  goalId?: string | null
 }): Promise<{ ok: true; task: BoardTask } | { ok: false; reason: string }> {
   try {
     const r = await apiFetch('/api/board', {
@@ -319,6 +321,8 @@ export interface CreateTaskForAgentInput {
   parentTaskId?: string
   /** Makes the create safe to repeat: the same key returns the same task. */
   idempotencyKey?: string
+  /** A goal on the same team the task counts toward. */
+  goalId?: string | null
 }
 
 /** Set a task's priority, a person's change from the task drawer. The server

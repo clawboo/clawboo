@@ -12,6 +12,7 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 
 import { catalogHandlers } from './catalogFixtures'
+import { homeHandlers } from './homeFixtures'
 
 // Default handlers persist across resetHandlers(). The GitHub star count is the
 // one cross-origin call the panels make on mount (GitHubStarButton lives in many
@@ -34,10 +35,28 @@ export const server = setupServer(
   // mount, and detail sheets fetch bodies, so without these any test rendering
   // MarketplacePanel or CreateTeamModal trips onUnhandledRequest.
   ...catalogHandlers,
+  // Home's reads (team and All teams), empty by default: see homeFixtures.
+  ...homeHandlers,
   http.get('https://api.github.com/repos/clawboo/clawboo', () =>
     HttpResponse.json({ stargazers_count: 0 }),
   ),
   http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+  // The account bar at the bottom of the sidebar asks who "you" are on mount,
+  // and the dashboard reads how the server checks a person once its access lock
+  // opens (lib/personCheckNotice). A local install's answer by default: nobody
+  // verified, the install's built-in person. A test about who "you" is
+  // registers its own.
+  http.get('/api/access/identity', () =>
+    HttpResponse.json({
+      proxyIdentity: 'off',
+      appLink: false,
+      roles: 'off',
+      personCheck: 'page',
+      controlClaim: 'off',
+      person: null,
+      you: { id: 'local', name: 'You', role: null },
+    }),
+  ),
   // The drawer asks for a task's plan and Team settings for its switch.
   http.get('/api/board/:taskId/plan', () => HttpResponse.json({ plan: null, revisions: [] })),
   http.get('/api/team-plan-approval/:teamId', () => HttpResponse.json({ on: false })),

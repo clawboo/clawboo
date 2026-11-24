@@ -363,8 +363,9 @@ describe('the Today view', () => {
     if (new Date(target).getMonth() !== new Date().getMonth()) {
       await user.click(within(picker).getByRole('button', { name: 'Next month' }))
     }
+    // No digit may follow the day, or December 1 would also match December 15.
     await user.click(
-      within(picker).getByRole('button', { name: new RegExp(`^${longDate(target)}`) }),
+      within(picker).getByRole('button', { name: new RegExp(`^${longDate(target)}(?!\\d)`) }),
     )
     expect(screen.queryByTestId('calendar-mini-month')).toBeNull()
     expect(screen.getByTestId('board-calendar')).toHaveAttribute('data-mode', 'week')

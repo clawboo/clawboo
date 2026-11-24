@@ -196,6 +196,38 @@ describe('live view of an agent display', () => {
     expect(rfb.pointers).toEqual([[2, 1, 0]])
   })
 
+  it('lets go of what the person in control held when their view closes, even the last view', () => {
+    const { rfb } = fakeDisplay('a')
+    const first = live.openViewer('a', { kind: 'dashboard' }, sink().sink)
+    live.setControl('a', first.viewerId, { kind: 'dashboard' }, 'take')
+    live.sendInput('a', first.viewerId, { kind: 'dashboard' }, [
+      { t: 'k', s: 0xffe1, d: true },
+      { t: 'p', x: 2, y: 1, b: 1 },
+    ])
+    rfb.keys.length = 0
+    rfb.pointers.length = 0
+    // A renewal: the only view closes, and the page comes back at once.
+    first.close()
+    const again = live.openViewer('a', { kind: 'dashboard' }, sink().sink, first.viewerId)
+    expect(again.viewerId).toBe(first.viewerId)
+    live.setControl('a', again.viewerId, { kind: 'dashboard' }, 'release')
+    expect(rfb.keys).toEqual([[0xffe1, false]])
+    expect(rfb.pointers).toEqual([[2, 1, 0]])
+  })
+
+  it('lets go of what the person in control held when their view closes while others watch', () => {
+    const { rfb } = fakeDisplay('a')
+    const holder = live.openViewer('a', { kind: 'dashboard' }, sink().sink)
+    live.openViewer('a', { kind: 'dashboard' }, sink().sink)
+    live.setControl('a', holder.viewerId, { kind: 'dashboard' }, 'take')
+    live.sendInput('a', holder.viewerId, { kind: 'dashboard' }, [{ t: 'k', s: 0x61, d: true }])
+    rfb.keys.length = 0
+    holder.close()
+    // Not left repeating on the agent's screen through the reconnect grace.
+    expect(rfb.keys).toEqual([[0x61, false]])
+    expect(isPersonInControl('a')).toBe(true)
+  })
+
   it('lets a page that comes back replace its own stream that still looks open', () => {
     fakeDisplay('a')
     const old = sink()

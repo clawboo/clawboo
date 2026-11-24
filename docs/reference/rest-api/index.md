@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 238 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 297 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -17,7 +17,7 @@ The Clawboo server answers JSON requests under `/api/` on the same port as the d
 | Cross-origin   | Browser requests from other origins are refused with `403` unless you allowlist them  |
 | Rate limits    | 3,000 requests a minute per client; 60 a minute across the sensitive routes           |
 | Streaming      | 9 routes answer with Server-Sent Events; one WebSocket route for the OpenClaw Gateway |
-| Routes         | 238: 106 `GET`, 91 `POST`, 18 `DELETE`, 13 `PUT`, 10 `PATCH` ([index](#route-index))  |
+| Routes         | 297: 127 `GET`, 116 `POST`, 25 `DELETE`, 15 `PUT`, 14 `PATCH` ([index](#route-index)) |
 
 Check that the server is up (the response carries `"ok": true` when no boot check failed). Without the cookie the answer is a `401` from the access gate, which also tells you Clawboo is running:
 
@@ -37,7 +37,7 @@ The server picks its port at startup. It tries `18790` first and scans up to `18
 | `PORT`                   | Outside `--dev`, use exactly this port (fails if taken). Checked before the scan, so it beats the next one. |
 | `CLAWBOO_API_PORT_START` | Start the scan here instead of `18790`.                                                                     |
 
-After binding, the server writes the port to `<clawboo home>/api-port.txt` (`~/.clawboo/api-port.txt` unless `CLAWBOO_HOME` is set). The CLI reads that file to find a running server; see [CLI](/reference/cli).
+After binding, the server writes the port to `<clawboo home>/api-port.txt` (`~/.clawboo/api-port.txt` unless `CLAWBOO_HOME` is set), and from 0.9.0 the [start marker](/reference/configuration#start-marker) `api-port.json` beside it, which names the server's process so a reader can tell a running server's record from a dead one's. The CLI reads them to find a running server; see [CLI](/reference/cli).
 
 ### Serving under a path prefix
 
@@ -73,7 +73,7 @@ With your own token, use `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`. Send the co
 
 **One-time sign-in codes.** `POST /api/access/launch-code`, behind the cookie like every other route, answers `{ "gated": true, "code": "…", "expiresAt": <epoch ms>, "expiresInMs": 120000 }`, or `{ "gated": false }` on a server with no token. Loading any page address with `?access_code=<code>` in a browser sets the cookie once, within two minutes, when the request carries `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. A request with no fetch metadata at all (browsers send none to a plain-HTTP network address) gets a `200` sign-in page whose button sends `POST ?access_code=<code>`, which sets the cookie with a `303`. Only that form's POST spends a code: form-encoded, with fetch metadata (if any) of a same-origin page navigation and an `Origin` (if any) of the dashboard itself. The dashboard's locked screen sends the same POST for a link pasted into it, to `?signin=pasted&access_code=<code>`; the redirect keeps `signin=pasted`. A fetch or a frame, and a used, expired or unknown code, get a redirect without the cookie; a code that was not spent stays live. A code is never accepted on an `/api/` path. The route is on the sensitive rate limit.
 
-**Who is signed in.** `GET /api/access/identity` answers `{ "proxyIdentity": "off" | "on" | "required", "appLink": boolean, "person": { "id", "name", "role" } | null, "you": { "id", "name", "role" } }`: the [proxy identity lane](/guides/sso-proxy)'s mode, whether an [app that started Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) gave it a key, the person the request's verified identity token names, and who "you" means on the board: that person, else the install's built-in person (`{ "id": "local", "name": "You", "role": null }`). With the lane `required`, every `/api/` request also needs a good token from your sign-in proxy, or from the [app that started Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) when it gave Clawboo a key (never on the Gateway WebSocket), and one that does not verify gets `401` with `"gate": "clawboo-proxy-identity"` and a `reason`, in any mode.
+**Who is signed in.** `GET /api/access/identity` answers `{ "proxyIdentity": "off" | "on" | "required", "appLink": boolean, "roles": "off" | "enforce", "personCheck": "page" | "verified", "controlClaim": "off" | "required", "readerKey": boolean, "person": { "id", "name", "role" } | null, "you": { "id", "name", "role" } }`: the [proxy identity lane](/guides/sso-proxy)'s mode, whether an [app that started Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) gave it a key, whether [roles](/guides/sso-proxy#roles) are enforced, who may act as a person and whether a take over needs the proxy's `control` claim (both from 0.9.0; see [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person)), whether a [program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo) may make its own reads with a reader key (`readerKey`, from 0.9.0), the person the request's verified identity token names, and who "you" means on the board: that person, else the install's built-in person (`{ "id": "local", "name": "You", "role": null }`). With roles enforced it also carries `access`, what this person may do, and a request their role does not allow gets `403` with `"error": "role"` and a `reason`. With the lane `required`, every `/api/` request also needs a good token from your sign-in proxy, or from the [app that started Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) when it gave Clawboo a key (never on the Gateway WebSocket), and one that does not verify gets `401` with `"gate": "clawboo-proxy-identity"` and a `reason`, in any mode.
 
 Keep the token out of API URLs: any request whose URL carries `access_token` gets that `302` answer (or a `401` when the token is wrong) instead of the route's response.
 
@@ -84,6 +84,8 @@ Keep the token out of API URLs: any request whose URL carries `access_token` get
 | WebSocket upgrade without a valid cookie | none   | The socket is closed                                                                                                                                                                 |
 
 The token may contain only `A-Z a-z 0-9 . _ ~ -`. With any other character the server does not start: it logs `SECURITY: refusing to start` and exits with code 1 on every bind, even with `CLAWBOO_ALLOW_INSECURE=1`. `openssl rand -hex 24` makes a suitable token. The comparison is constant-time, and the `/api/` prefix test ignores letter case.
+
+**Is the server up.** From 0.9.0, `GET` or `HEAD` on [`/api/system/live`](/reference/rest-api/system#get-%2Fapi%2Fsystem%2Flive), exactly, with no query, needs no cookie and no identity token: it answers `200` `{ "ok": true }` and nothing about the install.
 
 **Agent MCP connections.** An agent runtime that Clawboo starts reaches the four MCP endpoints (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) without a cookie. It passes only with the `attachToken` Clawboo put in its attach URL, and only when it connects straight to the loopback port with no proxy forwarding headers. `/api/mcp/config` and `POST /api/mcp/attach-secret/rotate` always need the cookie. See [Tools and MCP](/reference/rest-api/tools-and-mcp).
 
@@ -124,6 +126,8 @@ Two ceilings apply. Both count requests in memory, per client address, over a 60
 Responses carry `RateLimit-Policy`, `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (IETF draft 6). A `429` also carries `Retry-After` in seconds. On a sensitive route these headers describe the sensitive budget. The dashboard's page and asset files have their own ceiling and do not count against the API.
 
 The client address is the TCP peer. `X-Forwarded-For` is ignored, so behind a reverse proxy every client shares the proxy's budget.
+
+From 0.9.0, [`GET /api/system/live`](/reference/rest-api/system#get-%2Fapi%2Fsystem%2Flive), which anyone may ask without signing in, has a ceiling of its own instead: 600 requests a minute per client address, with no rate-limit headers. It never counts against the general tier, so callers that have not signed in cannot use up the budget the dashboard shares behind a reverse proxy.
 
 The sensitive tier covers the routes that install software, rewrite runtime configuration, start sign-ins or grant access:
 
@@ -188,13 +192,14 @@ Something that stops or restarts a server (a stop script, an updater, a process 
 
 ## Route index
 
-The router registers 263 routes: 115 `GET`, 101 `POST`, 22 `DELETE`, 14 `PUT`, 11 `PATCH`. Each belongs to one page:
+The router registers 297 routes: 127 `GET`, 116 `POST`, 25 `DELETE`, 15 `PUT`, 14 `PATCH`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                                                                                                                         |
 | ---------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [Agents](/reference/rest-api/agents)                 | 34     | `/api/agents*`: list, create, sync, delete, move, model, agent files, sessions, workspaces, browser screenshots, the live screen and take over, the native shell switch, 1:1 agent chats; `/api/computer-link/*`, `/api/computer/tools/install`        |
 | [Teams](/reference/rest-api/teams)                   | 34     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat, task id letters, labels), `/api/team-rules/:teamId`, `/api/team-verify-command/:teamId`, `/api/team-plan-approval/:teamId`, `/api/team-agent-wakes/:teamId`, `/api/team-chat*` |
 | [Board](/reference/rest-api/board)                   | 40     | `/api/board*`: tasks, claim, status changes, comments, labels, read state, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview, a job's limit of runs; `/api/pauses*`                                              |
+| [Home](/reference/rest-api/home)                     | 32     | `/api/home*`: one team's Home or all teams, goals, goal updates, KPIs and their values, pages and their revisions, Home settings, weekly updates                                                                                                       |
 | [Memory](/reference/rest-api/memory)                 | 9      | `/api/memory*`: search, save, browse, graph, feedback, outcomes, embedding status, reindex, model install                                                                                                                                              |
 | [Capabilities](/reference/rest-api/capabilities)     | 2      | `/api/capabilities*`: the merged skills, tools and connectors inventory, and its actions                                                                                                                                                               |
 | [Connectors](/reference/rest-api/connectors)         | 21     | `/api/connectors*` (including Composio and custom connectors), `/api/grants*`                                                                                                                                                                          |
@@ -209,7 +214,7 @@ The router registers 263 routes: 115 `GET`, 101 `POST`, 22 `DELETE`, 14 `PUT`, 1
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                                                                                                                   |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                                                                                                                   |
 | [Authentication](#authentication)                    | 2      | `/api/access/launch-code`: one-time sign-in codes for `clawboo open` and **Open on another device**; `/api/access/identity`: who is signed in                                                                                                          |
-| [System](/reference/rest-api/system)                 | 19     | `/api/system/*`: OpenClaw setup and Gateway control, models, device pairing, Clawboo's version, capabilities, update, drain and hold, pinned settings                                                                                                  |
+| [System](/reference/rest-api/system)                 | 20     | `/api/system/*`: OpenClaw setup and Gateway control, models, device pairing, Clawboo's version, whether it is up, capabilities, update, drain and hold, pinned settings                                                                                |
 | [Catalog](/reference/rest-api/catalog)               | 3      | `/api/catalog/*`: the marketplace's agent and team templates                                                                                                                                                                                           |
 | [Website logins](/reference/rest-api/website-logins) | 7      | `/api/website-logins*`: saved logins, the 1Password source and its install                                                                                                                                                                             |
 

@@ -198,7 +198,7 @@ async function main(): Promise<void> {
   if (!support.ok) return
   check('a window manager was found', support.tools.windowManager !== null, support.tools)
 
-  // ── What an administrator named (releases after 0.8.0) ─────────────────────
+  // ── What an administrator named (releases after 0.9.1) ─────────────────────
   const namedXvnc = process.env['CLAWBOO_XVNC_PATH']
   if (namedXvnc) {
     check(

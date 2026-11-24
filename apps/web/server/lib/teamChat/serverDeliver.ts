@@ -1070,7 +1070,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // (the single choke point covers the user's leader turn AND every delegated
     // child turn). See `contextPreamble.ts`.
     const baseTeamContext = isTeamSessionKey(targetSessionKey)
-      ? buildServerTeamContext(db, teamId, targetAgentId, framing, chatRoomId)
+      ? buildServerTeamContext(db, teamId, targetAgentId, framing, chatRoomId, runTaskId)
       : null
     // WHAT IS WAITING is read when the run actually STARTS, never at `deliver`
     // time. `nudge.deliver` FIFO-queues behind a busy session, so reading here in

@@ -413,6 +413,11 @@ export const tasks = sqliteTable(
     // as a card there, and its result goes back there through report_up_outbox.
     // NULL for a task from anywhere else.
     chatSessionKey: text('chat_session_key'),
+    // The team goal it serves (team_goals.id, same team), or NULL. Copied from the
+    // request or parent at creation (see home/links.ts). No foreign key.
+    goalId: text('goal_id'),
+    // 1: a person said this task serves no goal, so the resolver stops here.
+    goalCleared: integer('goal_cleared').notNull().default(0),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),
@@ -430,6 +435,7 @@ export const tasks = sqliteTable(
     // from this DDL would not drop it from databases that already have it.
     index('idx_tasks_parent_dropped_created').on(t.parentTaskId, t.dropped, t.createdAt),
     index('idx_tasks_assignee_person').on(t.assigneePersonId),
+    index('idx_tasks_goal').on(t.goalId),
     uniqueIndex('idx_tasks_identifier').on(t.identifier),
   ],
 )
@@ -610,6 +616,192 @@ export const taskDocuments = sqliteTable(
 )
 
 export type DbTaskDocument = typeof taskDocuments.$inferSelect
+
+// ─── Home: team goals, KPIs, pages, status line (see src/home/) ──────────────
+// People and agents are a JSON {kind: 'person'|'agent', id, name} in TEXT columns.
+
+export const teamGoals = sqliteTable(
+  'team_goals',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    // One level: a goal with a parent is never a parent. Same team.
+    parentGoalId: text('parent_goal_id'),
+    title: text('title').notNull(),
+    description: text('description').notNull().default(''),
+    owner: text('owner'),
+    targetDate: integer('target_date'),
+    // active | done | dropped
+    status: text('status').notNull().default('active'),
+    // on_track | at_risk | off_track, set only by a person
+    health: text('health'),
+    healthSetBy: text('health_set_by'),
+    healthSetAt: integer('health_set_at'),
+    updateCadenceDays: integer('update_cadence_days').notNull().default(7),
+    position: integer('position').notNull().default(0),
+    createdBy: text('created_by'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    archivedAt: integer('archived_at'),
+  },
+  (t) => [
+    index('idx_team_goals_team').on(t.teamId, t.position),
+    index('idx_team_goals_parent').on(t.parentGoalId),
+  ],
+)
+export type DbTeamGoal = typeof teamGoals.$inferSelect
+
+export const teamGoalHealth = sqliteTable(
+  'team_goal_health',
+  {
+    id: text('id').primaryKey(),
+    goalId: text('goal_id')
+      .notNull()
+      .references(() => teamGoals.id, { onDelete: 'cascade' }),
+    health: text('health'),
+    setBy: text('set_by'),
+    setAt: integer('set_at').notNull(),
+    // The update whose publishing set it; null for a direct set.
+    updateId: text('update_id'),
+  },
+  (t) => [index('idx_team_goal_health_goal').on(t.goalId, t.setAt)],
+)
+export type DbTeamGoalHealth = typeof teamGoalHealth.$inferSelect
+
+export const teamGoalUpdates = sqliteTable(
+  'team_goal_updates',
+  {
+    id: text('id').primaryKey(),
+    goalId: text('goal_id')
+      .notNull()
+      .references(() => teamGoals.id, { onDelete: 'cascade' }),
+    teamId: text('team_id').notNull(),
+    body: text('body').notNull(),
+    health: text('health'),
+    author: text('author'),
+    executionId: text('execution_id'),
+    // draft | published | discarded
+    state: text('state').notNull().default('draft'),
+    publishedBy: text('published_by'),
+    publishedAt: integer('published_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    index('idx_team_goal_updates_goal').on(t.goalId, t.createdAt),
+    index('idx_team_goal_updates_team_state').on(t.teamId, t.state),
+  ],
+)
+export type DbTeamGoalUpdate = typeof teamGoalUpdates.$inferSelect
+
+export const teamKpis = sqliteTable(
+  'team_kpis',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    goalId: text('goal_id').references(() => teamGoals.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    unit: text('unit').notNull().default(''),
+    // up | down
+    direction: text('direction').notNull().default('up'),
+    target: real('target'),
+    // week | month | quarter | all
+    period: text('period').notNull().default('week'),
+    // computed | agent | person
+    source: text('source').notNull(),
+    metric: text('metric'),
+    reporterAgentId: text('reporter_agent_id'),
+    staleAfterHours: real('stale_after_hours'),
+    // active | suggested | archived
+    status: text('status').notNull().default('active'),
+    suggestedBy: text('suggested_by'),
+    suggestionNote: text('suggestion_note'),
+    createdBy: text('created_by'),
+    position: integer('position').notNull().default(0),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    index('idx_team_kpis_team').on(t.teamId, t.status, t.position),
+    index('idx_team_kpis_goal').on(t.goalId),
+  ],
+)
+export type DbTeamKpi = typeof teamKpis.$inferSelect
+
+export const teamKpiValues = sqliteTable(
+  'team_kpi_values',
+  {
+    id: text('id').primaryKey(),
+    kpiId: text('kpi_id')
+      .notNull()
+      .references(() => teamKpis.id, { onDelete: 'cascade' }),
+    value: real('value').notNull(),
+    asOf: integer('as_of').notNull(),
+    reportedBy: text('reported_by'),
+    executionId: text('execution_id'),
+    taskId: text('task_id'),
+    sourceUrl: text('source_url'),
+    note: text('note'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_team_kpi_values_kpi').on(t.kpiId, t.asOf)],
+)
+export type DbTeamKpiValue = typeof teamKpiValues.$inferSelect
+
+export const teamPages = sqliteTable(
+  'team_pages',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    goalId: text('goal_id').references(() => teamGoals.id, { onDelete: 'set null' }),
+    title: text('title').notNull(),
+    pinned: integer('pinned').notNull().default(0),
+    archivedAt: integer('archived_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('idx_team_pages_team').on(t.teamId, t.updatedAt)],
+)
+export type DbTeamPage = typeof teamPages.$inferSelect
+
+export const teamPageRevisions = sqliteTable(
+  'team_page_revisions',
+  {
+    id: text('id').primaryKey(),
+    pageId: text('page_id')
+      .notNull()
+      .references(() => teamPages.id, { onDelete: 'cascade' }),
+    // 1, 2, 3 per page; a revert is a new revision.
+    revision: integer('revision').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    author: text('author'),
+    executionId: text('execution_id'),
+    revertedFrom: integer('reverted_from'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('idx_team_page_revisions_revision').on(t.pageId, t.revision)],
+)
+export type DbTeamPageRevision = typeof teamPageRevisions.$inferSelect
+
+export const teamHomeSummary = sqliteTable('team_home_summary', {
+  teamId: text('team_id')
+    .primaryKey()
+    .references(() => teams.id, { onDelete: 'cascade' }),
+  body: text('body').notNull(),
+  author: text('author'),
+  executionId: text('execution_id'),
+  model: text('model'),
+  writtenAt: integer('written_at').notNull(),
+  // The team board's newest task change (max tasks.updated_at) when written.
+  boardSeq: integer('board_seq').notNull().default(0),
+})
+export type DbTeamHomeSummary = typeof teamHomeSummary.$inferSelect
 
 // task_comments — per-task discussion / system notes.
 export const taskComments = sqliteTable(
@@ -1412,6 +1604,27 @@ export const teamOsGroups = sqliteTable(
 )
 
 export type DbTeamOsGroup = typeof teamOsGroups.$inferSelect
+
+// ─── identity_token_uses ──────────────────────────────────────────────────────
+// Each request-bound identity token the server accepted, by issuer lane and id,
+// until it stops mattering. See src/identityTokenUses.ts.
+
+export const identityTokenUses = sqliteTable(
+  'identity_token_uses',
+  {
+    /** The lane that accepted it: `proxy`, `app` or `reader`. */
+    issuer: text('issuer').notNull(),
+    jti: text('jti').notNull(),
+    /** Epoch ms after which the token could not be accepted anyway. */
+    untilMs: integer('until_ms').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.issuer, t.jti] }),
+    index('idx_identity_token_uses_until').on(t.untilMs),
+  ],
+)
+
+export type DbIdentityTokenUse = typeof identityTokenUses.$inferSelect
 
 // ─── team_chat ────────────────────────────────────────────────────────────────
 // The durable group-chat room substrate (mixed-runtime peer chat): every team

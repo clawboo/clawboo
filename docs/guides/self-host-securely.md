@@ -401,6 +401,12 @@ Answering an approval, Retry, Assign and a team's work check are refused with `4
 
 </Accordion>
 
+<Accordion title="The dashboard says it is not signed in through your sign-in proxy">
+
+From 0.9.0, with `proxyIdentity: on` and `personCheck: verified`, only a request your sign-in proxy signed acts as you. A dashboard opened around the proxy, such as at `http://localhost:18790` or the server's own address, sends no token: it can show your agents, but answering approvals and taking over a screen are refused with `403 person_only`, a card you move there moves without stopping its run, and the Gateway connection is refused. With `proxyIdentity: required`, the page loads but shows none of your data: its API requests carry no token, so they are refused with `401` and "Clawboo needs a signed identity token from your sign-in proxy for this request." Open Clawboo at the address your proxy serves. If you do and still see it, check that the proxy sends its token on every request, `GET /api/access/identity` included. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person).
+
+</Accordion>
+
 <Accordion title="401: Clawboo access token required">
 
 This browser has no cookie yet, or the token changed. Open your Clawboo address with `?access_token=<your-token>` once, or open a one-time link from `clawboo open --print` on the server (replace `127.0.0.1:<port>` with the address you use) or from **Open on another device** in a signed-in browser.
@@ -471,7 +477,7 @@ The proxy rule blocks it, and releases after 0.5.0 also refuse an attach token t
 
 ## Limits
 
-- **One token, full access.** There are no accounts or roles. To rotate the token, change the variable, restart the server and sign in again in every browser.
+- **One token, full access.** There are no accounts or roles. To rotate the token, change the variable, restart the server and sign in again in every browser. Behind a [sign-in proxy](/guides/sso-proxy), each person can have a [role](/guides/sso-proxy#roles) that decides what they may do.
 - **One rate-limit allowance behind a proxy.** Clawboo counts requests by the connection's address, so every browser behind the proxy shares one allowance. See [Limits and defaults](/reference/limits-and-defaults).
 
 ## Next steps

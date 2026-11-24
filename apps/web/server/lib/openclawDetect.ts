@@ -73,7 +73,9 @@ export async function detectOpenClaw(): Promise<OpenClawInfo> {
       version: owned.record.version,
       path: owned.launcher,
       source: 'clawboo',
-      node: owned.record.interpreter ?? null,
+      node: owned.record.interpreter
+        ? { path: owned.record.interpreter.path, version: owned.record.interpreter.version }
+        : null,
     }
   }
 

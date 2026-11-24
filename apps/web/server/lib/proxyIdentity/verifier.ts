@@ -15,15 +15,35 @@
 // request's method and path, as in DPoP, RFC 9449), `iat`, `exp` no more than
 // the operator's maximum lifetime after `iat`, and a `jti` that is accepted
 // once. A copied token is then good for one request, to one path, for seconds.
+// In releases after 0.8.0 "once" holds across a restart too: the server passes
+// a store (seenTokens.ts) that records each id in the database until the token
+// could not be accepted anyway. A token issued before the server started is not
+// refused for that; only a second use is. When the database refuses the write
+// (a full disk, a read-only file), the token is checked against memory alone,
+// as before, and the store reports the failure: a broken database must not lock
+// every person out, the health page that explains it included.
 // SESSION BINDING is for proxies that send their own sign-in token on every
 // request (Cloudflare Access, oauth2-proxy): such a token is good until it
 // expires, on any path. `htm` and `htu` are still checked when present.
+//
+// THE READER KEY (config `reader`). A token signed with the reader key names a
+// program running beside the server, never a person: its `sub` must start with
+// `reader:`, it must be request-bound, and nothing else is read from it (no name,
+// no role, no claim beside them). While a reader key is on, a sign-in proxy's
+// token may not name a `reader:` subject (`refuseReaderSubjects`).
+//
+// THE TAKE-OVER CLAIM. With `proxyIdentityControlClaim: required` (request
+// binding only; config.ts refuses it otherwise), a token's `control` claim names
+// the agent whose screen its person may take over. It is read only then: a
+// `control` that is there but not an agent id refuses the token, and an absent
+// one is no claim.
 
 import {
   createLocalJWKSet,
   createRemoteJWKSet,
   decodeProtectedHeader,
   jwtVerify,
+  type JSONWebKeySet,
   type JWTPayload,
   type JWTVerifyGetKey,
 } from 'jose'
@@ -31,7 +51,14 @@ import {
 import { ACCOUNT_PERSON_PREFIX, isAccountPerson } from '@clawboo/board-core'
 import type { PersonRef } from '@clawboo/protocol'
 
-import type { ProxyIdentityConfig } from './config'
+import { accessFromClaims, type PersonAccess } from '../roles/policy'
+import {
+  READER_SUBJECT_PREFIX,
+  keyFingerprintOf,
+  keyFingerprints,
+  sharesKey,
+  type ProxyIdentityConfig,
+} from './config'
 
 /** Asymmetric signatures only. */
 export const ALLOWED_ALGORITHMS = [
@@ -84,9 +111,21 @@ export type AssertionRefusal =
   | 'claims'
   /** The proxy's keys could not be fetched. */
   | 'keys-unavailable'
+  /** A reader key's token while the sign-in proxy's key set holds the reader key
+   *  too: the reader key is a person's key as well. */
+  | 'shared-key'
 
 export type AssertionResult =
-  { ok: true; person: PersonRef } | { ok: false; reason: AssertionRefusal }
+  | {
+      ok: true
+      person: PersonRef
+      /** What the token's role claims grant. Only with roles enforced. */
+      access?: PersonAccess
+      /** The agent whose screen the token's `control` claim lets its person take
+       *  over. Only with the claim required, and only when the token has one. */
+      control?: string
+    }
+  | { ok: false; reason: AssertionRefusal }
 
 export interface AssertionInput {
   token: string
@@ -100,11 +139,35 @@ export interface AssertionVerifier {
   verify: (input: AssertionInput) => Promise<AssertionResult>
 }
 
+/** Where a verifier records each request-bound token it accepts, beside its own
+ *  memory, so a token stays used across a restart (seenTokens.ts). */
+export interface SeenTokenStore {
+  /** Record `jti` as used until `untilMs`. False when it is already recorded and
+   *  the record still matters at `nowMs`: a replay. Throws when it cannot record
+   *  (the verifier then goes by its memory alone; the store reports it). */
+  claim: (jti: string, untilMs: number, nowMs: number) => boolean
+  /** Drop the records that stopped mattering by `nowMs`. Never throws. */
+  sweep: (nowMs: number) => void
+}
+
 export interface VerifierOptions {
   /** Epoch ms. Defaults to `Date.now`. */
   now?: () => number
   /** Replaces the key lookup the config names. Tests. */
   getKey?: JWTVerifyGetKey
+  /** Records each request-bound token's single use beyond this process's memory.
+   *  Unset: memory only, as in a test. */
+  seen?: SeenTokenStore
+  /** For the reader key's verifier: the sign-in proxy's current key set, which
+   *  must hold none of the reader's keys. Set when the proxy publishes a JWKS
+   *  URL, whose keys cannot be compared with the reader key at startup
+   *  (config.ts). Throws when the set cannot be fetched. */
+  personKeySet?: () => Promise<JSONWebKeySet>
+  /** For a sign-in proxy's verifier beside a reader key: keys whose tokens it
+   *  refuses, whatever they claim (the reader's). Set when the proxy publishes a
+   *  JWKS URL, which could come to hold the reader key: a token that key signed
+   *  would otherwise pass for a person. */
+  refuseKeysIn?: JSONWebKeySet
 }
 
 /** A path without its query or fragment, exactly as written. */
@@ -190,21 +253,50 @@ function refusalOf(err: unknown): AssertionRefusal {
   }
 }
 
+/** A sign-in proxy's JWKS URL, fetched and cached: refetched after 10 minutes,
+ *  or for a key id it does not have at most once every 30 seconds. */
+export function remoteKeySet(url: URL): ReturnType<typeof createRemoteJWKSet> {
+  return createRemoteJWKSet(url, {
+    timeoutDuration: 5_000,
+    cooldownDuration: 30_000,
+    cacheMaxAge: 10 * 60_000,
+  })
+}
+
+/** The key set a remote lookup holds now, fetched first when it has none or its
+ *  copy is older than the cache allows. Throws when it cannot be fetched. */
+export async function currentKeySet(
+  remote: ReturnType<typeof createRemoteJWKSet>,
+): Promise<JSONWebKeySet> {
+  if (!remote.fresh || remote.jwks() === undefined) await remote.reload()
+  const set = remote.jwks()
+  if (!set) throw new Error('the key set could not be fetched')
+  return set
+}
+
+/** The key lookup an issuer's settings name: its JWKS URL, fetched and cached,
+ *  or the key set written into the settings. */
+export function keyLookupFor(config: ProxyIdentityConfig): JWTVerifyGetKey {
+  return config.keys.source === 'jwks-url'
+    ? remoteKeySet(config.keys.url)
+    : createLocalJWKSet(config.keys.jwks)
+}
+
 export function createAssertionVerifier(
   config: ProxyIdentityConfig,
   opts: VerifierOptions = {},
 ): AssertionVerifier {
   const now = opts.now ?? Date.now
-  const getKey: JWTVerifyGetKey =
-    opts.getKey ??
-    (config.keys.source === 'jwks-url'
-      ? createRemoteJWKSet(config.keys.url, {
-          timeoutDuration: 5_000,
-          cooldownDuration: 30_000,
-          cacheMaxAge: 10 * 60_000,
-        })
-      : createLocalJWKSet(config.keys.jwks))
+  const getKey: JWTVerifyGetKey = opts.getKey ?? keyLookupFor(config)
   const requestBound = config.binding === 'request'
+  const store = opts.seen
+
+  // The proxy key set the shared-key check last compared, and what it found: the
+  // set is the same object until it is fetched again.
+  let lastPersonSet: JSONWebKeySet | null = null
+  // The keys this verifier never takes a token from, by fingerprint.
+  const refusedKeys = opts.refuseKeysIn ? keyFingerprints(opts.refuseKeysIn) : null
+  let lastShared = false
 
   // jti -> when it stops mattering (epoch ms), oldest first.
   const seen = new Map<string, number>()
@@ -213,6 +305,7 @@ export function createAssertionVerifier(
     if (at - lastSweep < 1_000 && seen.size < MAX_SEEN_TOKENS) return
     lastSweep = at
     for (const [jti, until] of seen) if (until <= at) seen.delete(jti)
+    store?.sweep(at)
   }
 
   async function verify(input: AssertionInput): Promise<AssertionResult> {
@@ -234,8 +327,9 @@ export function createAssertionVerifier(
 
     const at = now()
     let payload: JWTPayload
+    let signedBy: unknown
     try {
-      ;({ payload } = await jwtVerify(token, getKey, {
+      const verified = await jwtVerify(token, getKey, {
         algorithms: [...ALLOWED_ALGORITHMS],
         issuer: config.issuer,
         audience: config.audience,
@@ -243,13 +337,34 @@ export function createAssertionVerifier(
         currentDate: new Date(at),
         requiredClaims: requestBound ? ['sub', 'exp', 'iat', 'jti', 'htm', 'htu'] : ['sub', 'exp'],
         ...(requestBound ? { maxTokenAge: config.maxLifetimeSeconds } : {}),
-      }))
+      })
+      payload = verified.payload
+      signedBy = (verified as { key?: unknown }).key
     } catch (err) {
       return { ok: false, reason: refusalOf(err) }
+    }
+    // A token one of the refused keys signed (the reader key, published by a
+    // sign-in proxy's JWKS URL as well) is never a person's: checked on the key
+    // that verified it, so it holds after every refetch of the set. A key that
+    // cannot be read is refused too.
+    if (refusedKeys) {
+      const print = keyFingerprintOf(signedBy)
+      if (print === null || refusedKeys.has(print)) return { ok: false, reason: 'shared-key' }
     }
 
     const sub = cleanText(payload.sub, MAX_ID_CHARS)
     if (!sub || sub !== payload.sub) return { ok: false, reason: 'claims' }
+    // The reader key names a `reader:` program and nothing else, and only with a
+    // request-bound token. While it is on, a sign-in proxy names no such subject,
+    // so the reader and a person never share an id.
+    if (config.reader) {
+      if (!requestBound) return { ok: false, reason: 'claims' }
+      if (!sub.startsWith(READER_SUBJECT_PREFIX) || sub === READER_SUBJECT_PREFIX) {
+        return { ok: false, reason: 'claims' }
+      }
+    } else if (config.refuseReaderSubjects && sub.startsWith(READER_SUBJECT_PREFIX)) {
+      return { ok: false, reason: 'claims' }
+    }
     // Each issuer keeps to its own people. A proxy naming an `account:` person
     // would pass for the app link's, and an app link naming anyone else would
     // pass for the proxy's.
@@ -277,6 +392,26 @@ export function createAssertionVerifier(
       if (boundPath(htu) !== rawPath(input.path)) return { ok: false, reason: 'binding' }
     }
 
+    // A sign-in proxy whose key set holds the reader key means the program that
+    // holds it could sign a person. Checked here only for a proxy that publishes
+    // a JWKS URL, whose keys startup cannot see; a key set written into the
+    // settings is compared at startup. It compares the key material itself,
+    // whatever each set calls it, so a `kid` or the lack of one changes nothing,
+    // and a set that cannot be fetched refuses the token rather than pass it.
+    if (config.reader && opts.personKeySet && config.keys.source === 'public-key') {
+      let theirs: JSONWebKeySet
+      try {
+        theirs = await opts.personKeySet()
+      } catch {
+        return { ok: false, reason: 'keys-unavailable' }
+      }
+      if (theirs !== lastPersonSet) {
+        lastPersonSet = theirs
+        lastShared = sharesKey(config.keys.jwks, theirs)
+      }
+      if (lastShared) return { ok: false, reason: 'shared-key' }
+    }
+
     if (requestBound) {
       const jti = payload.jti
       if (typeof jti !== 'string' || jti === '' || jti.length > MAX_ID_CHARS) {
@@ -289,15 +424,51 @@ export function createAssertionVerifier(
       // Kept until jose would refuse the token as expired. It reads the clock in
       // whole seconds, so a fractional exp is good until ceil(exp) + skew; a
       // record dropped at exp + skew would let the token through once more.
-      seen.set(jti, (Math.ceil(payload.exp as number) + CLOCK_SKEW_SECONDS) * 1000)
+      const until = (Math.ceil(payload.exp as number) + CLOCK_SKEW_SECONDS) * 1000
+      // Recorded beyond memory as well, so a restart does not forget it. A
+      // record the database will not take leaves memory alone to go by, as
+      // before; the store has reported it. Refusing instead would turn a full
+      // disk into every person locked out, the health page included.
+      if (store) {
+        let first = true
+        try {
+          first = store.claim(jti, until, at)
+        } catch {
+          // Reported by the store; memory still holds the token's single use.
+        }
+        if (!first) return { ok: false, reason: 'replayed' }
+      }
+      seen.set(jti, until)
     }
+
+    // A program, never a person: nothing else is read from its token.
+    if (config.reader) return { ok: true, person: { id: sub, name: null, role: null } }
 
     const name =
       cleanText(claimAt(payload, config.nameClaim), MAX_NAME_CHARS) ??
       cleanText(payload['email'], MAX_NAME_CHARS) ??
       cleanText(payload['preferred_username'], MAX_NAME_CHARS)
-    const role = roleOf(claimAt(payload, config.roleClaim))
-    return { ok: true, person: { id: sub, name, role } }
+    const roleValue = claimAt(payload, config.roleClaim)
+    const role = roleOf(roleValue)
+    const person = { id: sub, name, role }
+    // Read only from a request-bound token: config.ts refuses the switch with
+    // session binding, and this keeps a session token from ever carrying one.
+    let control: string | undefined
+    if (config.controlClaim === 'required' && requestBound && payload['control'] !== undefined) {
+      const value = payload['control']
+      // Exactly an id, as written: no control characters, no padding, not empty.
+      if (typeof value !== 'string' || cleanText(value, MAX_ID_CHARS) !== value) {
+        return { ok: false, reason: 'claims' }
+      }
+      control = value
+    }
+    const withControl = control === undefined ? {} : { control }
+    if (config.roles !== 'enforce') return { ok: true, person, ...withControl }
+    // A claim beside the role that is there but malformed refuses the token: a
+    // `teams` that is not a list must never read as every team.
+    const access = accessFromClaims(roleValue, payload)
+    if (!access) return { ok: false, reason: 'claims' }
+    return { ok: true, person, access, ...withControl }
   }
 
   return { verify }

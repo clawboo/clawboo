@@ -49,6 +49,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_API_PORT_START`                | `18790`                           | First port of the 20-port scan                                         |
 | `PORT`                                  | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset           |
 | `CLAWBOO_HERMES_GATEWAY_PORT`           | `8642`                            | First port the Hermes gateway tries, on `127.0.0.1`                    |
+| `CLAWBOO_HERMES_STOP_GRACE_MS`          | `5000`                            | The Hermes gateway's time to stop when Clawboo stops (at most 8000)    |
 | **Folders**                             |                                   |                                                                        |
 | `CLAWBOO_HOME`                          | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
 | `CLAWBOO_WORK_DIR`                      | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
@@ -75,11 +76,11 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`     | unset                             | `1` stops the browsers starting on a new install                       |
 | `CLAWBOO_PROXY_IDENTITY`                | `off`                             | Checks a sign-in proxy's signed identity tokens                        |
 | `CLAWBOO_PROXY_IDENTITY_*`              | see below                         | The proxy's keys, issuer, audience, header and binding                 |
-| `CLAWBOO_COMPUTER_LINKS`                | `on`                              | After 0.8.0: links to agents' screens, `on`, `view` or `off`           |
-| `CLAWBOO_XVNC_PATH`                     | unset                             | After 0.8.0: the `Xvnc` agents' displays run on                        |
-| `CLAWBOO_CUA_DRIVER_PATH`               | unset                             | After 0.8.0: the Cua Driver agents use                                 |
-| `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL` | unset                             | After 0.8.0: `1` turns the desktop tools download off                  |
-| `CLAWBOO_MAX_AGENT_DISPLAYS`            | `CLAWBOO_MAX_AGENT_BROWSERS`      | After 0.8.0: agent displays running at once                            |
+| `CLAWBOO_COMPUTER_LINKS`                | `on`                              | After 0.9.1: links to agents' screens, `on`, `view` or `off`           |
+| `CLAWBOO_XVNC_PATH`                     | unset                             | After 0.9.1: the `Xvnc` agents' displays run on                        |
+| `CLAWBOO_CUA_DRIVER_PATH`               | unset                             | After 0.9.1: the Cua Driver agents use                                 |
+| `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL` | unset                             | After 0.9.1: `1` turns the desktop tools download off                  |
+| `CLAWBOO_MAX_AGENT_DISPLAYS`            | `CLAWBOO_MAX_AGENT_BROWSERS`      | After 0.9.1: agent displays running at once                            |
 | **Provider keys**                       |                                   |                                                                        |
 | `ANTHROPIC_API_KEY`                     | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes                        |
 | `OPENAI_API_KEY`                        | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings                     |
@@ -275,6 +276,16 @@ The port the Hermes gateway's API server listens on, on `127.0.0.1` only.
 
 Clawboo starts the gateway on the first free port from this one, trying 40 in all, and starts it on the port it used last when it restarts. When none of them is free, the gateway does not start and the **Gateway** section of the Hermes row says so. Any value that is not a whole number from 1 to 65535 means the default. It takes effect the next time the gateway starts. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
 
+### CLAWBOO_HERMES_STOP_GRACE_MS
+
+From 0.9.0: when Clawboo stops, how long the Hermes gateway gets to finish its planned stop after Clawboo sends it SIGINT, before Clawboo kills it and the processes it started.
+
+- Type: whole number of milliseconds, 0 to 8000
+- Default: `5000`
+- Example: `CLAWBOO_HERMES_STOP_GRACE_MS=3000`
+
+The cap is 8000: a larger value means 8000. It keeps a stop of Clawboo to about 9 seconds in all (this wait, then up to a second after the kill, alongside the 5-second wait for other runtime processes), plus up to 2 seconds to flush traces when you export them, inside the time an app that runs Clawboo, or a service manager, typically allows before it ends the process. Any value that is not a number of 0 or more means the default. It does not change a stop from the **Hermes** row, which waits 40 seconds. On Windows it has no effect: the gateway ends at once. See [The Hermes gateway](/runtimes/hermes#the-hermes-gateway).
+
 ## Folders
 
 ### CLAWBOO_HOME
@@ -375,7 +386,7 @@ Before it accepts any run, the server checks from inside that user's account tha
 
 ### CLAWBOO_AGENT_USERS
 
-A pool of operating system users, so each agent runs as a user of its own. Linux only for now, in releases after 0.7.0.
+A pool of operating system users, so each agent runs as a user of its own. Linux only for now, from 0.8.0.
 
 - Type: user names separated by commas, or a range of user ids
 - Default: unset (off)
@@ -487,36 +498,40 @@ The file is a JSON object of the keys below. Clawboo reads it once at startup an
 - it has a key Clawboo does not know, or a key whose value has the wrong type;
 - a key's name looks like a credential (containing `token`, `secret`, `password`, `apiKey`, `credential`, `privateKey` or `auth`), or a URL carries a user name, a password or a credential parameter. Keep keys in the vault or in the environment.
 
-| Key                          | Type                      | Variable                                |
-| ---------------------------- | ------------------------- | --------------------------------------- |
-| `disableSelfUpdate`          | boolean                   | `CLAWBOO_DISABLE_SELF_UPDATE`           |
-| `disableBrowserAutostart`    | boolean                   | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`     |
-| `catalogIndexUrl`            | URL                       | `CLAWBOO_CATALOG_INDEX_URL`             |
-| `proxyIdentity`              | `off`, `on` or `required` | `CLAWBOO_PROXY_IDENTITY`                |
-| `proxyIdentityHeader`        | header name               | `CLAWBOO_PROXY_IDENTITY_HEADER`         |
-| `proxyIdentityJwksUrl`       | URL                       | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`       |
-| `proxyIdentityPublicKey`     | public key                | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`     |
-| `proxyIdentityIssuer`        | string                    | `CLAWBOO_PROXY_IDENTITY_ISSUER`         |
-| `proxyIdentityAudience`      | string                    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`       |
-| `proxyIdentityBinding`       | `request` or `session`    | `CLAWBOO_PROXY_IDENTITY_BINDING`        |
-| `proxyIdentityMaxLifetime`   | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME`   |
-| `proxyIdentityNameClaim`     | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`     |
-| `proxyIdentityRoleClaim`     | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`     |
-| `anthropicBaseUrl`           | URL                       | `ANTHROPIC_BASE_URL`                    |
-| `openaiBaseUrl`              | URL                       | `OPENAI_BASE_URL`                       |
-| `openrouterBaseUrl`          | URL                       | `OPENROUTER_BASE_URL`                   |
-| `googleBaseUrl`              | URL                       | `GEMINI_BASE_URL`                       |
-| `xaiBaseUrl`                 | URL                       | `XAI_BASE_URL`                          |
-| `groqBaseUrl`                | URL                       | `GROQ_BASE_URL`                         |
-| `mistralBaseUrl`             | URL                       | `MISTRAL_BASE_URL`                      |
-| `togetherBaseUrl`            | URL                       | `TOGETHER_BASE_URL`                     |
-| `cerebrasBaseUrl`            | URL                       | `CEREBRAS_BASE_URL`                     |
-| `moonshotBaseUrl`            | URL                       | `MOONSHOT_BASE_URL`                     |
-| `computerLinks`              | `on`, `view` or `off`     | `CLAWBOO_COMPUTER_LINKS`                |
-| `xvncPath`                   | absolute path             | `CLAWBOO_XVNC_PATH`                     |
-| `cuaDriverPath`              | absolute path             | `CLAWBOO_CUA_DRIVER_PATH`               |
-| `disableDesktopToolsInstall` | boolean                   | `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL` |
-| `maxAgentDisplays`           | whole number (1 to 64)    | `CLAWBOO_MAX_AGENT_DISPLAYS`            |
+| Key                            | Type                      | Variable                                   |
+| ------------------------------ | ------------------------- | ------------------------------------------ |
+| `disableSelfUpdate`            | boolean                   | `CLAWBOO_DISABLE_SELF_UPDATE`              |
+| `disableBrowserAutostart`      | boolean                   | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`        |
+| `catalogIndexUrl`              | URL                       | `CLAWBOO_CATALOG_INDEX_URL`                |
+| `proxyIdentity`                | `off`, `on` or `required` | `CLAWBOO_PROXY_IDENTITY`                   |
+| `proxyIdentityHeader`          | header name               | `CLAWBOO_PROXY_IDENTITY_HEADER`            |
+| `proxyIdentityJwksUrl`         | URL                       | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`          |
+| `proxyIdentityPublicKey`       | public key                | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`        |
+| `proxyIdentityIssuer`          | string                    | `CLAWBOO_PROXY_IDENTITY_ISSUER`            |
+| `proxyIdentityAudience`        | string                    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`          |
+| `proxyIdentityBinding`         | `request` or `session`    | `CLAWBOO_PROXY_IDENTITY_BINDING`           |
+| `proxyIdentityMaxLifetime`     | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME`      |
+| `proxyIdentityNameClaim`       | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`        |
+| `proxyIdentityRoleClaim`       | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`        |
+| `proxyIdentityRoles`           | `off` or `enforce`        | `CLAWBOO_PROXY_IDENTITY_ROLES`             |
+| `proxyIdentityControlClaim`    | `off` or `required`       | `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM`     |
+| `proxyIdentityReaderPublicKey` | public key                | `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY` |
+| `personCheck`                  | `page` or `verified`      | `CLAWBOO_PERSON_CHECK`                     |
+| `anthropicBaseUrl`             | URL                       | `ANTHROPIC_BASE_URL`                       |
+| `openaiBaseUrl`                | URL                       | `OPENAI_BASE_URL`                          |
+| `openrouterBaseUrl`            | URL                       | `OPENROUTER_BASE_URL`                      |
+| `googleBaseUrl`                | URL                       | `GEMINI_BASE_URL`                          |
+| `xaiBaseUrl`                   | URL                       | `XAI_BASE_URL`                             |
+| `groqBaseUrl`                  | URL                       | `GROQ_BASE_URL`                            |
+| `mistralBaseUrl`               | URL                       | `MISTRAL_BASE_URL`                         |
+| `togetherBaseUrl`              | URL                       | `TOGETHER_BASE_URL`                        |
+| `cerebrasBaseUrl`              | URL                       | `CEREBRAS_BASE_URL`                        |
+| `moonshotBaseUrl`              | URL                       | `MOONSHOT_BASE_URL`                        |
+| `computerLinks`                | `on`, `view` or `off`     | `CLAWBOO_COMPUTER_LINKS`                   |
+| `xvncPath`                     | absolute path             | `CLAWBOO_XVNC_PATH`                        |
+| `cuaDriverPath`                | absolute path             | `CLAWBOO_CUA_DRIVER_PATH`                  |
+| `disableDesktopToolsInstall`   | boolean                   | `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL`    |
+| `maxAgentDisplays`             | whole number (1 to 64)    | `CLAWBOO_MAX_AGENT_DISPLAYS`               |
 
 Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
 
@@ -624,11 +639,43 @@ The claim with the person's name. When the token has none, Clawboo uses `email`,
 - Default: `role`
 - Example: `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM=groups`
 
-The claim with the person's role. A list is joined with commas. The role is recorded with the person, never enforced. Operator file key: `proxyIdentityRoleClaim`.
+The claim with the person's role. A list is joined with commas. The role is recorded with the person, and decides what they may do only while [`CLAWBOO_PROXY_IDENTITY_ROLES`](#clawboo_proxy_identity_roles) is `enforce`. Operator file key: `proxyIdentityRoleClaim`.
+
+### CLAWBOO_PROXY_IDENTITY_ROLES
+
+- Type: `off` or `enforce`
+- Default: `off`
+- Example: `CLAWBOO_PROXY_IDENTITY_ROLES=enforce`
+
+From 0.9.0. With `enforce`, the role in each token decides what its person may do: `owner`, `operator`, `member` or `guest`, with the claims beside it described in [Roles](/guides/sso-proxy#roles). It needs `CLAWBOO_PROXY_IDENTITY=required`; with any other mode the server refuses to start. Operator file key: `proxyIdentityRoles`.
+
+### CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM
+
+- Type: `off` or `required`
+- Default: `off`
+- Example: `CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM=required`
+
+From 0.9.0. With `required`, taking over an agent's screen, and every batch of input after, needs a sign-in proxy token whose `control` claim names that agent; a batch without it hands the screen back to the agent. See [Taking over a screen](/guides/sso-proxy#taking-over-a-screen). It needs `CLAWBOO_PROXY_IDENTITY` on or required, and request binding; otherwise the server refuses to start. Operator file key: `proxyIdentityControlClaim`.
+
+### CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY
+
+- Type: public key: a PEM public key (`BEGIN PUBLIC KEY`), a JWK or a JWKS
+- Default: unset
+- Example: `CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY='{"kty":"OKP","crv":"Ed25519","x":"…"}'`
+
+From 0.9.0. The public key of a program running beside Clawboo that makes its own background reads, such as one that watches for approvals. Its tokens travel in the `clawboo-reader-identity` header, name a `reader:` program, never a person, and reach only a short fixed list of reads, each workspace-wide; anything else answers `403` with `"reason": "reader"`. See [A program beside Clawboo](/guides/sso-proxy#a-program-beside-clawboo). It takes the same forms as [`CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`](#clawboo_proxy_identity_public_key) and refuses a private key the same way. It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off, or with a key that `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY` or [`CLAWBOO_APP_LINK_PUBLIC_KEY`](#clawboo_app_link_public_key) holds too, the server refuses to start. Operator file key: `proxyIdentityReaderPublicKey`.
+
+### CLAWBOO_PERSON_CHECK
+
+- Type: `page` or `verified`
+- Default: `page`
+- Example: `CLAWBOO_PERSON_CHECK=verified`
+
+From 0.9.0. Who may act as a person on the routes that take [the person check](/operating/security#the-person-check). `page`: a person a verified token names, or the dashboard's own page. `verified`: only a person a verified token names, and the same for the Gateway WebSocket and every route of an agent's screen. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off the server refuses to start. `CLAWBOO_PROXY_IDENTITY=required` always works as `verified`. Operator file key: `personCheck`.
 
 ### Agent screens
 
-In releases after 0.8.0, these settings let an administrator decide who can reach agents' screens from outside the dashboard and which programs give agents those screens. They matter on Linux, where agents get a display of their own (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Only the variables and the operator file set them; **Settings** offers none of them. A value Clawboo cannot read stops the server at startup with `CONFIG: refusing to start.`
+In releases after 0.9.1, these settings let an administrator decide who can reach agents' screens from outside the dashboard and which programs give agents those screens. They matter on Linux, where agents get a display of their own (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Only the variables and the operator file set them; **Settings** offers none of them. A value Clawboo cannot read stops the server at startup with `CONFIG: refusing to start.`
 
 ### CLAWBOO_COMPUTER_LINKS
 
@@ -640,7 +687,7 @@ Whether links to an agent's screen work.
 
 With `view`, no control link can be made, and one made earlier stops working: no one can take over a screen through a link, while view links still work. With `off`, no link of either kind can be made or used, and the access gate admits nothing on `/api/computer-link/*` without the access cookie. The setting is checked on every request a link makes, not only when a link is made.
 
-It closes the one way to a screen that needs no access token. It does not stop anyone who can sign in to the dashboard: they can still watch any agent's screen and take it over there. Operator file key: `computerLinks`.
+It closes the one way to a screen that needs no access token. It leaves the dashboard as it is: who may watch and take over there is decided as before, and behind a sign-in proxy by [`CLAWBOO_PERSON_CHECK`](#clawboo_person_check) and [`CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM`](#clawboo_proxy_identity_control_claim). Those two apply to links too, on top of this setting: a link it leaves on still needs a verified person under `verified`, and a take over through it needs the control claim where that is required. `off` turns links off whatever they say. Operator file key: `computerLinks`.
 
 ### CLAWBOO_XVNC_PATH
 
@@ -930,7 +977,7 @@ An agent browser nobody has used for this long is closed. Time the computer spen
 
 On Linux, each agent's browser opens on a display of the agent's own, which you can watch and take over (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Turned off, agents' browsers start as they would without `Xvnc`. Has no effect on macOS or Windows, where agents get no display. [`CLAWBOO_MAX_AGENT_DISPLAYS`](#clawboo_max_agent_displays) caps how many run at once, and [`CLAWBOO_XVNC_PATH`](#clawboo_xvnc_path) names the `Xvnc` they run on.
 
-In releases after 0.8.0, a display keeps its files (its cookie, its sockets and its window manager's settings) in a runtime folder in memory when the user running it has one: `XDG_RUNTIME_DIR` for the server's own user, then `/run/user/<uid>`, used only when it is a real folder owned by that user, closed to everyone else, and on `tmpfs`. The files are then not written to the data folder or a home folder, and are gone after a reboot, though a `tmpfs` can still move them to swap. Where there is none, which is usual for an agent user that never logs in, the files stay where 0.8.0 keeps them: under `CLAWBOO_HOME`, or in the agent user's home. To give an agent user one on a systemd machine, have the folder made at boot with a `tmpfiles.d` line, such as `d /run/user/10002 0700 clawboo-agent clawboo-agent -` (that user's uid and name); a login session of that user would put one of its own in its place until the session ends. Do not turn on lingering for an agent user (`loginctl enable-linger`): it starts a service manager of that user's own, through which agent code could set up services that keep running after Clawboo stops its agents, the reason [agent isolation](/operating/agent-isolation#set-it-up-on-linux) also keeps that user out of `cron` and `at`. A runtime folder can go away while Clawboo runs (systemd removes a user's own when their last login session ends): a display started in it loses its files, and the next display starts in the fallback folder.
+In releases after 0.9.1, a display keeps its files (its cookie, its sockets and its window manager's settings) in a runtime folder in memory when the user running it has one: `XDG_RUNTIME_DIR` for the server's own user, then `/run/user/<uid>`, used only when it is a real folder owned by that user, closed to everyone else, and on `tmpfs`. The files are then not written to the data folder or a home folder, and are gone after a reboot, though a `tmpfs` can still move them to swap. Where there is none, which is usual for an agent user that never logs in, the files stay where 0.9.1 keeps them: under `CLAWBOO_HOME`, or in the agent user's home. To give an agent user one on a systemd machine, have the folder made at boot with a `tmpfiles.d` line, such as `d /run/user/10002 0700 clawboo-agent clawboo-agent -` (that user's uid and name); a login session of that user would put one of its own in its place until the session ends. Do not turn on lingering for an agent user (`loginctl enable-linger`): it starts a service manager of that user's own, through which agent code could set up services that keep running after Clawboo stops its agents, the reason [agent isolation](/operating/agent-isolation#set-it-up-on-linux) also keeps that user out of `cron` and `at`. A runtime folder can go away while Clawboo runs (systemd removes a user's own when their last login session ends): a display started in it loses its files, and the next display starts in the fallback folder.
 
 ### CLAWBOO_AGENT_DISPLAY_SIZE
 
@@ -1097,7 +1144,7 @@ Runtimes Clawboo starts (Claude Code, Codex, Hermes) and the verification comman
 
 The removal works by name. Any other secret in the server's environment, including provider keys such as `OPENAI_API_KEY`, reaches every agent those runtimes run. Start Clawboo from a shell that holds only what agents may see. [What agents can do](/concepts/permissions) covers what else they can reach.
 
-With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, every process the agent host starts also loses the variables that describe your account and Clawboo's folders: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the `XDG_*` folders, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `DBUS_SESSION_BUS_ADDRESS`, `CLAWBOO_HOME`, `CLAWBOO_WORK_DIR` and the agent isolation variables, among others. The agent host fills in the agent user's own `HOME`, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`.
+With [CLAWBOO_AGENT_USER](#clawboo_agent_user) set, every process the agent host starts also loses the variables that describe your account and Clawboo's folders: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the `XDG_*` folders, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `DBUS_SESSION_BUS_ADDRESS`, `CLAWBOO_HOME`, `CLAWBOO_WORK_DIR` and the agent isolation variables, among others. The agent host fills in the agent user's own `HOME`, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`. From 0.9.0, your `PYTHONPYCACHEPREFIX` is one of them, since an agent user's Python writing bytecode into your folder could plant code your own Python then runs; a process started as the agent user, such as a runtime, a connector or an approved command, gets `PYTHONDONTWRITEBYTECODE=1` in its place, unless Clawboo gives it a folder of its own or a `PYTHONDONTWRITEBYTECODE` is already set.
 
 ## What connectors and approved commands inherit
 
@@ -1106,9 +1153,12 @@ Local connectors and the shell commands you approve for a Clawboo Native agent s
 - What a process needs to start: `PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME`, `TERM`, `TMPDIR`, `TZ`, `LANG`, `LC_ALL` and `LC_CTYPE`, and on Windows `SystemRoot`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `TEMP` and the other system folders.
 - Proxy settings: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, in either case.
 - npm's prefix, cache and update check: `npm_config_prefix`, `npm_config_cache` and `npm_config_update_notifier`, in lower or upper case (`NPM_CONFIG_PREFIX` and so on). No other npm setting arrives, so npm credentials such as `npm_config__authToken` stay out.
+- From 0.9.0, Python's bytecode settings: `PYTHONDONTWRITEBYTECODE` and `PYTHONPYCACHEPREFIX`. No other Python setting arrives, so `PYTHONPATH` and `PYTHONSTARTUP` stay out.
 - For a connector, the keys you entered for that connector.
 
-A connector also gets `npm_config_update_notifier=false` when neither spelling is set, so its `npx` start does not ask the registry for a newer npm. An approved command runs npm as you configured it.
+A connector also gets `npm_config_update_notifier=false` when neither spelling is set, so its `npx` start does not ask the registry for a newer npm. From 0.9.0, a connector started through npm (its command is `npx`, `npm` or `node`, wherever that program is, and on Windows also `npx.cmd`, `npm.cmd` or `node.exe`) also gets `PYTHONDONTWRITEBYTECODE=1` when neither Python setting is set. Starting a connector through `npx` can build a native part of one of its packages, such as `fsevents` for the browser connector, and that build runs Python, which would otherwise write `__pycache__` folders into the folder of the npm that runs it: nvm's, Homebrew's, or the npm of a Node.js bundled inside an app that runs Clawboo. A connector any other program starts, such as `uvx`, `python` or `docker`, gets no Python setting of Clawboo's, so uv keeps the bytecode it caches between starts. Either setting you make passes through as it is, for every connector, with nothing added: to keep Python's bytecode, set `PYTHONPYCACHEPREFIX` to a folder of your own before you start Clawboo, and Python writes it there. With agents as their own user, a process started as the agent user never gets that folder (see above). An approved command runs npm and Python as you configured them.
+
+The npm that installs a runtime into the [runtimes folder](/operating/data-and-state#the-runtimes-folder) (OpenClaw, Claude Code's Agent SDK, Codex, 1Password's SDK) gets `PYTHONDONTWRITEBYTECODE=1` on the same terms from 0.9.0, since a native part's build runs Python there too.
 
 <Accordion title="Source of truth">
 

@@ -110,11 +110,12 @@ export function startMcpSupervisor(opts: { log: SupervisorLog }): void {
 
   timer = setInterval(tick, probeMs)
   timer.unref()
+}
 
-  const stop = (): void => {
-    if (timer) clearInterval(timer)
-    timer = null
-  }
-  process.once('SIGTERM', stop)
-  process.once('SIGINT', stop)
+/** Stop the supervisor, for a stop of the server. Called by the server's
+ *  graceful stop rather than from a signal listener of its own (see
+ *  `stopRegistry` in agentSource/registry.ts). */
+export function stopMcpSupervisor(): void {
+  if (timer) clearInterval(timer)
+  timer = null
 }

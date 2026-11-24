@@ -218,7 +218,7 @@ export function FindPopover({
           onChange={(e) => changeQuery(e.target.value)}
           onKeyDown={onKeyDown}
           // The board's ink focus ring is the field's ring too.
-          className="h-8 w-full rounded-lg border border-border bg-surface pl-8 pr-8 text-compact text-foreground transition-colors placeholder:text-muted-foreground focus:border-foreground/40"
+          className="h-8 w-full rounded-lg border border-border bg-field pl-8 pr-8 text-compact text-foreground transition-colors placeholder:text-muted-foreground focus:border-foreground/40"
         />
         {query ? (
           <button

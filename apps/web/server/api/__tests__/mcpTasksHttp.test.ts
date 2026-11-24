@@ -90,6 +90,11 @@ async function toolNames(url: string): Promise<string[]> {
 
 const secret = (): string => getMcpAttachSecret(getDb())
 
+/** Home's reads, served to every caller but a one-to-one chat. */
+const HOME_READS = ['get_goal', 'list_goals', 'list_kpis', 'list_pages', 'read_page']
+/** Home's writes, served only to a session bound to its agent. */
+const HOME_WRITES = ['draft_goal_update', 'report_kpi', 'suggest_kpi', 'write_page']
+
 const MOVES_NO_CARD = [
   'add_comment',
   'create_subtask',
@@ -97,7 +102,8 @@ const MOVES_NO_CARD = [
   'get_task',
   'link_task',
   'list_tasks',
-]
+  ...HOME_READS,
+].sort()
 
 describe('Tasks over HTTP', () => {
   it('serves a team run (the URL serverDeliver writes) no tool that moves another card', async () => {
@@ -108,7 +114,11 @@ describe('Tasks over HTTP', () => {
       attachSecret: secret(),
     })
     expect(await toolNames(url)).toEqual(
-      [...MOVES_NO_CARD.filter((name) => name !== 'link_task'), 'block_task'].sort(),
+      [
+        ...MOVES_NO_CARD.filter((name) => name !== 'link_task'),
+        'block_task',
+        ...HOME_WRITES,
+      ].sort(),
     )
   })
 
@@ -127,6 +137,7 @@ describe('Tasks over HTTP', () => {
         'release_task',
         'unblock_task',
         'update_task_status',
+        ...HOME_WRITES,
       ].sort(),
     )
   })

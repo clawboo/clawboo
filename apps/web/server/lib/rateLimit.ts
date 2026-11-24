@@ -41,6 +41,22 @@ export const sensitiveLimiter: RateLimitRequestHandler = rateLimit({
   message: { error: 'Too many requests for this operation. Wait a moment and retry.' },
 })
 
+/**
+ * The liveness probe (GET /api/system/live), which anyone may ask without the
+ * access token. A bucket of its own, mounted ahead of the general one, so a
+ * caller with no token never uses up the ceiling the signed-in dashboard shares
+ * (behind a reverse proxy on the same computer every caller has one address).
+ * No rate-limit headers: what is left of a shared bucket says how busy the
+ * install is. 10 a second per address is far above any real poll.
+ */
+export const livenessLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: WINDOW_MS,
+  limit: 600,
+  standardHeaders: false,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Wait a moment and retry.' },
+})
+
 /** The static SPA shell, its assets, and its deep-link fallback. */
 export const staticLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: WINDOW_MS,

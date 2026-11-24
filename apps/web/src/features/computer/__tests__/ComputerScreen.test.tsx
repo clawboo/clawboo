@@ -7,20 +7,36 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const calls = vi.hoisted(() => ({
   list: [] as { path: string; init?: RequestInit }[],
   push: null as ((text: string) => void) | null,
+  close: null as (() => void) | null,
+  /** The next answer to a control or input POST, when a test sets one. */
+  answer: null as { status: number; body: unknown } | null,
+  /** The next answer to the live view, when a test sets one. */
+  live: null as { status: number; body: unknown } | null,
 }))
 
 vi.mock('@clawboo/control-client', () => ({
   apiUrl: (p: string) => p,
   apiFetch: async (path: string, init?: RequestInit) => {
     calls.list.push({ path, init })
-    if (path.endsWith('/computer/live')) {
+    if (path.endsWith('/live')) {
+      if (calls.live) {
+        const { status, body } = calls.live
+        calls.live = null
+        return new Response(JSON.stringify(body), { status })
+      }
       const enc = new TextEncoder()
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           calls.push = (text) => controller.enqueue(enc.encode(text))
+          calls.close = () => controller.close()
         },
       })
       return new Response(body, { status: 200 })
+    }
+    if (calls.answer) {
+      const { status, body } = calls.answer
+      calls.answer = null
+      return new Response(JSON.stringify(body), { status })
     }
     return new Response(JSON.stringify({ ok: true }), { status: 200 })
   },
@@ -35,6 +51,9 @@ function send(event: string, data: unknown): void {
 beforeEach(() => {
   calls.list = []
   calls.push = null
+  calls.close = null
+  calls.answer = null
+  calls.live = null
   ;(globalThis as { createImageBitmap?: unknown }).createImageBitmap = vi.fn(async () => ({
     width: 4,
     height: 2,
@@ -97,11 +116,16 @@ describe('ComputerScreen', () => {
     return screen.getByLabelText(/You have control/)
   }
 
-  async function inputEvents(): Promise<unknown[]> {
-    await new Promise((r) => setTimeout(r, 120))
+  /** Every input event sent to the agent so far, in order. */
+  function sentEvents(): unknown[] {
     return calls.list
       .filter((c) => c.path === '/api/agents/a1/computer/input')
       .flatMap((c) => (JSON.parse(String(c.init?.body)) as { events: unknown[] }).events)
+  }
+
+  async function inputEvents(): Promise<unknown[]> {
+    await new Promise((r) => setTimeout(r, 120))
+    return sentEvents()
   }
 
   it('releases a key with the keysym it was pressed with', async () => {
@@ -124,10 +148,37 @@ describe('ComputerScreen', () => {
     act(() => {
       window.dispatchEvent(new Event('blur'))
     })
-    expect(await inputEvents()).toEqual([
-      { t: 'k', s: 0xffe7, d: true },
-      { t: 'k', s: 0xffe7, d: false },
-    ])
+    await waitFor(() =>
+      expect(sentEvents()).toEqual([
+        { t: 'k', s: 0xffe7, d: true },
+        { t: 'k', s: 0xffe7, d: false },
+      ]),
+    )
+  })
+
+  it('lets go of a key pressed as control arrives when the window loses focus at once', async () => {
+    await openOnDisplay()
+    const canvas = await screen.findByLabelText("The agent's screen")
+    // Press a key and leave the window straight from the DOM change that shows
+    // this view in control, before React's next task: the canvas takes keys
+    // from that commit, so the release has to be listening from it too.
+    let pressed = false
+    const watch = new MutationObserver(() => {
+      if (!/You have control/.test(canvas.getAttribute('aria-label') ?? '')) return
+      watch.disconnect()
+      fireEvent.keyDown(canvas, { key: 'Meta', code: 'MetaLeft' })
+      window.dispatchEvent(new Event('blur'))
+      pressed = true
+    })
+    watch.observe(canvas, { attributes: true, attributeFilter: ['aria-label'] })
+    send('control', { state: 'you', canControl: true })
+    await waitFor(() => expect(pressed).toBe(true))
+    await waitFor(() =>
+      expect(sentEvents()).toEqual([
+        { t: 'k', s: 0xffe7, d: true },
+        { t: 'k', s: 0xffe7, d: false },
+      ]),
+    )
   })
 
   it('never moves a press to where a drag went next', async () => {
@@ -219,5 +270,70 @@ describe('ComputerScreen', () => {
     send('control', { state: 'other', canControl: true })
     expect(await screen.findByTestId('computer-screen-hidden')).toBeTruthy()
     expect(screen.queryByText('Connecting to the agent’s screen…')).toBeNull()
+  })
+})
+
+describe('ComputerScreen behind a sign-in proxy', () => {
+  it('says in words when the proxy has not allowed a take over', async () => {
+    await openOnDisplay()
+    calls.answer = { status: 403, body: { ok: false, error: 'control_claim' } }
+    fireEvent.click(await screen.findByRole('button', { name: 'Take over' }))
+    expect(
+      await screen.findByText(/Your sign-in proxy has not allowed you to take over this agent/),
+    ).toBeTruthy()
+  })
+
+  it('says in words when watching needs a person the proxy signed in', async () => {
+    calls.live = { status: 403, body: { ok: false, error: 'person_only' } }
+    render(<ComputerScreen target={{ kind: 'dashboard', agentId: 'a1' }} />)
+    expect(await screen.findByText(/needs a person your sign-in proxy signed in/)).toBeTruthy()
+  })
+
+  it('comes back at once when the server asks for a fresh request, naming its view', async () => {
+    await openOnDisplay()
+    const lives = () => calls.list.filter((c) => c.path === '/api/agents/a1/computer/live')
+    expect(lives()).toHaveLength(1)
+    send('renew', { afterMs: 0 })
+    act(() => calls.close!())
+    // Well inside the first reconnect step (a second), so this is the renewal.
+    await waitFor(() => expect(lives()).toHaveLength(2), { timeout: 500 })
+    const headers = lives()[1]!.init?.headers as Record<string, string>
+    expect(headers['x-clawboo-viewer']).toBe('v-1')
+  })
+
+  it('drops control when a renewal is refused, and captures no more keys', async () => {
+    await openOnDisplay()
+    send('control', { state: 'you', canControl: true })
+    await screen.findByRole('button', { name: 'Hand back' })
+    calls.live = { status: 403, body: { ok: false, error: 'person_only' } }
+    send('renew', { afterMs: 0 })
+    act(() => calls.close!())
+    expect(await screen.findByText(/needs a person your sign-in proxy signed in/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Hand back' })).toBeNull()
+    expect(screen.queryByLabelText(/You have control/)).toBeNull()
+    const canvas = screen.getByLabelText("The agent's screen")
+    expect(canvas.tabIndex).toBe(-1)
+    // Tab stays with the page (not cancelled), and nothing goes to the agent.
+    expect(fireEvent.keyDown(canvas, { key: 'Tab', code: 'Tab' })).toBe(true)
+    fireEvent.keyDown(canvas, { key: 'a', code: 'KeyA' })
+    await new Promise((r) => setTimeout(r, 80))
+    expect(calls.list.some((c) => c.path.endsWith('/computer/input'))).toBe(false)
+  })
+
+  it('drops control when the server ends the view for good', async () => {
+    await openOnDisplay()
+    send('control', { state: 'you', canControl: true })
+    await screen.findByRole('button', { name: 'Hand back' })
+    send('end', { reason: 'This agent is gone.' })
+    expect(await screen.findByText('This agent is gone.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Hand back' })).toBeNull()
+    expect(screen.queryByLabelText(/You have control/)).toBeNull()
+  })
+
+  it("a link sends this address's cookies, so a sign-in proxy can tell who it is", async () => {
+    render(<ComputerScreen target={{ kind: 'link', token: 'cbcl_x' }} />)
+    await waitFor(() => expect(calls.push).not.toBeNull())
+    const live = calls.list.find((c) => c.path === '/api/computer-link/live')!
+    expect(live.init?.credentials).toBe('same-origin')
   })
 })

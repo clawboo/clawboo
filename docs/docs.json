@@ -109,7 +109,7 @@
           },
           {
             "group": "Work with your team",
-            "pages": ["using/team-chat", "using/board", "using/org-chart"]
+            "pages": ["using/home", "using/team-chat", "using/board", "using/org-chart"]
           },
           {
             "group": "Connect AI and tools",
@@ -149,6 +149,7 @@
               "operating/index",
               "guides/self-host-securely",
               "guides/sso-proxy",
+              "guides/app-window",
               "operating/deployment",
               "operating/security",
               "operating/agent-isolation",
@@ -235,6 +236,7 @@
               "reference/rest-api/agents",
               "reference/rest-api/teams",
               "reference/rest-api/board",
+              "reference/rest-api/home",
               "reference/rest-api/memory",
               "reference/rest-api/capabilities",
               "reference/rest-api/connectors",

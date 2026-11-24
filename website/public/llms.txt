@@ -4,7 +4,7 @@
 > different runtimes. Deploy a team of agents, watch them collaborate live in one group chat and on a
 > durable kanban board, and govern them with builder-not-judge verification, USD budgets, and circuit
 > breakers. Native agents are built in, so you paste one key and go; Claude Code, Codex, Hermes, and
-> OpenClaw join as peer teammates in one chat. Open-source, MIT, local-first. Install with `npx clawboo`.
+> OpenClaw join as peer teammates in one chat. Open-source, MIT, local-first. Install with `npx clawboo@latest`.
 
 ## Docs
 - [Documentation](https://docs.claw.boo): Guides, concepts, and reference.

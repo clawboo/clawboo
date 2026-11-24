@@ -103,6 +103,10 @@ export const ENGINE_FEATURES = [
   // when the next scheduled work is due. A client reports a person with
   // POST /api/system/presence.
   'system.idle',
+  // GET and HEAD /api/system/live: whether the server is up, with no sign-in at
+  // all (no access token, no identity token). It answers `{ "ok": true }` and
+  // nothing else.
+  'system.live',
   // Pause an agent, a team or a task tree, durably, until a person resumes it
   // (/api/pauses).
   'board.pause',
@@ -113,6 +117,30 @@ export const ENGINE_FEATURES = [
   // The app that started this engine (a desktop app) can name its own people on
   // the requests it signs, as `account:` people (CLAWBOO_APP_LINK_PUBLIC_KEY).
   'auth.appLink',
+  // The role in a sign-in proxy's token decides what its person may do
+  // (proxyIdentityRoles: enforce). What this person may do: the `access` of
+  // GET /api/access/identity.
+  'auth.roles',
+  // Only a person a verified token names acts as the person (personCheck:
+  // verified, or a required sign-in proxy lane): the dashboard's page alone does
+  // not, and the Gateway WebSocket and an agent's screen need such a person too.
+  'auth.personCheck',
+  // A program running beside the server may make its own background reads with
+  // a key of its own (proxyIdentityReaderPublicKey): a short fixed list of reads,
+  // in their own header, never as a person.
+  'auth.readerKey',
+  // Taking over an agent's screen, and every batch of input after, needs a
+  // sign-in proxy token whose `control` claim names that agent
+  // (proxyIdentityControlClaim: required).
+  'computer.controlClaim',
+  // The dashboard draws a slim top bar when an app that shows it in its own window
+  // sets `data-clawboo-embed-titlebar` on <html> (with --clawboo-titlebar-inset and
+  // --clawboo-titlebar-left). A layout the dashboard supports; it has no route.
+  'ui.embedTitlebar',
+  // Home: a team's goals, KPIs, pages and status line, and the All teams view
+  // (GET /api/home and /api/home/teams/:teamId/...). Agents reach it through the
+  // Tasks MCP tools. See home.ts.
+  'home.goals',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 

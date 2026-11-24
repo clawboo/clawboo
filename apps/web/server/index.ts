@@ -37,15 +37,13 @@ import { attachIdentity } from './lib/auth'
 import { recordPersonActions } from './lib/personActions'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
 import { setDashboardPort } from './lib/connectors/dashboardGuard'
+import { repointRuntimesToServerNode } from './lib/runtimeFolder'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
 import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
-import { installServerStop, startOnceListening, watchEmbedderChannel } from './lib/serverStop'
-import {
-  isSubprocessShutdown,
-  killLiveSubprocesses,
-  shutdownLiveSubprocesses,
-} from './lib/runtimes/subprocess'
+import { installStopThenListen, watchEmbedderChannel, watchStopSignals } from './lib/serverStop'
+import { stopServerParts } from './lib/serverExit'
+import { killLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskFolders } from './lib/taskFolders'
 import { gcTaskWorkspaces } from './lib/worktrees'
 import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
@@ -86,6 +84,7 @@ import {
 import { taskForRoutineSession } from './lib/routines/openclawDispatch'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { engineHeld, engineHold } from './lib/engineHold'
+import { startHomeStatusAsks } from './lib/home/statusAsks'
 import { onPauseLifted } from './lib/pauseBus'
 import { isRunnerRerunWaiting, pumpRunnerReruns } from './lib/runnerRerun'
 import { runnerTargetOf } from './lib/runnerRoute'
@@ -95,15 +94,18 @@ import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { gatewayProxyUpstreamSettings, getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
-import { startHermesAtBoot } from './lib/runtimes/hermes'
+import { signalHermesGatewayForExit, startHermesAtBoot } from './lib/runtimes/hermes'
 import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWatcher'
 import {
   resolveApiPort,
   writeApiPortFile,
   getApiPortFilePath,
   removeApiPortFileIfOwned,
+  removeStartMarkerIfOwned,
   waitForPortFree,
+  writeStartMarker,
 } from './lib/portUtils'
+import { getCurrentVersion } from './lib/updateCheck'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe, startBackgroundFullDatabaseCheck } from './lib/bootProbe'
@@ -113,15 +115,29 @@ import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSetti
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import { loadProviderBaseUrls, providerBaseUrlWarnings } from './lib/providerBaseUrls'
 import {
+  controlClaimModeOf,
   identityConfigs,
+  loadReaderConfig,
   loadAppLinkConfig,
+  loadPersonCheck,
   loadProxyIdentityConfig,
   operatorFileReplaceable,
   proxyIdentityFileWarning,
+  rolesModeOf,
   type ProxyIdentityConfig,
 } from './lib/proxyIdentity/config'
+import {
+  controlClaimRequired,
+  personCheckLogLine,
+  personCheckMode,
+  setControlClaimMode,
+  setPersonCheckMode,
+  upgradeAllowedForPersonCheck,
+} from './lib/personCheck'
+import { upgradeAllowedForRoles } from './lib/roles/guard'
 import { createIdentityLane, type LaneSource } from './lib/proxyIdentity/lane'
-import { createAssertionVerifier } from './lib/proxyIdentity/verifier'
+import { sweepSeenTokensAtBoot } from './lib/proxyIdentity/seenTokens'
+import { identitySources } from './lib/proxyIdentity/sources'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
 import { restoreScreenshots } from './lib/screenshotBus'
@@ -203,6 +219,10 @@ async function main() {
   // before anything waits, so a stop asked for while the server starts is held
   // and runs as soon as the stop below exists.
   const embedder = watchEmbedderChannel(process, process.env)
+  // SIGINT and SIGTERM are kept the same way: no other part of the server
+  // listens for them, so one sent while the server starts is neither spent on a
+  // part that happened to listen already nor ends the process before its stop.
+  const stopSignals = watchStopSignals(process)
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
 
@@ -228,9 +248,11 @@ async function main() {
   // The proxy identity lane is among them, and refuses the same way when it is
   // on but has no key, issuer or audience it can trust. So is the app link's key,
   // which only the environment can set: an app that starts the engine and believes
-  // its link is on must not get an engine that ignores it.
+  // its link is on must not get an engine that ignores it. So is the reader key,
+  // refused with the lane off or when it is also a person's key.
   let proxyIdentityConfig: ProxyIdentityConfig | null = null
   let appLinkConfig: ProxyIdentityConfig | null = null
+  let readerConfig: ProxyIdentityConfig | null = null
   let identityConfigList: ProxyIdentityConfig[] = []
   try {
     const operator = initOperatorSettings(process.env)
@@ -240,7 +262,12 @@ async function main() {
     }
     proxyIdentityConfig = loadProxyIdentityConfig()
     appLinkConfig = loadAppLinkConfig(process.env)
-    identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig)
+    readerConfig = loadReaderConfig(proxyIdentityConfig, appLinkConfig)
+    identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig, readerConfig)
+    // Who may act as the person: the dashboard's page too, or only a verified
+    // token. From the sign-in proxy lane alone: the app link does not count.
+    setPersonCheckMode(loadPersonCheck(proxyIdentityConfig))
+    setControlClaimMode(controlClaimModeOf(proxyIdentityConfig))
     // Where Clawboo Native reaches each model provider (a gateway, a company
     // proxy), read once like the rest. A base URL receives the provider's key.
     loadProviderBaseUrls()
@@ -347,14 +374,24 @@ async function main() {
   // cookie. A link to an agent's computer is not exempted: with a token
   // required, the person opening one signs in through the proxy too.
   // The app link (an app that started this engine and signs for its own
-  // `account:` people) joins it as a second issuer, always in `on` mode.
-  const identitySources: LaneSource[] = identityConfigList.map((config) => ({
-    config,
-    verifier: createAssertionVerifier(config),
-  }))
+  // `account:` people) joins it as a second issuer, always in `on` mode, and the
+  // reader key (a program beside the server making its own reads) as a third.
+  // Each records the request-bound tokens it accepts in the database, so a token
+  // stays used across a restart.
+  // A proxy's JWKS URL cannot be compared with the reader key at startup, so the
+  // reader's verifier refuses a token the proxy's keys also verify (sources.ts).
+  const identitySourceList: LaneSource[] = identitySources(
+    identityConfigList,
+    proxyIdentityConfig,
+    {
+      // Never the token: which lane, what failed, and why.
+      onStoreError: ({ issuer, op, err }) =>
+        log.error({ issuer, op, err }, 'Proxy identity: could not record a used token'),
+    },
+  )
   const proxyIdentity =
-    identitySources.length > 0
-      ? createIdentityLane(identitySources, {
+    identitySourceList.length > 0
+      ? createIdentityLane(identitySourceList, {
           isRuntimeRequest: (req) => isRuntimeControlRequest(req, carriesAttachToken),
           // The reason only: the token never reaches a log.
           onRefuse: ({ reason, method, path }) =>
@@ -365,6 +402,13 @@ async function main() {
     log.info(
       'App link on: the app that started this engine can name its own people on a request ' +
         'it signs. A request it does not sign is treated as before.',
+    )
+  }
+  if (readerConfig) {
+    log.info(
+      { header: readerConfig.header },
+      'Reader key on: a program beside this server can make the reads on its list with its ' +
+        'own key. Those reads never act as a person.',
     )
   }
   if (proxyIdentityConfig) {
@@ -385,6 +429,34 @@ async function main() {
     }
     const fileWarning = proxyIdentityFileWarning()
     if (fileWarning) log.warn(fileWarning)
+  }
+  // Whether the role a token carries decides what its person may do. Read by
+  // every route's role guard (lib/roles/guard) and by the WebSocket upgrade.
+  const rolesMode = rolesModeOf(proxyIdentityConfig)
+  if (rolesMode === 'enforce') {
+    log.info(
+      'Roles enforced: each request may do only what the role in its token allows. ' +
+        'A token with no role this engine knows reaches only who it names, health, capabilities and presence.',
+    )
+  }
+  // The person check's mode, and how far it reaches with agents where they run.
+  if (proxyIdentityConfig || personCheckMode() === 'verified') {
+    log.info(
+      personCheckLogLine(
+        personCheckMode(),
+        !isAgentUserMode(process.env)
+          ? 'none'
+          : isAgentPoolMode(process.env)
+            ? 'agent-users'
+            : 'agent-user',
+      ),
+    )
+  }
+  if (controlClaimRequired()) {
+    log.info(
+      "Take over claim required: taking over an agent's screen, and every batch of input " +
+        'after, needs a sign-in proxy token whose control claim names that agent.',
+    )
   }
 
   // ── Same-origin guard (CSWSH / DNS-rebinding / cross-site CSRF) ────────────
@@ -491,6 +563,8 @@ async function main() {
   app.locals['basePath'] = basePath
   // POST /api/access/launch-code mints its one-time sign-in codes from this gate.
   app.locals['accessGate'] = accessGate
+  // Every route's role guard reads it (lib/roles/guard).
+  app.locals['rolesMode'] = rolesMode
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
   // of it. The guards below protect a request whose path is under `/api/` and
@@ -614,6 +688,12 @@ async function main() {
         return
       }
       if (!proxyIdentity) {
+        // Startup refuses a verified person check with no sign-in proxy lane;
+        // this keeps the socket shut should that ever change.
+        if (!upgradeAllowedForPersonCheck(personCheckMode(), null)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
         proxy.handleUpgrade(req, socket, head)
         return
       }
@@ -628,6 +708,18 @@ async function main() {
         if (socket.destroyed) return
         if (!decision.ok) {
           socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        // The Gateway socket's messages are not checked one by one, so with
+        // roles enforced only a person who may run the whole system opens it.
+        if (!upgradeAllowedForRoles(rolesMode, decision)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        // The dashboard answers OpenClaw approvals over this socket, so with the
+        // verified person check only a person the sign-in proxy names opens it.
+        if (!upgradeAllowedForPersonCheck(personCheckMode(), decision)) {
+          socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
           return
         }
         proxy.handleUpgrade(req, socket, head)
@@ -651,6 +743,25 @@ async function main() {
   } catch (err) {
     log.error({ err }, 'SQLite: could not open/bootstrap the database — see /api/health')
   }
+  // Drop the records of used identity tokens that stopped mattering while the
+  // server was down, also when the lane is now off. The rest stay, so a token
+  // used before the restart is not accepted again. Each lane also sweeps as it
+  // checks tokens.
+  try {
+    sweepSeenTokensAtBoot(getDb())
+  } catch (err) {
+    log.warn({ err }, 'Proxy identity: could not sweep the records of used tokens')
+  }
+
+  // ── Runtimes on a Node that moved ───────────────────────────────────────────
+  // A runtime Clawboo installed runs on the Node.js that installed it, by path.
+  // When that Node is gone (an app that runs Clawboo on a Node of its own was
+  // moved or renamed) and this server's Node can run the runtime, its launchers
+  // move to this Node now, so one typed in a terminal works before anything
+  // here looks it up. Each move is logged by repointRuntimeNode.
+  safeStart('runtime-node-repoint', () => {
+    repointRuntimesToServerNode()
+  })
 
   // ── Orphaned runtime children ───────────────────────────────────────────────
   // An agent run outlives an engine that dies hard: a crash, a force-quit from
@@ -1065,6 +1176,9 @@ async function main() {
       }
     }
     startChatReportUps(getDb, { mcpBaseUrl: mcpBase })
+    // Teams that turned on a lead-written Home status line: ask their lead when the
+    // board moved, inside the line's limits (lib/home/statusAsks.ts).
+    startHomeStatusAsks({ mcpBaseUrl: mcpBase })
     // First pass shortly after boot (let the registry / Boo Zero bootstrap land).
     setTimeout(pump, 10_000).unref()
     setInterval(pump, pumpMs).unref()
@@ -1158,8 +1272,9 @@ async function main() {
 
   // ── Listen ────────────────────────────────────────────────────────────────
 
-  // Not once a stop has begun: see startOnceListening.
-  const onListening = startOnceListening(isSubprocessShutdown, (): void => {
+  // What starts once the server listens. Never once a stop has begun, kept from
+  // boot or asked for while the listen completes: see installStopThenListen.
+  const startAfterListen = (): void => {
     const hostForBrowser = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname
     // Trailing slash under a mount so the shell's relative assets resolve without
     // relying on the redirect (which is there for hand-typed URLs).
@@ -1176,6 +1291,12 @@ async function main() {
           'and sends its access token only to the port it names, so it cannot sign in to ' +
           'this server until the file can be written.',
       )
+    }
+    // Right after the port file: the start marker names this process too, so a
+    // reader can tell this server from a program that took a dead one's port.
+    // A reader with no marker goes by the port file alone, as before.
+    if (!writeStartMarker(port, getCurrentVersion())) {
+      log.warn({ port }, 'Could not write the start marker api-port.json beside the port file.')
     }
 
     log.info({ url: browserUrl }, `Clawboo ready — open in browser: ${browserUrl}`)
@@ -1290,10 +1411,7 @@ async function main() {
         }
       })
       .catch((err: unknown) => log.error({ err }, 'Boot probe failed (non-fatal)'))
-  })
-  // Already listening when the work folder move ran.
-  if (server.listening) onListening()
-  else server.listen(port, hostname, onListening)
+  }
 
   // Best-effort cleanup of the runtime port file on graceful shutdown so
   // stale entries don't mislead the CLI on the next launch. We don't rely
@@ -1306,7 +1424,7 @@ async function main() {
   // recovered on the next open — so a checkpoint failure is logged and
   // never blocks shutdown or changes the exit code.
   //
-  // This runs TWICE by construction: the stop below (a signal, or a shutdown
+  // This runs TWICE by construction: the stop (a signal, or a shutdown
   // message from the app that started this server) calls it and then calls
   // `process.exit(0)`, which fires the `'exit'` hook that calls it again.
   // `closeDb()` is idempotent, and the flag keeps the port-file removal and the
@@ -1325,6 +1443,14 @@ async function main() {
     } catch (err) {
       log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
     }
+    // The Hermes gateway is not in that reap: it gets SIGINT, its planned stop
+    // (a bare SIGTERM reads to Hermes as a crash). Nothing waits here; after the
+    // graceful path it has already exited, and this is a no-op.
+    try {
+      signalHermesGatewayForExit()
+    } catch (err) {
+      log.warn({ err }, 'Failed to stop the Hermes gateway on shutdown (non-fatal)')
+    }
     // With agent isolation: every process the agent user still runs, then the
     // host. A no-op otherwise.
     try {
@@ -1336,6 +1462,8 @@ async function main() {
     // fallback, or a restart successor that has already rebound) may have
     // rewritten it, and deleting that would strand a server that is still up.
     removeApiPortFileIfOwned(port)
+    // The same rule: only a marker that names this process.
+    removeStartMarkerIfOwned()
     try {
       closeDb()
     } catch (err) {
@@ -1348,29 +1476,43 @@ async function main() {
   // process — so a child ignoring SIGTERM used to outlive the server. The wait is
   // bounded (SHUTDOWN_WAIT_MS) so a hung child can never block the exit, and it
   // never throws.
+  //
+  // The Hermes gateway's planned stop runs AT THE SAME TIME, not after, and so
+  // does closing the OpenClaw connection, after the parts that start work are
+  // stopped; traces are flushed last, so the spans of the runs those stops end
+  // are kept (see `stopServerParts`). The whole wait stays under about 11 s,
+  // inside the 15 s an app that runs Clawboo may allow a stop. With no gateway
+  // started and no trace exporter it waits for nothing.
   const gracefulExit = async (): Promise<void> => {
-    try {
-      const { signalled, exited } = await shutdownLiveSubprocesses()
-      if (signalled > 0) {
-        log.info({ signalled, exited }, 'Terminated running runtime subprocesses on shutdown')
-      }
-    } catch (err) {
-      log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
-    }
+    await stopServerParts(log)
     cleanup()
   }
-  // One stop, however it is asked for: Ctrl+C, SIGTERM, or the app that started
-  // this server, over its IPC channel. Asked twice, it runs once.
-  installServerStop({
-    proc: process,
-    channel: embedder,
-    gracefulExit,
-    exit: (code) => process.exit(code),
-    onStopping: (why) => log.info({ why }, 'Stopping the server'),
-  })
   // Last-resort synchronous path (a `process.exit` from anywhere else): it cannot
   // await, so it falls back to signalling without waiting.
   process.once('exit', cleanup)
+
+  // One stop, however it is asked for: Ctrl+C, SIGTERM, or the app that started
+  // this server, over its IPC channel. Asked twice, it runs once. Installed
+  // BEFORE the after-listen starts: a stop kept while the server started (on a
+  // boot that moved work folders the server already listens here) runs first,
+  // and then none of them run, so no routine can start a run on a server that
+  // is going away.
+  installStopThenListen(
+    {
+      proc: process,
+      signals: stopSignals,
+      channel: embedder,
+      gracefulExit,
+      exit: (code) => process.exit(code),
+      onStopping: (why) => log.info({ why }, 'Stopping the server'),
+    },
+    {
+      // Already listening when the work folder move ran.
+      listening: server.listening,
+      listen: (onListening) => server.listen(port, hostname, onListening),
+      onListening: startAfterListen,
+    },
+  )
 
   // Defensive graceful degradation: a background subsystem that rejects without a
   // local handler should NOT crash the whole server. Log it (redacted by the pino

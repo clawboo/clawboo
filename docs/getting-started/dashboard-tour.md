@@ -13,13 +13,13 @@ Use this page to find your way around. The dashboard is one browser window: a si
 
 ## The sidebar
 
-The sidebar has two parts: a narrow team rail on the far left, and the agent column next to it.
+The sidebar has three parts: a narrow team rail on the far left, the agent column next to it, and the account bar along the bottom of both.
 
 ### Team rail
 
 - **Boo Zero** (the red mascot at the top) opens Boo Zero's own page, where you talk to the leader of all your teams. Right-click it and choose **Show all agents** to open the Org chart.
-- **One icon per team.** Click an icon to open that team's **Home**. Right-click it for **Archive**, **Refresh Protocol**, **Delete team only** and **Delete with agents**; [Teams](/using/teams) explains each. Archiving takes a team off the rail, which puts its chats and Home out of reach. Nothing is deleted, but the dashboard has no list of archived teams to bring one back from.
-- **+** (**Create a team**) opens the Marketplace's **Teams** tab, where you deploy a ready-made team or start one from scratch.
+- **One icon per team.** Click an icon to open [Home](/using/home) on that team. Right-click it for **Archive**, **Refresh Protocol**, **Delete team only** and **Delete with agents**; [Teams](/using/teams) explains each. Archiving takes a team off the rail, which puts its chats and Home out of reach. Nothing is deleted, but the dashboard has no list of archived teams to bring one back from.
+- **+** (**Create a team**), at the end of the team icons, opens the Marketplace's **Teams** tab, where you deploy a ready-made team or start one from scratch. It scrolls with the icons.
 
 ### Agent column
 
@@ -29,21 +29,32 @@ From top to bottom:
 - **The team's agents**, each drawn as a Boo. A pulsing green dot marks an agent that is working and a red dot one with an error. Boo Zero comes last. Click an agent to open its page.
 - **The team's chats:** **New room**, then **General**, the chat with the whole team, then any rooms you made. A room is a smaller group of teammates with its own chat; see [Team chat](/using/team-chat).
 - **Create Boo** adds an agent to the team. It runs on OpenClaw while an OpenClaw Gateway is connected, and on Clawboo Native otherwise.
-- **The nav**, described below, and the theme switch (**System**, **Light**, **Dark**).
+- **The nav**, described below, then **Open on another device**.
 
-Drag the agent column's edge to resize it; double-click the edge to reset it. To hide the whole sidebar, drag the edge far to the left, click the hide button, or press `Cmd/Ctrl + \`. While it is hidden, a button at the start of each page's header brings it back, and hovering that button shows the sidebar without docking it.
+### Account bar
+
+A panel along the bottom of the sidebar, under the team rail and the agent column:
+
+- **Who you are.** Behind a [sign-in proxy](/guides/sso-proxy), the name it verified for you, and **Signed in via your proxy**. When nothing verified who you are, as on your own computer, it shows **You** and **Local install**: everyone at this dashboard acts as the install's one built-in person.
+- **The theme switch** (**System**, **Light**, **Dark**). See [Theme](/using/theming).
+- **The gear**, which opens **Settings** (below).
+
+On Boo Zero's page the sidebar is only the team rail, so the account bar stands upright to fit it.
+
+Drag the agent column's edge to resize it; double-click the edge to reset it. To hide the whole sidebar, drag the edge far to the left, click the hide button, or press `Cmd/Ctrl + \`. While it is hidden, a button at the start of each page's header brings it back, and hovering that button shows the sidebar without docking it, account bar included. `Cmd/Ctrl + ,` opens Settings either way. In an [app's own window](/guides/app-window) with the slim top bar, the hide button sits at the left of the top bar instead, and brings the sidebar back from there too.
 
 ### The nav
 
-| Item                               | What it opens                                                                                                                     | Shortcut       |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| **Home** (when a team is selected) | The team's Home page, a placeholder. To work with the team, open **General**                                                      | None           |
-| **Org chart**                      | Every team on one live chart, under Boo Zero                                                                                      | `Cmd/Ctrl + 1` |
-| **Board**                          | Every task by status on **Kanban**, or by day in **Today**, **Week** and **Month**, with anything waiting on you in **Needs you** | `Cmd/Ctrl + 2` |
-| **Connectors**                     | Apps and tools your agents can use, such as GitHub, Gmail or a local folder                                                       | `Cmd/Ctrl + 3` |
-| **Memory**                         | The team memory, as a graph and a list                                                                                            | `Cmd/Ctrl + 4` |
-| **Marketplace**                    | Ready-made agents, teams and skills                                                                                               | None           |
-| **Settings**                       | Everything else, in one window (below)                                                                                            | `Cmd/Ctrl + ,` |
+| Item            | What it opens                                                                                                                     | Shortcut       |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| **Home**        | How a team, or all teams, is doing: goals, KPIs, what needs you, spend and pages                                                  | None           |
+| **Org chart**   | Every team on one live chart, under Boo Zero                                                                                      | `Cmd/Ctrl + 1` |
+| **Board**       | Every task by status on **Kanban**, or by day in **Today**, **Week** and **Month**, with anything waiting on you in **Needs you** | `Cmd/Ctrl + 2` |
+| **Connectors**  | Apps and tools your agents can use, such as GitHub, Gmail or a local folder                                                       | `Cmd/Ctrl + 3` |
+| **Memory**      | The team memory, as a graph and a list                                                                                            | `Cmd/Ctrl + 4` |
+| **Marketplace** | Ready-made agents, teams and skills                                                                                               | None           |
+
+**Settings**, everything else in one window (below), is the gear in the account bar, or `Cmd/Ctrl + ,`.
 
 There is no separate approvals page. Requests that wait for your OK appear in **Needs you** on the Board and in a tray above the chat's message box; see [Approvals](/using/approvals).
 
@@ -99,12 +110,14 @@ Click an agent to open its page: its chat on the left, and cards on the right th
 
 ## Keyboard shortcuts
 
-| Keys                  | What they do                                                                                                         |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `Cmd/Ctrl + 1` to `4` | Open the Org chart, Board, Connectors or Memory                                                                      |
-| `Cmd/Ctrl + ,`        | Open Settings                                                                                                        |
-| `Cmd/Ctrl + \`        | Hide or show the sidebar                                                                                             |
-| `Escape`              | Close Settings; otherwise go from an agent page, Boo Zero's page, a team's Home or a team chat to the welcome screen |
+| Keys                  | What they do                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `Cmd/Ctrl + 1` to `4` | Open the Org chart, Board, Connectors or Memory                                                       |
+| `Cmd/Ctrl + ,`        | Open Settings                                                                                         |
+| `Cmd/Ctrl + \`        | Hide or show the sidebar                                                                              |
+| `Cmd/Ctrl + [`        | Go back a page, in an [app's own window](/guides/app-window) with the slim top bar (from 0.9.0)       |
+| `Cmd/Ctrl + ]`        | Go forward again, in the same window                                                                  |
+| `Escape`              | Close Settings; otherwise go from an agent page, Boo Zero's page or a team chat to the welcome screen |
 
 Shortcuts other than `Cmd/Ctrl + \` don't fire while you type in a text field. The welcome screen has buttons for the Org chart, the Marketplace and **Cost**, which opens **Tokens Used**. [Keyboard shortcuts](/reference/keyboard-shortcuts) also lists the Board and graph keys.
 

@@ -7,8 +7,8 @@
 // to msw's strict mode, which cannot see a fetch the component swallows.
 //
 // The <ThemeProvider> wrapper is required, not cosmetic: AgentBooAvatar (inside
-// AgentAvatar and GroupChatRow) and ThemeToggle both call useTheme(), which
-// THROWS outside a provider.
+// AgentAvatar and GroupChatRow) calls useTheme(), which THROWS outside a
+// provider.
 
 import type { ReactElement } from 'react'
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
@@ -87,7 +87,7 @@ beforeEach(() => {
   useConnectionStore.setState({ status: 'connected', client: {} as unknown as GatewayClient })
   // The store default is `{ type: 'nav', view: 'graph' }`, which would leave the
   // Atlas row active in every test — seed an inert view instead.
-  useViewStore.setState({ viewMode: { type: 'welcome' }, columnCollapsed: false })
+  useViewStore.setState({ viewMode: { type: 'welcome' }, columnCollapsed: false, homeFocus: null })
   useSettingsModalStore.setState({ open: false })
   useChatStore.setState({ transcripts: new Map(), streamingText: new Map() })
 })
@@ -119,15 +119,15 @@ describe('AgentListColumn', () => {
     // The header shows just the team name, no member count.
     const heading = screen.getByRole('heading', { level: 2 })
     expect(heading).toHaveTextContent(/^Alpha$/)
-    // A team with members gets its Home row and the General room.
-    expect(screen.getByTestId('teamspace-row')).toBeInTheDocument()
+    // Home is the first nav row, and a team with members gets the General room.
+    expect(screen.getByTestId('nav-home')).toBeInTheDocument()
     expect(screen.getByTestId('group-chat-row')).toBeInTheDocument()
 
     // The panel hydrates from the store, never from the network, on mount.
     expect(vi.mocked(listAgents)).not.toHaveBeenCalled()
   })
 
-  it("shows the team's mascots with Boo Zero last; the Home row and a mascot navigate", async () => {
+  it("shows the team's mascots with Boo Zero last; Home and a mascot navigate", async () => {
     useFleetStore.setState({
       agents: [
         agent({ id: 'a1', name: 'Research Boo', teamId: 't1' }),
@@ -144,11 +144,25 @@ describe('AgentListColumn', () => {
       'teamspace-mascot-bz',
     ])
 
-    await userEvent.click(screen.getByTestId('teamspace-row'))
-    expect(useViewStore.getState().viewMode).toEqual({ type: 'teamspace', teamId: 't1' })
+    // Home opens on the team the sidebar shows.
+    await userEvent.click(screen.getByTestId('nav-home'))
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'home' })
+    expect(useViewStore.getState().homeFocus).toMatchObject({ teamId: 't1', goalId: null })
 
     await userEvent.click(screen.getByTestId('teamspace-mascot-bz'))
     expect(useViewStore.getState().viewMode).toEqual({ type: 'agent', agentId: 'bz' })
+  })
+
+  it('shows Home first in the nav with no team selected, opening All teams', async () => {
+    useTeamStore.setState({ teams: [team({ id: 't1', name: 'Alpha' })], selectedTeamId: null })
+    renderColumn(<AgentListColumn />)
+    const navIds = screen
+      .getAllByRole('button')
+      .map((b) => b.dataset.testid)
+      .filter((id): id is string => !!id && id.startsWith('nav-'))
+    expect(navIds[0]).toBe('nav-home')
+    await userEvent.click(screen.getByTestId('nav-home'))
+    expect(useViewStore.getState().homeFocus).toMatchObject({ teamId: 'all' })
   })
 
   it('hides the OpenClaw Gateway default agent — but only when it is NOT Boo Zero', () => {
@@ -202,7 +216,7 @@ describe('AgentListColumn', () => {
     expect(screen.getByTestId('agent-search-open')).toBeInTheDocument()
   })
 
-  it('clicking a row opens that agent; the nav rows navigate and open settings', async () => {
+  it('clicking a row opens that agent; the nav rows navigate', async () => {
     useFleetStore.setState({ agents: [agent({ id: 'a1', name: 'Research Boo' })] })
     renderColumn(<AgentListColumn />)
 
@@ -218,9 +232,14 @@ describe('AgentListColumn', () => {
 
     await userEvent.click(screen.getByTestId('nav-graph'))
     expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'graph' })
+  })
 
-    await userEvent.click(screen.getByTestId('nav-settings'))
-    expect(useSettingsModalStore.getState().open).toBe(true)
+  it('leaves Settings and the theme switch to the account bar under the whole sidebar', () => {
+    renderColumn(<AgentListColumn />)
+    const column = screen.getByTestId('agent-list-column')
+    expect(within(column).queryByTestId('nav-settings')).not.toBeInTheDocument()
+    expect(within(column).queryByTestId('theme-toggle')).not.toBeInTheDocument()
+    expect(within(column).getByTestId('open-on-another-device')).toBeInTheDocument()
   })
 
   // Native mode: the app is connected and there is no Gateway client. Deleting

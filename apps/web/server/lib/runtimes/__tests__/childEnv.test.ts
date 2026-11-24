@@ -261,3 +261,61 @@ describe("buildChildEnv: the server's identity stays out of agents' environments
     expect(buildChildEnv()['CLAUDE_CONFIG_DIR']).toBe('/home/operator/.claude')
   })
 })
+
+describe("buildChildEnv: no bytecode in place of the server's Python bytecode folder", () => {
+  const keys = [
+    'CLAWBOO_AGENT_USER',
+    'CLAWBOO_AGENT_USERS',
+    'PYTHONPYCACHEPREFIX',
+    'PYTHONDONTWRITEBYTECODE',
+  ]
+  const saved: Record<string, string | undefined> = {}
+  beforeEach(() => {
+    for (const k of keys) saved[k] = process.env[k]
+    for (const k of keys) delete process.env[k]
+    process.env['CLAWBOO_AGENT_USER'] = 'clawboo-agent'
+    process.env['PYTHONPYCACHEPREFIX'] = '/home/operator/.cache/pycache'
+  })
+  afterEach(() => {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  it('turns bytecode off for an agent child that loses the folder', () => {
+    // Otherwise a runtime's Python would write __pycache__ into the sources.
+    const env = buildChildEnv()
+    expect(env['PYTHONPYCACHEPREFIX']).toBeUndefined()
+    expect(env['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
+
+  it('keeps a folder the caller gave, and a bytecode setting that is already there', () => {
+    const own = buildChildEnv({ PYTHONPYCACHEPREFIX: '/var/lib/clawboo-agent/pyc' })
+    expect(own['PYTHONPYCACHEPREFIX']).toBe('/var/lib/clawboo-agent/pyc')
+    expect(own['PYTHONDONTWRITEBYTECODE']).toBeUndefined()
+
+    expect(buildChildEnv({ PYTHONDONTWRITEBYTECODE: 'yes' })['PYTHONDONTWRITEBYTECODE']).toBe('yes')
+    process.env['PYTHONDONTWRITEBYTECODE'] = 'x'
+    expect(buildChildEnv()['PYTHONDONTWRITEBYTECODE']).toBe('x')
+    // Empty is unset for Python, so it is no setting.
+    process.env['PYTHONDONTWRITEBYTECODE'] = ''
+    expect(buildChildEnv()['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
+
+  it('adds nothing where the folder is kept or there was none', () => {
+    // A child that runs as the server's own user keeps the folder.
+    const server = buildChildEnv({}, { serverSide: true })
+    expect(server['PYTHONPYCACHEPREFIX']).toBe('/home/operator/.cache/pycache')
+    expect(server['PYTHONDONTWRITEBYTECODE']).toBeUndefined()
+
+    delete process.env['PYTHONPYCACHEPREFIX']
+    expect(buildChildEnv()['PYTHONDONTWRITEBYTECODE']).toBeUndefined()
+
+    process.env['PYTHONPYCACHEPREFIX'] = '/home/operator/.cache/pycache'
+    delete process.env['CLAWBOO_AGENT_USER']
+    const off = buildChildEnv()
+    expect(off['PYTHONPYCACHEPREFIX']).toBe('/home/operator/.cache/pycache')
+    expect(off['PYTHONDONTWRITEBYTECODE']).toBeUndefined()
+  })
+})

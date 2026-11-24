@@ -83,12 +83,14 @@ Environment=NODE_ENV=production
 EnvironmentFile=%h/.config/clawboo/clawboo.env
 ExecStart=/usr/bin/node /usr/lib/node_modules/clawboo/dist/server.js
 Restart=on-failure
+KillMode=mixed
+TimeoutStopSec=20
 
 [Install]
 WantedBy=default.target
 ```
 
-Replace the two paths in `ExecStart` with the output of `command -v node` and `npm root -g`. Agents and connectors find programs through `PATH`. If Node, npm or your agent runtimes live outside the system folders (under nvm, for example), add an `Environment=PATH=...` line with your shell's `PATH`.
+Replace the two paths in `ExecStart` with the output of `command -v node` and `npm root -g`. `KillMode=mixed` sends the stop's SIGTERM to the server alone, which then stops the agent processes it started its own way: from 0.9.0 it gives the Hermes gateway the SIGINT that Hermes reads as a planned stop. With systemd's default, every process of the service gets SIGTERM at once, and Hermes takes that for a crash. `TimeoutStopSec=20` leaves room for the server's stop, which takes about 11 seconds at most, before systemd kills what is left. Agents and connectors find programs through `PATH`. If Node, npm or your agent runtimes live outside the system folders (under nvm, for example), add an `Environment=PATH=...` line with your shell's `PATH`.
 
 Put your settings in the environment file, one `NAME=value` per line, and keep the file readable only by you:
 
@@ -146,7 +148,7 @@ CLAWBOO_HOME=/data CLAWBOO_WORK_DIR=/work \
 | `PORT=N`                   | Uses `N` when `CLAWBOO_API_PORT` is unset and the server is not in dev mode, for hosting platforms that set `PORT` |
 | `CLAWBOO_API_PORT_START=M` | Starts the search at `M` instead of `18790`                                                                        |
 
-The server writes the port it chose to `~/.clawboo/api-port.txt`, and removes the file when it stops unless another instance has rewritten it. Pin the port when something else must find the server, such as a reverse proxy. To run a second, separate instance, give it its own `CLAWBOO_HOME` and port.
+The server writes the port it chose to `~/.clawboo/api-port.txt`, and removes the file when it stops unless another instance has rewritten it. From 0.9.0 it also writes the [start marker](/reference/configuration#start-marker) `api-port.json`, which names its process; something that finds the server through these files should check the marker before it trusts the port. Pin the port when something else must find the server, such as a reverse proxy. To run a second, separate instance, give it its own `CLAWBOO_HOME` and port.
 
 ## Where the server keeps its files
 
@@ -221,7 +223,7 @@ Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere 
 | `catalogIndexUrl`                                                                              | Where the Marketplace catalog comes from, such as a mirror                                                                                                                                                             | `CLAWBOO_CATALOG_INDEX_URL`                                                                                                                     |
 | `proxyIdentity` and the other `proxyIdentity*` keys                                            | Checking a sign-in proxy's signed identity tokens, and its keys; see [Run Clawboo behind a sign-in proxy](/guides/sso-proxy)                                                                                           | `CLAWBOO_PROXY_IDENTITY` and the other `CLAWBOO_PROXY_IDENTITY_*` variables                                                                     |
 | `openrouterBaseUrl` and the other `*BaseUrl` keys                                              | Where Clawboo Native reaches each model provider, such as your gateway; see [Provider base URLs](/reference/environment-variables#provider-base-urls)                                                                  | `OPENROUTER_BASE_URL` and the other provider `*_BASE_URL` variables                                                                             |
-| `computerLinks`, `xvncPath`, `cuaDriverPath`, `disableDesktopToolsInstall`, `maxAgentDisplays` | In releases after 0.8.0: links to agents' screens, the programs their screens run, the desktop tools download, and how many screens run at once; see [Agents' screens](/reference/environment-variables#agent-screens) | `CLAWBOO_COMPUTER_LINKS`, `CLAWBOO_XVNC_PATH`, `CLAWBOO_CUA_DRIVER_PATH`, `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL`, `CLAWBOO_MAX_AGENT_DISPLAYS` |
+| `computerLinks`, `xvncPath`, `cuaDriverPath`, `disableDesktopToolsInstall`, `maxAgentDisplays` | In releases after 0.9.1: links to agents' screens, the programs their screens run, the desktop tools download, and how many screens run at once; see [Agents' screens](/reference/environment-variables#agent-screens) | `CLAWBOO_COMPUTER_LINKS`, `CLAWBOO_XVNC_PATH`, `CLAWBOO_CUA_DRIVER_PATH`, `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL`, `CLAWBOO_MAX_AGENT_DISPLAYS` |
 
 - Every key also has an environment variable, and the variable wins over the file.
 - Clawboo reads the file once at startup, so run `clawboo restart` after a change. It never writes the file.
@@ -255,9 +257,9 @@ An app can run the server as a child process of its own and show the dashboard i
 
 ### Stop it over the channel
 
-- **With a message.** Send `{ "type": "shutdown" }` on the channel. The server stops as it does on Ctrl+C or SIGTERM: it stops the agent processes it started, waits up to 5 seconds for them, closes the database and exits with code `0`. This works on every platform, and on Windows it is the only clean stop, because a signal from another process ends the server at once there. To let the agent runs finish first, [drain](/reference/rest-api/system#drain-and-hold) before you send it.
+- **With a message.** Send `{ "type": "shutdown" }` on the channel. The server stops as it does on Ctrl+C or SIGTERM: it stops the agent processes it started, waits up to 5 seconds for them, closes the database and exits with code `0`. It also stops its routines, closes its OpenClaw connection and flushes traces. From 0.9.0 the Hermes gateway gets its planned stop at the same time as that wait, and traces are flushed last, so the whole stop stays under about 11 seconds. This works on every platform, and on Windows it is the only clean stop, because a signal from another process ends the server at once there. To let the agent runs finish first, [drain](/reference/rest-api/system#drain-and-hold) before you send it.
 - **When the channel closes.** Set `CLAWBOO_STOP_ON_DISCONNECT=1` in the server's environment, and it also stops this way when the channel closes: your app quit, crashed or called `disconnect()`. Without it, the server keeps running when the channel closes. The `clawboo` launcher relies on that: it starts the server with `fork()`, lets go of the channel and exits.
-- A shutdown message sent while the server is still starting is kept, and the server stops once it has started. A server that fails to start exits with code `1`, whether or not your app still holds the channel. Once it is running, asking more than one way (the message, then a SIGTERM) stops it once. Other messages are ignored.
+- A shutdown message sent while the server is still starting is kept, and the server stops once it has started. From 0.9.0 a SIGINT or SIGTERM sent while it starts is kept the same way, and a kept stop runs before anything the server starts once it listens, so no routine can start a run on a server that is stopping. Before, a SIGTERM during the start could be taken by one part of the server and lost: the server kept running, and its later stop left the OpenClaw connection open. A server that fails to start exits with code `1`, whether or not your app still holds the channel. Once it is running, asking more than one way (the message, then a SIGTERM) stops it once. Other messages are ignored.
 - **Turn off the in-app update** with `CLAWBOO_DISABLE_SELF_UPDATE=1`, and update the server with your app instead. The in-app update replaces the server with a new process your app did not start: it has no channel, so your app can neither stop it over one nor have it stop with the app.
 
 The server reads `CLAWBOO_STOP_ON_DISCONNECT` once and removes it from its environment, so the agents and programs it starts do not inherit it, and the launcher never passes it to a server it starts.

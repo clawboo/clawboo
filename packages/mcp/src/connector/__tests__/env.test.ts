@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CONNECTOR_ENV_ALLOWLIST, connectorChildEnv } from '../env'
+import { CONNECTOR_ENV_ALLOWLIST, connectorChildEnv, launchesThroughNpm } from '../env'
 
 /** An ambient environment holding the things an operator really does export. */
 const AMBIENT: NodeJS.ProcessEnv = {
@@ -164,6 +164,126 @@ describe('connectorChildEnv', () => {
     expect(Object.keys(env).some((k) => k.toLowerCase() === 'npm_config_update_notifier')).toBe(
       false,
     )
+  })
+
+  it('turns Python’s bytecode off for a connector started through npm', () => {
+    // A connector's npm install can run python3 (node-gyp, for an optional
+    // native part such as fsevents), and Python would write __pycache__
+    // folders into the install tree of the npm that started it.
+    for (const command of ['npx', 'npm', 'node']) {
+      const env = connectorChildEnv({ source: AMBIENT, command, platform: 'linux' })
+      expect(env['PYTHONDONTWRITEBYTECODE'], command).toBe('1')
+      expect('PYTHONPYCACHEPREFIX' in env).toBe(false)
+    }
+    // A caller that does not say how it starts the connector gets it too.
+    expect(connectorChildEnv({ source: AMBIENT })['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
+
+  it('adds no bytecode setting for a connector started any other way', () => {
+    // uv keeps compiled bytecode in its own environments between starts; a
+    // default here would make every uvx connector compile from source.
+    for (const command of ['uvx', '/opt/homebrew/bin/uvx', 'python3', 'docker', '/srv/my-server']) {
+      const env = connectorChildEnv({ source: AMBIENT, command, platform: 'darwin' })
+      expect(
+        Object.keys(env).some((k) => k.startsWith('PYTHON')),
+        command,
+      ).toBe(false)
+    }
+  })
+
+  it('counts npx, npm or node by file name, so a bundled one counts', () => {
+    for (const command of [
+      '/Applications/Some App.app/Contents/Resources/node/bin/npx',
+      '/opt/node-24/bin/node',
+      '/usr/local/bin/npm',
+    ]) {
+      expect(launchesThroughNpm(command, 'darwin'), command).toBe(true)
+      const env = connectorChildEnv({ source: AMBIENT, command, platform: 'darwin' })
+      expect(env['PYTHONDONTWRITEBYTECODE'], command).toBe('1')
+    }
+    // A program merely named like one is not one.
+    for (const command of ['/opt/npx-helper', '/usr/bin/nodejs-tool', 'npx.sh', 'NPX']) {
+      expect(launchesThroughNpm(command, 'linux'), command).toBe(false)
+    }
+  })
+
+  it('counts npx.cmd, npm.cmd and node.exe on Windows, in any case', () => {
+    for (const command of [
+      'C:\\Program Files\\Some App\\node\\npx.cmd',
+      'C:\\Program Files\\Some App\\node.exe',
+      'C:\\nodejs\\NPM.CMD',
+      'Node.exe',
+      'npx',
+    ]) {
+      expect(launchesThroughNpm(command, 'win32'), command).toBe(true)
+      const env = connectorChildEnv({ source: AMBIENT, command, platform: 'win32' })
+      expect(env['PYTHONDONTWRITEBYTECODE'], command).toBe('1')
+    }
+    expect(launchesThroughNpm('C:\\uv\\uvx.exe', 'win32')).toBe(false)
+    // Only Windows reads those extensions as the program.
+    expect(launchesThroughNpm('/opt/node/npx.cmd', 'linux')).toBe(false)
+    expect(launchesThroughNpm('/opt/node/node.exe', 'linux')).toBe(false)
+  })
+
+  it('passes the operator’s bytecode settings through for either kind of launcher', () => {
+    for (const command of ['npx', 'uvx']) {
+      const prefix = connectorChildEnv({
+        source: { ...AMBIENT, PYTHONPYCACHEPREFIX: '/home/dev/.cache/pycache' },
+        command,
+        platform: 'linux',
+      })
+      expect(prefix['PYTHONPYCACHEPREFIX'], command).toBe('/home/dev/.cache/pycache')
+      expect('PYTHONDONTWRITEBYTECODE' in prefix, command).toBe(false)
+
+      const own = connectorChildEnv({
+        source: { ...AMBIENT, PYTHONDONTWRITEBYTECODE: 'yes' },
+        command,
+        platform: 'linux',
+      })
+      expect(own['PYTHONDONTWRITEBYTECODE'], command).toBe('yes')
+    }
+  })
+
+  it('passes a bytecode setting the operator made through, and adds none beside it', () => {
+    const own = connectorChildEnv({ source: { ...AMBIENT, PYTHONDONTWRITEBYTECODE: 'yes' } })
+    expect(own['PYTHONDONTWRITEBYTECODE']).toBe('yes')
+
+    const prefix = connectorChildEnv({
+      source: { ...AMBIENT, PYTHONPYCACHEPREFIX: '/home/dev/.cache/pycache' },
+    })
+    expect(prefix['PYTHONPYCACHEPREFIX']).toBe('/home/dev/.cache/pycache')
+    expect('PYTHONDONTWRITEBYTECODE' in prefix).toBe(false)
+  })
+
+  it('reads an empty bytecode setting as none', () => {
+    // Python itself treats an empty PYTHONDONTWRITEBYTECODE as unset.
+    const env = connectorChildEnv({ source: { ...AMBIENT, PYTHONDONTWRITEBYTECODE: '' } })
+    expect(env['PYTHONDONTWRITEBYTECODE']).toBe('1')
+  })
+
+  it('adds no bytecode setting when asked to inherit it, and passes the operator’s through', () => {
+    const bare = connectorChildEnv({ source: AMBIENT, pythonBytecode: 'inherit' })
+    expect(Object.keys(bare).some((k) => k.startsWith('PYTHON'))).toBe(false)
+
+    const own = connectorChildEnv({
+      source: { ...AMBIENT, PYTHONDONTWRITEBYTECODE: '1', PYTHONPYCACHEPREFIX: '/tmp/pyc' },
+      pythonBytecode: 'inherit',
+    })
+    expect(own['PYTHONDONTWRITEBYTECODE']).toBe('1')
+    expect(own['PYTHONPYCACHEPREFIX']).toBe('/tmp/pyc')
+  })
+
+  it('lets through only the two Python settings, none that changes what Python runs', () => {
+    // PYTHONPATH and PYTHONSTARTUP would let the server's environment decide
+    // code a connector's Python loads, and PYTHONHOME which Python it is.
+    const python = [...CONNECTOR_ENV_ALLOWLIST].filter((n) => n.toUpperCase().startsWith('PYTHON'))
+    expect(python.sort()).toEqual(['PYTHONDONTWRITEBYTECODE', 'PYTHONPYCACHEPREFIX'])
+    const env = connectorChildEnv({
+      source: { ...AMBIENT, PYTHONPATH: '/evil', PYTHONSTARTUP: '/evil.py', PYTHONHOME: '/x' },
+    })
+    expect(env['PYTHONPATH']).toBeUndefined()
+    expect(env['PYTHONSTARTUP']).toBeUndefined()
+    expect(env['PYTHONHOME']).toBeUndefined()
   })
 
   it('carries the Windows variables a child cannot start without', () => {

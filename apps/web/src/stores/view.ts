@@ -15,6 +15,9 @@ import { scopedLocalStorage } from '@/lib/clientStorage'
 // rule in `lib/topBar.ts` builds its set from this, so adding a view here keeps
 // that rule in sync automatically (every nav panel hosts the Star pill inline).
 export const NAV_VIEWS = [
+  // Home: one page for every team (a team picker like the Board's), with each
+  // team's goals, KPIs, pinned pages and a status line.
+  'home',
   'graph',
   'fleet',
   'cost',
@@ -47,8 +50,6 @@ export type ViewMode =
       /** One of the team's chat rooms; null/absent = the team's own group chat. */
       roomId?: string | null
     }
-  /** The team's overview: its graph and every task from all its rooms. */
-  | { type: 'teamspace'; teamId: string }
 
 /** A task the Board should open in its detail drawer the next time it renders
  *  (set by "Open on board" from a chat task card). `nonce` makes a second
@@ -56,6 +57,16 @@ export type ViewMode =
 export interface BoardFocus {
   taskId: string
   teamId: string | null
+  nonce: number
+}
+
+/** A request for Home to show a team (or All teams), and with `goalId` that
+ *  goal's page (set by a click on a team in the rail, and by a goal chip on the
+ *  Board). Consumed once, like `BoardFocus`. */
+export interface HomeFocus {
+  /** A team id, or `all`. */
+  teamId: string
+  goalId: string | null
   nonce: number
 }
 
@@ -70,11 +81,62 @@ export interface BoardNeedsYouFocus {
   nonce: number
 }
 
+// ─── History ─────────────────────────────────────────────────────────────────
+// The dashboard's own back and forward, for the slim top bar an app that shows
+// the dashboard in its own window can ask for. A view the person moves to pushes
+// the one they left onto `past` and clears `future`, like a browser tab. It is
+// bounded and kept in memory only: a reload starts it empty.
+
+/** How many views back (and forward) the history keeps. */
+export const VIEW_HISTORY_LIMIT = 50
+
+export interface ViewHistory {
+  /** Views left behind, oldest first: back goes to the last one. */
+  past: ViewMode[]
+  /** Views stepped back from, nearest first: forward goes to the first one. */
+  future: ViewMode[]
+}
+
+const EMPTY_HISTORY: ViewHistory = { past: [], future: [] }
+
+/** True when two view modes show the same page. A new object for the same page
+ *  (Needs you asked for again while the board is open) is not a move. */
+export function sameView(a: ViewMode, b: ViewMode): boolean {
+  if (a.type !== b.type) return false
+  switch (a.type) {
+    case 'agent':
+      return a.agentId === (b as typeof a).agentId
+    case 'nav':
+      return a.view === (b as typeof a).view
+    case 'groupChat':
+      return (
+        a.teamId === (b as typeof a).teamId &&
+        (a.roomId ?? null) === ((b as typeof a).roomId ?? null)
+      )
+    default:
+      return true
+  }
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 interface ViewStore {
   viewMode: ViewMode
   setViewMode: (mode: ViewMode) => void
+  /** Show `mode` in place of the current view, leaving nothing in the history:
+   *  for a page that went away under the person (its team, agent or room was
+   *  deleted), so back never returns to it. */
+  replaceViewMode: (mode: ViewMode) => void
+
+  /** The views back and forward step through. */
+  viewHistory: ViewHistory
+  /** Step back (or forward) to the nearest view `usable` accepts, dropping the
+   *  ones it refuses on the way. Returns the view now shown, or null when there
+   *  was nowhere to go (and nothing changed). */
+  stepViewHistory: (
+    direction: 'back' | 'forward',
+    usable?: (mode: ViewMode) => boolean,
+  ) => ViewMode | null
 
   /** Navigate to a NavView (graph, board, cost, marketplace, routines, system). */
   navigateTo: (view: NavView) => void
@@ -103,8 +165,13 @@ interface ViewStore {
   /** Open the team group chat view, or one of the team's chat rooms. */
   openGroupChat: (teamId: string, roomId?: string | null) => void
 
-  /** Open the team's overview (graph + tasks from every room). */
-  openTeamspace: (teamId: string) => void
+  /** Pending "show this team / goal" request for Home (consumed once). */
+  homeFocus: HomeFocus | null
+  /** Switch to Home on `teamId` (a team id or `all`; null keeps Home's team),
+   *  and with `goalId` open that goal's page. */
+  openHome: (teamId?: string | null, goalId?: string | null) => void
+  /** Home took the request. */
+  clearHomeFocus: () => void
 
   /** Whether the whole left sidebar (team rail + agent column) is collapsed. */
   columnCollapsed: boolean
@@ -136,19 +203,68 @@ function initialSidebarWidth(): number {
   return Number.isFinite(n) && n > 0 ? clampSidebarWidth(n) : SIDEBAR_NATURAL_WIDTH
 }
 
-export const useViewStore = create<ViewStore>((set) => ({
+/** The state for a move to `next`: the view it leaves goes onto `past`, and
+ *  `future` empties. The same page again keeps the history as it is, but still
+ *  takes the new object, so whatever reacts to a navigation still sees one. */
+function moveTo(
+  s: Pick<ViewStore, 'viewMode' | 'viewHistory'>,
+  next: ViewMode,
+): Pick<ViewStore, 'viewMode' | 'viewHistory'> {
+  if (sameView(s.viewMode, next)) return { viewMode: next, viewHistory: s.viewHistory }
+  return {
+    viewMode: next,
+    viewHistory: {
+      past: [...s.viewHistory.past, s.viewMode].slice(-VIEW_HISTORY_LIMIT),
+      future: [],
+    },
+  }
+}
+
+export const useViewStore = create<ViewStore>((set, get) => ({
   viewMode: { type: 'nav', view: 'graph' },
 
-  setViewMode: (mode) => set({ viewMode: mode }),
+  setViewMode: (mode) => set((s) => moveTo(s, mode)),
 
-  navigateTo: (view) => set({ viewMode: { type: 'nav', view } }),
+  replaceViewMode: (mode) => set({ viewMode: mode }),
+
+  viewHistory: EMPTY_HISTORY,
+  stepViewHistory: (direction, usable = () => true) => {
+    const { viewMode, viewHistory } = get()
+    const back = direction === 'back'
+    // Nearest first in both directions.
+    const queue = back ? [...viewHistory.past].reverse() : viewHistory.future
+    const at = queue.findIndex((m) => usable(m) && !sameView(m, viewMode))
+    if (at < 0) return null
+    const target = queue[at]!
+    const rest = queue.slice(at + 1)
+    set(
+      back
+        ? {
+            viewMode: target,
+            viewHistory: {
+              past: rest.reverse(),
+              future: [viewMode, ...viewHistory.future].slice(0, VIEW_HISTORY_LIMIT),
+            },
+          }
+        : {
+            viewMode: target,
+            viewHistory: {
+              past: [...viewHistory.past, viewMode].slice(-VIEW_HISTORY_LIMIT),
+              future: rest,
+            },
+          },
+    )
+    return target
+  },
+
+  navigateTo: (view) => set((s) => moveTo(s, { type: 'nav', view })),
 
   boardFocus: null,
   // Each request replaces the other kind still waiting, so when both wait for
   // the Board to mount, the newer one is what it shows.
   openBoardTask: (taskId, teamId = null) =>
     set((s) => ({
-      viewMode: { type: 'nav', view: 'board' },
+      ...moveTo(s, { type: 'nav', view: 'board' }),
       boardFocus: { taskId, teamId, nonce: (s.boardFocus?.nonce ?? 0) + 1 },
       boardNeedsYouFocus: null,
     })),
@@ -157,7 +273,7 @@ export const useViewStore = create<ViewStore>((set) => ({
   boardNeedsYouFocus: null,
   openBoardNeedsYou: (teamId = null, approvalId = null) =>
     set((s) => ({
-      viewMode: { type: 'nav', view: 'board' },
+      ...moveTo(s, { type: 'nav', view: 'board' }),
       boardNeedsYouFocus: {
         teamId,
         approvalId,
@@ -167,16 +283,22 @@ export const useViewStore = create<ViewStore>((set) => ({
     })),
   clearBoardNeedsYouFocus: () => set({ boardNeedsYouFocus: null }),
 
-  openAgent: (agentId) => set({ viewMode: { type: 'agent', agentId } }),
+  openAgent: (agentId) => set((s) => moveTo(s, { type: 'agent', agentId })),
 
-  openBooZero: () => set({ viewMode: { type: 'booZero' } }),
+  openBooZero: () => set((s) => moveTo(s, { type: 'booZero' })),
 
   openGroupChat: (teamId, roomId = null) =>
-    set({
-      viewMode: roomId ? { type: 'groupChat', teamId, roomId } : { type: 'groupChat', teamId },
-    }),
+    set((s) =>
+      moveTo(s, roomId ? { type: 'groupChat', teamId, roomId } : { type: 'groupChat', teamId }),
+    ),
 
-  openTeamspace: (teamId) => set({ viewMode: { type: 'teamspace', teamId } }),
+  homeFocus: null,
+  openHome: (teamId = null, goalId = null) =>
+    set((s) => ({
+      ...moveTo(s, { type: 'nav', view: 'home' }),
+      homeFocus: teamId ? { teamId, goalId, nonce: (s.homeFocus?.nonce ?? 0) + 1 } : s.homeFocus,
+    })),
+  clearHomeFocus: () => set({ homeFocus: null }),
 
   columnCollapsed: readStored(SIDEBAR_COLLAPSED_KEY) === '1',
   toggleColumnCollapsed: () =>

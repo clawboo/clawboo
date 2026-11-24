@@ -687,7 +687,7 @@ async function spawnReservedBrowser(
             },
           }),
       env: {
-        ...connectorChildEnv({ declared }),
+        ...connectorChildEnv({ declared, command: plan.command }),
         ...plan.env,
         // The display, its cookie and its bus: the display's own private bus,
         // or one that cannot exist, never unset (see NO_SESSION_BUS).

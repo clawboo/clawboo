@@ -27,6 +27,17 @@
 // WebSocket. Messages on that socket are not checked one by one, so an answer
 // sent there would skip what an app's person may not do (allow an approval
 // always); an upgrade that carries the app's token is refused.
+//
+// THE READER KEY (in releases after 0.8.0) is a third issuer with a header of
+// its own: a program running beside the server making its own background reads.
+// Its token is let through only to the reads in readerRoutes.ts, never the
+// Gateway WebSocket, and anything else answers 403 (`"error": "role"`,
+// `"reason": "reader"`). It never sets a person: it sets `req.reader` instead,
+// so nothing records it as anyone and no person check takes it.
+//
+// THE LIVENESS PROBE (GET or HEAD /api/system/live) needs no token, in either
+// mode, like the access gate lets it through without the access token. One
+// that carries a token is checked like any other request.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
@@ -35,18 +46,22 @@ import type { NextFunction, Request, Response } from 'express'
 import {
   anyPathUnder,
   everyPathUnder,
+  isLivenessRequest,
   requestPathReadings,
   targetPath,
 } from '@clawboo/gateway-proxy'
 import type { PersonRef } from '@clawboo/protocol'
 
-import type { ProxyIdentityConfig } from './config'
+import type { PersonAccess } from '../roles/policy'
+import { issuerOf, type IdentityIssuer, type ProxyIdentityConfig } from './config'
+import { readerMayRead } from './readerRoutes'
 import type { AssertionRefusal, AssertionVerifier } from './verifier'
 
 /** The refusal's reason: a verifier's, `missing` when a required token is
- *  absent, `two-tokens` when a request carries both issuers' tokens, `route`
- *  when an issuer limited to some routes (the app link) sent one elsewhere. */
-export type LaneRefusal = AssertionRefusal | 'missing' | 'two-tokens' | 'route'
+ *  absent, `two-tokens` when a request carries two issuers' tokens, `route`
+ *  when an issuer limited to some routes (the app link) sent one elsewhere,
+ *  `reader` when the reader key's token is sent off its list (a 403, below). */
+export type LaneRefusal = AssertionRefusal | 'missing' | 'two-tokens' | 'route' | 'reader'
 
 /** One issuer the lane trusts: its settings and the verifier built from them. */
 export interface LaneSource {
@@ -63,7 +78,15 @@ export interface ProxyIdentityLane {
 }
 
 export type LaneDecision =
-  { ok: true; person: PersonRef | null } | { ok: false; reason: LaneRefusal }
+  | {
+      ok: true
+      person: PersonRef | null
+      /** What the person's token grants, with roles enforced. */
+      access?: PersonAccess | null
+      /** The agent the token's `control` claim names, with the claim required. */
+      control?: string | null
+    }
+  | { ok: false; reason: LaneRefusal }
 
 export interface LaneOptions {
   /** True for a spawned runtime's own `/api/mcp/*` call, as the access gate judges it. */
@@ -74,7 +97,7 @@ export interface LaneOptions {
 
 /** Recognised by "clawboo" and "token" like the access gate's 401, and by `gate`.
  *  `from` names whose token was refused, when one was. */
-export function laneRefusalBody(reason: LaneRefusal, from: 'proxy' | 'app' = 'proxy'): string {
+export function laneRefusalBody(reason: LaneRefusal, from: IdentityIssuer = 'proxy'): string {
   return JSON.stringify({
     error:
       reason === 'missing'
@@ -85,9 +108,26 @@ export function laneRefusalBody(reason: LaneRefusal, from: 'proxy' | 'app' = 'pr
             ? 'The app that started Clawboo may not sign for this request.'
             : from === 'app'
               ? 'Clawboo refused the identity token from the app that started it.'
-              : 'Clawboo refused the identity token from your sign-in proxy.',
+              : from === 'reader'
+                ? 'Clawboo refused the identity token signed with its reader key.'
+                : 'Clawboo refused the identity token from your sign-in proxy.',
     gate: 'clawboo-proxy-identity',
     reason,
+  })
+}
+
+/** The message of a reader request off its list. lib/roles/guard.ts gives the
+ *  same one for its own `reader` refusal. */
+export const READER_REFUSAL_MESSAGE = 'The reader key may make only the reads on its list.'
+
+/** The 403 a reader key's token gets off its list: shaped like a role refusal
+ *  (lib/roles/guard.ts `roleRefusalBody`), so a client reads one kind of 403. */
+export function readerRefusalBody(): string {
+  return JSON.stringify({
+    ok: false,
+    error: 'role',
+    reason: 'reader',
+    message: READER_REFUSAL_MESSAGE,
   })
 }
 
@@ -110,17 +150,16 @@ export function createProxyIdentityLane(
   return createIdentityLane([{ config, verifier }], opts)
 }
 
-type Decided = LaneDecision & { from?: 'proxy' | 'app' }
+type Decided = LaneDecision & { from?: IdentityIssuer }
 
 /** The lane for every issuer the engine trusts: the sign-in proxy's, the app
- *  link's, or both. Each reads its own header. */
+ *  link's, the reader key's, or any of them together. Each reads its own header. */
 export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): ProxyIdentityLane {
   if (sources.length === 0) throw new Error('an identity lane needs at least one issuer')
   const headers = new Set(sources.map((s) => s.config.header))
   if (headers.size !== sources.length) throw new Error('two issuers share one header')
   const required = sources.some((s) => s.config.mode === 'required')
-  const fromOf = (source: LaneSource): 'proxy' | 'app' =>
-    source.config.accountSubjects === 'only' ? 'app' : 'proxy'
+  const fromOf = (source: LaneSource): IdentityIssuer => issuerOf(source.config)
   const tokensCarried = (req: IncomingMessage): number =>
     sources.filter((s) => tokenFrom(req, s.config.header) !== undefined).length
   const carriesToken = (req: IncomingMessage): boolean => tokensCarried(req) > 0
@@ -139,8 +178,18 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
       )
     })
 
+  /** A reader key's token on a request that is not one of its reads. */
+  const offReaderList = (req: IncomingMessage): boolean =>
+    sources.some(
+      (s) =>
+        fromOf(s) === 'reader' &&
+        tokenFrom(req, s.config.header) !== undefined &&
+        !readerMayRead(req),
+    )
+
+  // Only a sign-in proxy's token opens the Gateway WebSocket.
   const upgradeSources = sources.filter((s) => fromOf(s) === 'proxy')
-  const appSources = sources.filter((s) => fromOf(s) === 'app')
+  const otherSources = sources.filter((s) => fromOf(s) !== 'proxy')
 
   /** `path` is the one the request arrived with, the base path included: the
    *  path the proxy signed. `pool` is the issuers whose tokens count here. */
@@ -161,13 +210,21 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     if (token === '') return { ok: false, reason: 'malformed', from }
     try {
       const result = await source.verifier.verify({ token, method: req.method ?? 'GET', path })
-      return result.ok ? { ok: true, person: result.person, from } : { ...result, from }
+      return result.ok
+        ? {
+            ok: true,
+            person: result.person,
+            access: result.access ?? null,
+            control: result.control ?? null,
+            from,
+          }
+        : { ...result, from }
     } catch {
       return { ok: false, reason: 'malformed', from }
     }
   }
 
-  function refuse(res: ServerResponse, reason: LaneRefusal, from?: 'proxy' | 'app'): void {
+  function refuse(res: ServerResponse, reason: LaneRefusal, from?: IdentityIssuer): void {
     res.statusCode = 401
     res.setHeader('Content-Type', 'application/json')
     res.setHeader('Cache-Control', 'no-store')
@@ -180,6 +237,12 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     // @clawboo/gateway-proxy's request-path): no letter case, dot segment,
     // backslash or absolute-form target routes past the lane.
     if (!anyPathUnder(req, '/api/')) {
+      next()
+      return
+    }
+    // The liveness probe needs no identity. One that carries a token is checked
+    // like any other request: a bad token is refused on every path.
+    if (isLivenessRequest(req) && !carriesToken(req)) {
       next()
       return
     }
@@ -204,25 +267,61 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
       refuse(res, 'route', 'app')
       return
     }
+    if (offReaderList(req)) {
+      opts.onRefuse?.({ reason: 'reader', method: req.method, path })
+      res.statusCode = 403
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('Cache-Control', 'no-store')
+      res.end(readerRefusalBody())
+      return
+    }
     void decide(req, path).then((decision) => {
       if (!decision.ok) {
         opts.onRefuse?.({ reason: decision.reason, method: req.method, path })
         refuse(res, decision.reason, decision.from)
         return
       }
-      req.person = decision.person
-      if (decision.person && decision.from) req.personVia = decision.from
+      // The reader key's program is never a person: no person, no access, no
+      // claim, nothing a person check or a record could take for one.
+      if (decision.from === 'reader') {
+        req.person = null
+        req.access = null
+        req.controlClaim = null
+        req.reader = decision.person?.id ?? null
+        next()
+        return
+      }
+      // A service token (roles enforced, `svc: true`) is a program acting for the
+      // sign-in front, never a person: it is kept apart, so nothing records it as
+      // one and no person check takes it.
+      const service = decision.access?.service === true
+      req.person = service ? null : decision.person
+      if (service) req.service = decision.person
+      req.access = decision.access ?? null
+      if (!service && decision.person && decision.from) req.personVia = decision.from
+      // A take-over claim counts only for a person a sign-in proxy names: never a
+      // service token's, and the app link's tokens never carry one.
+      req.controlClaim =
+        !service && decision.person && decision.from === 'proxy' ? (decision.control ?? null) : null
       next()
     })
   }
 
   async function checkUpgrade(req: IncomingMessage): Promise<LaneDecision> {
     const path = targetPath(req.url) ?? ''
-    const appToken = appSources.some((s) => tokenFrom(req, s.config.header) !== undefined)
-    const decision: Decided = appToken
+    // The app link's and the reader key's tokens never open it, even good ones.
+    const otherToken = otherSources.some((s) => tokenFrom(req, s.config.header) !== undefined)
+    const decision: Decided = otherToken
       ? { ok: false, reason: 'binding' }
       : await decide(req, path, upgradeSources)
-    if (decision.ok) return { ok: true, person: decision.person }
+    if (decision.ok) {
+      // Only with roles enforced does a decision carry the person's access. A
+      // service token names no person, so it never opens the Gateway socket.
+      if (!decision.access) return { ok: true, person: decision.person }
+      return decision.access.service
+        ? { ok: true, person: null, access: decision.access }
+        : { ok: true, person: decision.person, access: decision.access }
+    }
     opts.onRefuse?.({ reason: decision.reason, method: req.method ?? 'GET', path })
     return { ok: false, reason: decision.reason }
   }

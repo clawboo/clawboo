@@ -158,6 +158,40 @@ export const OPERATOR_KEYS = {
     env: 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM',
     userEditable: false,
   },
+  /** Whether the role a token carries decides what the person may do: `off`
+   *  (the role is only recorded) or `enforce` (lib/roles). */
+  proxyIdentityRoles: {
+    kind: 'choice',
+    env: 'CLAWBOO_PROXY_IDENTITY_ROLES',
+    userEditable: false,
+    choices: ['off', 'enforce'],
+  },
+  /** Whether taking over an agent's screen needs the proxy's say-so: `off`, or
+   *  `required` (a `control` claim naming the agent, on the take over and every
+   *  batch of input; lib/auth.ts `controlClaimFor`). */
+  proxyIdentityControlClaim: {
+    kind: 'choice',
+    env: 'CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM',
+    userEditable: false,
+    choices: ['off', 'required'],
+  },
+  /** The public key of a program running beside the server that makes its own
+   *  background reads (lib/proxyIdentity/readerRoutes.ts): a PEM public key, a
+   *  JWK or a JWKS. Its tokens never name a person. */
+  proxyIdentityReaderPublicKey: {
+    kind: 'text',
+    env: 'CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY',
+    userEditable: false,
+    multiline: true,
+  },
+  /** Who may act as the person (lib/personCheck.ts): `page`, the dashboard's own
+   *  page or a verified person, or `verified`, a verified person only. */
+  personCheck: {
+    kind: 'choice',
+    env: 'CLAWBOO_PERSON_CHECK',
+    userEditable: false,
+    choices: ['page', 'verified'],
+  },
   // Where Clawboo Native sends each provider's requests, its key check and its
   // model list, for model traffic that goes through a gateway or company proxy
   // (lib/providerBaseUrls). Only an administrator sets these: a base URL
@@ -219,6 +253,10 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   proxyIdentityMaxLifetime: 60,
   proxyIdentityNameClaim: 'name',
   proxyIdentityRoleClaim: 'role',
+  proxyIdentityRoles: 'off',
+  proxyIdentityControlClaim: 'off',
+  proxyIdentityReaderPublicKey: null,
+  personCheck: 'page',
   anthropicBaseUrl: null,
   openaiBaseUrl: null,
   openrouterBaseUrl: null,

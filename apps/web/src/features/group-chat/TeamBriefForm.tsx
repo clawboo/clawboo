@@ -139,7 +139,7 @@ export function TeamBriefForm({
         onChange={(e) => setContent(e.target.value)}
         disabled={saving}
         spellCheck={false}
-        className="w-full resize-y rounded-xl border border-border bg-surface px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
+        className="w-full resize-y rounded-xl border border-border bg-field px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15"
         style={{ minHeight: 200, maxHeight: 420 }}
       />
       <div className="flex items-center gap-2.5">

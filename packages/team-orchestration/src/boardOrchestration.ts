@@ -1544,9 +1544,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const firstDuplicateNote = (sender: string | null, taskId: string): boolean =>
     firstRefusal('duplicate', sender, taskId, '')
 
-  /** How a refusal names a task: its readable id, else its title. */
+  /** How a refusal names a task: its readable id, else its title. A straight quote of
+   *  the title's own is made a single one, so the note's quotes always mark where the
+   *  title ends (a guest's view hides a title of another team's task by them). */
   const nameOfLink = (link: HandOffLink): string =>
-    link.identifier ?? `"${link.title.slice(0, 60)}"`
+    link.identifier ?? `"${link.title.slice(0, 60).replace(/"/g, "'")}"`
 
   /** The words for a hand-off going back up its own chain. */
   const cycleRefusal = (targetName: string, link: HandOffLink): string =>
@@ -1837,6 +1839,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       requestedBy: run.request.requestedBy ?? null,
       key: `main:${deps.teamId}:${run.deliveryId}`,
       ...(chatSessionKey ? { chatSessionKey } : {}),
+      ...(run.request.goalId ? { goalId: run.request.goalId } : {}),
     }
     return { input, turn, request: run.request }
   }

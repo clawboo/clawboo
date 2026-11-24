@@ -16,7 +16,13 @@ import {
 } from '@clawboo/control-client'
 import { embeddingsDisabled } from '@clawboo/db'
 
-import { appLinkOn, proxyIdentityMode } from './proxyIdentity/config'
+import { controlClaimRequired, personCheckMode } from './personCheck'
+import {
+  appLinkOn,
+  proxyIdentityMode,
+  proxyIdentityRolesEnforced,
+  readerKeyOn,
+} from './proxyIdentity/config'
 import { NON_OPENCLAW_RUNTIME_IDS } from './runtimes/descriptor'
 import { getCurrentVersion, selfUpdateRefusal } from './updateCheck'
 
@@ -134,9 +140,23 @@ export const FEATURE_ROUTES = {
     'DELETE /api/system/hold/:owner',
   ],
   'system.idle': ['GET /api/system/idle', 'POST /api/system/presence'],
+  'system.live': ['GET /api/system/live'],
   'board.pause': ['GET /api/pauses', 'POST /api/pauses', 'DELETE /api/pauses/:kind/:id'],
   'auth.proxyIdentity': ['GET /api/access/identity'],
   'auth.appLink': ['GET /api/access/identity'],
+  'auth.roles': ['GET /api/access/identity'],
+  'auth.personCheck': ['GET /api/access/identity'],
+  'auth.readerKey': ['GET /api/access/identity'],
+  'computer.controlClaim': [
+    'POST /api/agents/:agentId/computer/control',
+    'POST /api/agents/:agentId/computer/input',
+  ],
+  'home.goals': [
+    'GET /api/home',
+    'GET /api/home/teams/:teamId/goals',
+    'GET /api/home/teams/:teamId/kpis',
+    'GET /api/home/teams/:teamId/pages',
+  ],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
 export function buildEngineCapabilities(): EngineCapabilities {
@@ -212,12 +232,27 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'system.selfUpdate': selfUpdateRefusal() === null,
     'system.hold': true,
     'system.idle': true,
+    // The liveness probe, which needs no sign-in.
+    'system.live': true,
     'board.pause': true,
     // The administrator's switch, on or required. Either way a verified token
     // names the person; whether one is required is the lane's own business.
     'auth.proxyIdentity': proxyIdentityMode() !== 'off',
     // On only when the app that started this engine handed it a key.
     'auth.appLink': appLinkOn(),
+    // The administrator's switch: the role in each token decides what its person may do.
+    'auth.roles': proxyIdentityRolesEnforced(),
+    // As startup resolved it: a required lane is always verified.
+    'auth.personCheck': personCheckMode() === 'verified',
+    // On only when an administrator set a reader key, which needs the lane on.
+    'auth.readerKey': readerKeyOn(),
+    // The administrator's switch: a take over needs the proxy's control claim.
+    'computer.controlClaim': controlClaimRequired(),
+    // The dashboard page's own layout, so no route and no switch: an app that
+    // shows it in its own window can ask for the slim top bar.
+    'ui.embedTitlebar': true,
+    // Always on: goals, KPIs, pages and the status line have no switch.
+    'home.goals': true,
   }
   return {
     version,

@@ -1,7 +1,7 @@
 ---
 title: 'Choose a light or dark theme'
 sidebarTitle: 'Theme'
-description: 'Switch the dashboard between System, Light and Dark with the three-part switch at the bottom of the sidebar.'
+description: 'Switch the dashboard between System, Light and Dark with the three-part switch in the account bar at the bottom of the sidebar.'
 icon: 'sun-moon'
 keywords: ['theming', 'dark mode', 'light mode', 'system theme', 'appearance', 'color scheme']
 ---
@@ -14,7 +14,7 @@ The dashboard comes in a light and a dark look. Pick one, or let Clawboo follow 
 
 <Step title="Find the switch">
 
-At the bottom of the left sidebar, below **Settings**, is a three-part switch with icons only: a monitor for **System**, a sun for **Light** and a moon for **Dark**. Hover a part to see its name.
+In the account bar along the bottom of the left sidebar, beside your name and the **Settings** gear, is a three-part switch with icons only: a monitor for **System**, a sun for **Light** and a moon for **Dark**. Hover a part to see its name.
 
 </Step>
 
@@ -41,8 +41,8 @@ The whole dashboard changes at once, with no reload. The part you chose looks ra
 
 ## If you can't see the switch
 
-- **The sidebar is hidden.** Press `Cmd+\` (macOS) or `Ctrl+\` (Windows, Linux), or click **Expand sidebar** at the start of the page's header.
-- **You are on Boo Zero's page.** It hides the part of the sidebar that holds the switch. Click a team in the team rail on the far left, and the switch is back.
+- **The sidebar is hidden.** Press `Cmd+\` (macOS) or `Ctrl+\` (Windows, Linux), or click **Expand sidebar** at the start of the page's header. Hovering that button shows the sidebar, switch included, without docking it.
+- **You are on Boo Zero's page.** The sidebar is only the team rail there, so the account bar stands upright and the switch's three parts are stacked.
 
 ## Next steps
 

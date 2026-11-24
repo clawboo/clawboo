@@ -72,8 +72,12 @@ const DASHBOARD_PLACES = 8
 /** Input events accepted in one batch. */
 export const MAX_INPUT_EVENTS = 256
 
-/** Where a watcher came from, which decides what it may do. */
-export type ViewerVia = { kind: 'dashboard' } | { kind: 'link'; linkId: string; linkKind: LinkKind }
+/** Where a watcher came from, which decides what it may do. `person`, under the
+ *  verified person check, is the person who opened it: a resume, a take over or
+ *  input from anyone else does not reach it. */
+export type ViewerVia = (
+  { kind: 'dashboard' } | { kind: 'link'; linkId: string; linkKind: LinkKind }
+) & { person?: string }
 
 /** One open connection to a watcher, as the route gives it. */
 export interface ViewerSink {
@@ -484,6 +488,11 @@ function closeViewer(v: Viewer): void {
   const hub = hubs.get(v.agentId)
   if (!hub || !hub.viewers.delete(v)) return
   totalViewers -= 1
+  // The view in control went (a renewal, a dropped connection), or the last one
+  // did: nothing can send the release for what it held, a held key repeats on
+  // the agent's screen meanwhile, and a new hub would not know it was held. Let
+  // go now, while the display is still at hand.
+  if (controllerOf(v.agentId)?.viewerId === v.id || hub.viewers.size === 0) letGoOfInput(hub)
   viewerDetached(v.agentId, v.id)
   if (hub.viewers.size === 0) {
     stopBrowserPolling(hub)
@@ -507,6 +516,7 @@ export function openViewer(
   via: ViewerVia,
   sink: ViewerSink,
   resumeViewerId?: string | null,
+  holder?: string | null,
 ): { viewerId: string; close: () => void } {
   wire()
   if (resumeViewerId) {
@@ -517,7 +527,12 @@ export function openViewer(
     const ghost = [...(hubs.get(agentId)?.viewers ?? [])].find(
       (g) => g.id === resumeViewerId && sameVia(g.via, via),
     )
-    if (ghost) {
+    // A view holding control bound to another person is theirs: naming its id
+    // must not end it (its stream would drop and its control go into the grace).
+    const c = controllerOf(agentId)
+    const heldByAnother =
+      !!ghost && c !== null && c.viewerId === ghost.id && !heldThisWay(c, via, holder)
+    if (ghost && !heldByAnother) {
       ghost.sink.end()
       closeViewer(ghost)
     }
@@ -537,12 +552,7 @@ export function openViewer(
   let id: string = randomUUID()
   if (resumeViewerId) {
     const c = controllerOf(agentId)
-    const sameWay =
-      c !== null &&
-      c.viewerId === resumeViewerId &&
-      (c.via.kind === 'dashboard'
-        ? via.kind === 'dashboard'
-        : via.kind === 'link' && via.linkId === c.via.linkId)
+    const sameWay = c !== null && c.viewerId === resumeViewerId && heldThisWay(c, via, holder)
     if (sameWay && viewerReattached(agentId, resumeViewerId)) id = resumeViewerId
   }
   const v: Viewer = {
@@ -598,25 +608,36 @@ function findViewer(agentId: string, viewerId: string): Viewer | null {
 export type ControlResult =
   { ok: true; state: 'you' | 'agent' } | { ok: false; status: number; error: string }
 
-/** Take over the agent's screen for this watcher, or hand it back. */
+/**
+ * Whether control `c` was taken the way this request comes: the dashboard for the
+ * dashboard, the same link for a link, and, when control is bound to a person,
+ * by the same person (`holder`, which the route reads from the request).
+ */
+function heldThisWay(c: Controller, via: ViewerVia, holder: string | null | undefined): boolean {
+  const sameWay =
+    c.via.kind === 'dashboard'
+      ? via.kind === 'dashboard'
+      : via.kind === 'link' && via.linkId === c.via.linkId
+  return sameWay && (c.person === null || c.person === holder)
+}
+
+/** Take over the agent's screen for this watcher, or hand it back. `holder` is
+ *  the person the request names when control is bound to one, else undefined. */
 export function setControl(
   agentId: string,
   viewerId: string,
   via: ViewerVia,
   action: 'take' | 'release',
+  holder?: string | null,
 ): ControlResult {
   if (action === 'release') {
     // Handing back works after the view closed too (a tab closing sends it
     // after its stream ended), as long as it comes the same way control was
     // taken: the dashboard for the dashboard, the same link for a link.
     const c = controllerOf(agentId)
-    const same =
-      c !== null &&
-      c.viewerId === viewerId &&
-      (c.via.kind === 'dashboard'
-        ? via.kind === 'dashboard'
-        : via.kind === 'link' && via.linkId === c.via.linkId)
-    if (same) releaseControl(agentId, viewerId)
+    if (c !== null && c.viewerId === viewerId && heldThisWay(c, via, holder)) {
+      releaseControl(agentId, viewerId)
+    }
     return { ok: true, state: 'agent' }
   }
   const v = findViewer(agentId, viewerId)
@@ -634,12 +655,19 @@ export function setControl(
         'Take over needs the agent to have a display of its own (Linux). Here you can watch its browser.',
     }
   }
-  takeControl(agentId, viewerId, via.kind === 'link' ? { kind: 'link', linkId: via.linkId } : via)
+  takeControl(
+    agentId,
+    viewerId,
+    via.kind === 'link' ? { kind: 'link', linkId: via.linkId } : { kind: 'dashboard' },
+    holder ?? null,
+  )
   log.info({ agentId, via: via.kind }, 'a person took over an agent screen')
   return { ok: true, state: 'you' }
 }
 
 function sameVia(a: ViewerVia, b: ViewerVia): boolean {
+  // A view bound to a person is that person's alone; an unbound one stays unbound.
+  if ((a.person ?? null) !== (b.person ?? null)) return false
   if (a.kind === 'dashboard') return b.kind === 'dashboard'
   return b.kind === 'link' && b.linkId === a.linkId
 }
@@ -675,16 +703,23 @@ export function parseInputEvents(raw: unknown): InputEvent[] | null {
   return out
 }
 
-/** Send the controller's input to the agent's display. */
+/** Send the controller's input to the agent's display. `holder` as for setControl. */
 export function sendInput(
   agentId: string,
   viewerId: string,
   via: ViewerVia,
   events: readonly InputEvent[],
+  holder?: string | null,
 ): ControlResult {
   const v = findViewer(agentId, viewerId)
   if (!v || !sameVia(v.via, via)) {
     return { ok: false, status: 404, error: 'This live view is not open.' }
+  }
+  // Control bound to a person takes input from that person only. Checked before
+  // holdsControl, which counts as the holder's input.
+  const c = controllerOf(agentId)
+  if (c !== null && c.viewerId === viewerId && !heldThisWay(c, via, holder)) {
+    return { ok: false, status: 403, error: 'Another person holds control of this screen.' }
   }
   if (!holdsControl(agentId, viewerId)) {
     return { ok: false, status: 409, error: 'Take over first: the agent has control.' }

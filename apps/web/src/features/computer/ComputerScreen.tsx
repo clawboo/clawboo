@@ -12,7 +12,7 @@
 
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useRef,
   type KeyboardEvent,
   type MouseEvent,
@@ -86,7 +86,11 @@ export function ComputerScreen({
   // Focus moving elsewhere (another app, another tab) takes its key-ups and
   // mouse-ups with it: let go of everything rather than leave a key or a button
   // held on the agent's display.
-  useEffect(() => {
+  //
+  // A layout effect, so this is listening from the same commit that starts
+  // taking keys. React runs a plain effect a task later, and a key pressed and
+  // the window left in between would stay held.
+  useLayoutEffect(() => {
     if (!inControl) {
       keysDown.current.clear()
       pointer.current.b = 0

@@ -1,6 +1,7 @@
-// Who "you" is on the board: the person a sign-in proxy vouched for, else the
-// install's built-in person. Read once per page load and kept: it cannot change
-// without a reload, and every card that says "you" reads it.
+// Who "you" is on the board, and in the account bar at the bottom of the
+// sidebar: the person a sign-in proxy vouched for, else the install's built-in
+// person. Read once per page load and kept: it cannot change without a reload,
+// and every card that says "you" reads it.
 
 import { useEffect, useState } from 'react'
 
@@ -26,24 +27,35 @@ export function resetBoardPerson(): void {
   reading = null
 }
 
-/** `needed` false skips the read: most cards never ask who you are. */
-export function useBoardPerson(needed = true): BoardPerson {
-  const [person, setPerson] = useState<BoardPerson>(known ?? { ...LOCAL_PERSON })
+interface PersonRead {
+  person: BoardPerson
+  /** True once the server has said who you are; until then `person` is the
+   *  built-in one as a stand-in. */
+  settled: boolean
+}
+
+function usePersonRead(needed: boolean): PersonRead {
+  const [read, setRead] = useState<PersonRead>(() =>
+    known ? { person: known, settled: true } : { person: { ...LOCAL_PERSON }, settled: false },
+  )
   useEffect(() => {
     if (!needed) return
     if (known) {
-      setPerson(known)
+      const person = known
+      // The same state again bails out, so a card that mounts after the read
+      // does not render twice.
+      setRead((r) => (r.settled && r.person === person ? r : { person, settled: true }))
       return
     }
     let live = true
     let retry: ReturnType<typeof setTimeout> | undefined
     const readPerson = (): void => {
       reading ??= fetchBoardPerson()
-      void reading.then((read) => {
-        if (!read) reading = null
-        else known = read
+      void reading.then((person) => {
+        if (!person) reading = null
+        else known = person
         if (!live) return
-        if (read) setPerson(read)
+        if (person) setRead({ person, settled: true })
         // A list that says "nothing assigned to you" would otherwise stay wrong until
         // the page reloads.
         else retry = setTimeout(readPerson, BOARD_PERSON_RETRY_MS)
@@ -55,5 +67,18 @@ export function useBoardPerson(needed = true): BoardPerson {
       clearTimeout(retry)
     }
   }, [needed])
-  return person
+  return read
+}
+
+/** `needed` false skips the read: most cards never ask who you are. */
+export function useBoardPerson(needed = true): BoardPerson {
+  return usePersonRead(needed).person
+}
+
+/** Who "you" are once the server has said, or null until then and for as long
+ *  as the read keeps failing. For words that must never name the wrong person,
+ *  such as the account bar's. */
+export function useBoardPersonIfKnown(): BoardPerson | null {
+  const read = usePersonRead(true)
+  return read.settled ? read.person : null
 }

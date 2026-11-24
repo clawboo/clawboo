@@ -146,6 +146,12 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     runnerInputs: string | null // JSON: what the task runner ran it with; null if it never did (see retry below)
     checkHeldSince: number | null // when its team-chat check began waiting for the team folder; null otherwise
     isMainTask: number // 1: it holds a person's request, with the helpers' work filed under it. See below
+    // From 0.9.0: the team goal the task names itself, the goal it counts toward
+    // (its own, else its request's or a parent's), and how that one reaches it. See Home.
+    goalId: string | null
+    goalCleared: number // 1: a person took it off every goal, its request's included
+    effectiveGoalId: string | null
+    goalLinkedVia: 'own' | 'request' | 'parent' | null
     waitingOn: string | null // JSON: what it waits for, a kind and what it points at (see below)
     assigneePersonId: string | null // the person it is assigned to; never with assigneeAgentId
     assigneePerson: string | null // JSON { id, name, role } of that person
@@ -1028,7 +1034,23 @@ A new run is what ends a person's hold on a card (see `PATCH` above), so while a
     // 1 when the team engine owns the run, 0 when anything else opened it, null on a row
     // from before this field. Only the engine sets it.
     engineRun: number | null
-    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
+    // The last three mean the server stopped the run, not a person. Only the server
+    // writes them; PATCH /api/board/executions/:execId cannot.
+    //   budget_paused: a hard budget cap refused the run or ended it. A person raises the cap.
+    //   budget_held: refused because the cap's room is taken by runs already going.
+    //     It clears by itself when they end.
+    //   breaker_tripped: the circuit breaker stopped a run that was going wrong. A person
+    //     looks at it.
+    status:
+      | 'queued'
+      | 'running'
+      | 'succeeded'
+      | 'failed'
+      | 'timed_out'
+      | 'cancelled'
+      | 'budget_paused'
+      | 'budget_held'
+      | 'breaker_tripped'
     claimedAt: number | null
     startedAt: number | null
     completedAt: number | null

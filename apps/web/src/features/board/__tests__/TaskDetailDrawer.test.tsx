@@ -13,8 +13,10 @@ import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
+import { makeGoalSummary } from '@/__vitest__/homeFixtures'
 import { resetInboxStore, useInboxStore } from '@/features/inbox/inboxStore'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
+import { resetGoalsStore } from '@/stores/goals'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
@@ -2109,5 +2111,62 @@ describe('TaskDetailDrawer: opening a task reads it', () => {
     await screen.findAllByText('Wire it')
     await new Promise((r) => setTimeout(r, 30))
     expect(reads).toEqual([])
+  })
+})
+
+describe("TaskDetailDrawer: a task's goal", () => {
+  beforeEach(() => {
+    resetGoalsStore()
+    useToastStore.setState({ toasts: [] })
+  })
+
+  it('puts an inherited goal back, with its Open link, when taking it off fails', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            teamId: 'team-1',
+            title: 'Check the links',
+            status: 'todo',
+            goalId: null,
+            effectiveGoalId: 'g1',
+            goalLinkedVia: 'request',
+          },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.get('/api/home/teams/:teamId/goals', () =>
+        HttpResponse.json({
+          goals: [makeGoalSummary({ id: 'g1', teamId: 'team-1', title: 'Launch the beta' })],
+        }),
+      ),
+      http.patch('/api/board/t1', () => HttpResponse.json({ error: 'boom' }, { status: 500 })),
+    )
+    const user = userEvent.setup()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    const select = await screen.findByTestId('task-goal-select')
+    await waitFor(() => expect(select).toHaveTextContent('Launch the beta, through its request'))
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'No goal' }))
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+        'Couldn’t change the goal. Please try again.',
+      ),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('task-goal-select')).toHaveTextContent(
+        'Launch the beta, through its request',
+      ),
+    )
+    expect(
+      within(screen.getByTestId('task-goal')).getByRole('button', { name: 'Open' }),
+    ).toBeVisible()
   })
 })

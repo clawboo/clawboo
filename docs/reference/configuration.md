@@ -102,6 +102,7 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `secrets/keyless-providers.json`        | Whether you chose or removed keyless Ollama                                                                                                          | No                                      |
 | `proxy-device-identity.json`            | The key pair Clawboo uses to sign in to the OpenClaw Gateway as a device                                                                             | Yes                                     |
 | `api-port.txt`                          | The port the server listens on; removed at shutdown if it still names that port                                                                      | No                                      |
+| `api-port.json`                         | From 0.9.0: the [start marker](#start-marker), which names the server process behind that port                                                       | No                                      |
 | `server.log`, `server.log.1`            | Output of a server the CLI started                                                                                                                   | No                                      |
 | `gateway.log`, `gateway.pid`            | Output and process record of an OpenClaw Gateway that Clawboo started                                                                                | No                                      |
 | `connector-pids.json`                   | Connector processes Clawboo started, so leftovers from a crash are stopped at the next start                                                         | No                                      |
@@ -115,6 +116,49 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `runtimes/hermes/_gateway/`             | The Hermes gateway's home: its config, logs and one profile per Hermes agent under `profiles/` (memory, skills, sessions, its own jobs)              | Holds Hermes keys and sign-in copies    |
 
 The database files, `settings.json` and secrets are owner-only (mode 0600) in an owner-only folder (0700).
+
+### Start marker
+
+From 0.9.0, the server writes `api-port.json` next to `api-port.txt`, right after it, once it is listening. `api-port.txt` still holds only the port number, so older readers keep working. The marker also names the process that wrote the port. A server that crashed or was killed leaves both files behind, and any program may take its port afterwards; the marker lets a reader tell that record from a running server's.
+
+```json
+{
+  "port": 18790,
+  "pid": 51234,
+  "startedAt": 1763256000123,
+  "bootAt": 1762800000000,
+  "pidNamespace": null,
+  "initStart": null,
+  "version": "0.9.0"
+}
+```
+
+| Field          | Type             | Meaning                                                                                                                                                                                                 |
+| -------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`         | whole number     | The port the server listens on: the number in `api-port.txt`                                                                                                                                            |
+| `pid`          | whole number     | The server's process id                                                                                                                                                                                 |
+| `startedAt`    | number           | When the server process started, in milliseconds since 1 January 1970 UTC                                                                                                                               |
+| `bootAt`       | number           | When the computer last started, in milliseconds since 1 January 1970 UTC, rounded to 10 seconds                                                                                                         |
+| `pidNamespace` | string or `null` | Linux: the server's PID namespace, as `/proc/self/ns/pid` names it (`pid:[4026531836]`). `null` on macOS and Windows, and when it cannot be read                                                        |
+| `initStart`    | number or `null` | Linux: when process 1 of that namespace started, in clock ticks after boot (field 22 of `/proc/1/stat`), which tells one run of a container from the next. `null` elsewhere, and when it cannot be read |
+| `version`      | string           | The Clawboo version the server runs                                                                                                                                                                     |
+
+Every field is always there. A later release may add fields but never renames or retypes these, so a reader should ignore fields it does not know. The server writes the marker to a temporary file of its own and renames it into place, so a reader never sees half of one. On Windows, when another program holds the file open and the rename is refused, it is written in place instead; a reader that cannot parse it should treat it as missing. At a clean shutdown the server removes the marker only when it is still the one the server wrote (the same `pid`, `startedAt`, `bootAt`, `pidNamespace` and `initStart`), so a second server's marker stays, even one with the same `pid` in another container.
+
+**Checking it.** Never trust the port because the file exists. Trust it only when all of these hold:
+
+1. On Linux, `pidNamespace` and `initStart` are your own process's.
+2. A process with that `pid` exists.
+3. That process started within 15 seconds of `startedAt`: `TZ=UTC0 LC_ALL=C ps -o lstart= -p <pid>` on macOS and Linux (in UTC, since local time reads the same for the two passes of the hour a DST change repeats), `CreationDate` of `Win32_Process` on Windows. A process that started at another time holds a reused process id. The 15 seconds absorb start times that `ps` reports to the second and the moment between a process's creation and Node's start.
+4. `bootAt` is within 10 seconds of when the computer last started (now minus the system's uptime).
+
+The marker is stale, and its port not to be trusted, when no process has that `pid`, when the marker is from an earlier run of the PID namespace, or when the process holding the `pid` started at another time (on this boot, or after a reboot).
+
+The marker tells a running server from the record of one that is gone. It is not proof of who answers on the port: a process that was given the server's `pid` within 15 seconds of the server's start (so the server stopped within that time) and took its port passes every check above. Before you send a secret to the port, treat a marker that checks out as narrowing that risk, not ruling it out.
+
+When `bootAt` is more than 10 seconds off but the process still started at `startedAt`, or started exactly that much later, you cannot tell: a wall clock stepped since the server started moves the boot reading (and, on Linux, the start time `ps` reports) by the step, so it looks like a reboot. The same goes when start times cannot be read, or the marker names a PID namespace you are not in (or yours cannot be read). Then go by `api-port.txt` alone, as before the marker. Do the same with no marker (a server from 0.8.0 or earlier), and when `api-port.txt` is newer than the marker. Then the marker describes an earlier server, and the one that wrote `api-port.txt` since left no marker of its own: a server from 0.8.0 or earlier, or one whose marker write failed or that stopped before it, so there is nothing to check it by. Going by `api-port.txt` alone then keeps a running server reachable, and, as with no marker, cannot tell it from a program that took the port after that server crashed. When the two files name different ports and the marker checks out, go by the marker: two servers that started together can leave the files naming different ports, and the marker's server is the one shown to be running.
+
+The `clawboo` command follows these rules before it trusts the recorded port, and checks a server it found running again, start time included, on each request: a server that crashes while the command runs can have its `pid` handed to another process. A stale marker's port gets no access token and does not count as a busy server holding the port, and `clawboo stop` removes a stale marker with `api-port.txt` (see [CLI](/reference/cli)).
 
 ## Files in the work folder
 

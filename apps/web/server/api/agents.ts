@@ -20,8 +20,9 @@ import {
 } from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray, like } from 'drizzle-orm'
-import { refuseUnlessPerson } from '../lib/auth'
+import { refuseUnlessPerson, refuseUnlessVerifiedPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
+import { inRoleScope } from '../lib/roles/guard'
 import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
 import { getRegistry } from '../lib/agentSource'
@@ -84,7 +85,8 @@ export async function agentsListGET(req: Request, res: Response): Promise<void> 
       // Native-first installs identify the native Boo Zero here, not the Gateway default.
       defaultId: resolveBooZero(db)?.id ?? '',
       mainKey: (getSetting(db, 'agent-source:openclaw:mainKey') ?? '').trim() || 'main',
-      agents: lists.flat(),
+      // A guest gets only the agents of the teams their role names (lib/roles).
+      agents: lists.flat().filter((a) => inRoleScope(req, a.teamId)),
       // Not stale while nothing uses the Gateway: there are no OpenClaw agents to
       // have gone out of date, and the source is not trying to connect.
       stale: health.inUse !== false && health.connection !== 'connected',
@@ -768,6 +770,9 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
 // browser, and the GET below serves only that agent's frame.
 
 export async function agentScreenshotCapturePOST(req: Request, res: Response): Promise<void> {
+  // What the agent's browser shows is its screen: under the verified person check,
+  // only a verified person sees it, as on the live view (api/computer.ts).
+  if (refuseUnlessVerifiedPerson(req, res)) return
   try {
     await captureScreenshot(req, res)
   } catch (err) {
@@ -808,6 +813,7 @@ async function captureScreenshot(req: Request, res: Response): Promise<void> {
 const SAFE_FRAME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 
 export function agentScreenshotGET(req: Request, res: Response): void {
+  if (refuseUnlessVerifiedPerson(req, res)) return
   const agentId = (req.params['agentId'] as string | undefined) ?? ''
   // THIS AGENT'S OWN FRAME, and nobody else's.
   //

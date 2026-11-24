@@ -125,21 +125,32 @@ function contrastRatio(a: Rgb, b: Rgb): number {
  * only ever holds `text-foreground`.
  *
  * `--muted` is deliberately NOT here. It is not a general text surface: `bg-muted`
- * has exactly one consumer in the app (the avatar-count badge at
- * AgentListColumn.tsx:407) and it carries `text-foreground/75` and nothing else.
- * Asserting the full colour ramp against it manufactured five failures for
- * pairings that do not exist — `--primary`, `--secondary` and `--amber` are never
- * rendered on it. The one real pairing is asserted directly below instead.
+ * marks a selected row and the small "+N" count discs (the team chat header's,
+ * GroupAvatar's), which carry foreground or muted text and nothing else.
+ * Asserting the full colour ramp against it manufactured failures for pairings
+ * that do not exist: `--primary`, `--secondary` and `--amber` are never rendered
+ * on it. The real pairings are asserted directly below instead.
  */
-const SURFACES = ['--background', '--surface', '--card', '--popover', '--surface-raised'] as const
+const SURFACES = [
+  '--background',
+  '--surface',
+  '--card',
+  '--popover',
+  '--surface-raised',
+  // The frame: the team rail and top bar, and the agent column, whose nav and
+  // muted labels sit straight on it.
+  '--frame',
+  '--frame-column',
+] as const
 
 /** 1.4.3 Contrast (Minimum) — normal-size body text. */
 const AA_TEXT: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['--foreground', SURFACES],
   ['--card-foreground', ['--card']],
   ['--popover-foreground', ['--popover']],
-  // The single real `bg-muted` pairing — see the SURFACES note.
+  // The real `bg-muted` pairings, see the SURFACES note.
   ['--foreground', ['--muted']],
+  ['--muted-foreground', ['--muted']],
   ['--secondary', SURFACES],
   ['--muted-foreground', SURFACES],
   ['--destructive', SURFACES],

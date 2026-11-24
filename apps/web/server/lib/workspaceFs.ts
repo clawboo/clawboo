@@ -1100,7 +1100,7 @@ export async function realTaskFolder(dir: string): Promise<string | null> {
 
 /** A task folder's root for a read: its real path, to be read with
  *  `exactRoot` (see {@link realTaskFolder}). */
-async function resolveTaskFolderRoot(
+export async function resolveTaskFolderRoot(
   taskId: string,
 ): Promise<{ ok: true; root: string } | { ok: false; reason: WorkspaceMissReason }> {
   const folder = taskFolderOf(taskId)

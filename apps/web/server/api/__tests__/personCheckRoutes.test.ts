@@ -58,6 +58,7 @@ vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
 }))
 
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
+const { resetPersonCheckForTests, setPersonCheckMode } = await import('../../lib/personCheck')
 const { onChatReportUp } = await import('../../lib/agentChat/chatReportUpOutbox')
 const { boardCommentPOST, boardCreatePOST, boardTaskLabelsPUT, boardUpdatePATCH } =
   await import('../board')
@@ -65,6 +66,16 @@ const { boardAgentWakesPOST, boardAssignPersonPOST, boardQuestionAnswerPOST, boa
   await import('../boardPerson')
 const { teamAgentWakesPUT } = await import('../teamAgentWakes')
 const { teamPlanApprovalPUT } = await import('../teamPlanApproval')
+const {
+  homeGoalHealthPOST,
+  homeGoalsPOST,
+  homeKpiValuesPOST,
+  homePagesPOST,
+  homeSettingsPUT,
+  homeUpdatePublishPOST,
+  homeWeeklyUpdatesPOST,
+} = await import('../home')
+const { createTeamGoal, createTeamKpi, draftGoalUpdate } = await import('@clawboo/db')
 const { boardInboxReadPOST, boardTaskReadPOST } = await import('../boardInbox')
 const { teamLabelDELETE, teamLabelPATCH, teamLabelsPOST, teamTaskPrefixPUT } =
   await import('../teamLabels')
@@ -116,6 +127,10 @@ function mockRes() {
   return { res, code: () => status, body: () => payload as Record<string, unknown> }
 }
 
+/** Headers every request below carries too, for a case that sends the page's
+ *  marks on routes whose calls name no headers (the verified cases). */
+let pageMarks: Record<string, string> = {}
+
 const req = (over: {
   params?: Record<string, string>
   body?: unknown
@@ -126,12 +141,12 @@ const req = (over: {
     params: {},
     query: {},
     body: {},
-    headers: {},
     person: null,
     app: { locals: {} },
     get: () => undefined,
     socket: {},
     ...over,
+    headers: { ...pageMarks, ...(over.headers ?? {}) },
   }) as unknown as Request
 
 function eventsOf(kind: string, taskId: string): Array<Record<string, unknown>> {
@@ -217,6 +232,8 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   resetDb()
+  resetPersonCheckForTests()
+  pageMarks = {}
   for (const name of ['HOME', 'CLAWBOO_HOME']) {
     if (prev[name] === undefined) delete process.env[name]
     else process.env[name] = prev[name]
@@ -235,7 +252,8 @@ const ROUTINE = {
 /** A routine the person made, to act on: its id. */
 async function routine(): Promise<string> {
   const r = mockRes()
-  await schedulesCreatePOST(req({ body: ROUTINE, headers: DASHBOARD }), r.res)
+  // Made by a person a proxy vouched for, so it is made in every mode of the check.
+  await schedulesCreatePOST(req({ body: ROUTINE, person: ADA }), r.res)
   return (r.body()['schedule'] as { id: string }).id
 }
 
@@ -417,6 +435,72 @@ const ROUTES: Array<[string, (who: Who, res: Response) => unknown]> = [
     (who, res) =>
       teamPlanApprovalPUT(req({ params: { teamId: TEAM }, body: { on: true }, ...who }), res),
   ],
+  // Home: every write there is a person's.
+  [
+    'creating a goal',
+    (who, res) =>
+      homeGoalsPOST(req({ params: { teamId: TEAM }, body: { title: 'Ship' }, ...who }), res),
+  ],
+  [
+    "setting a goal's health",
+    (who, res) => {
+      const g = createTeamGoal(getDb(), TEAM, { title: 'Ship' }, null)
+      if (!g.ok) throw new Error(g.reason)
+      return homeGoalHealthPOST(
+        req({ params: { teamId: TEAM, goalId: g.value.id }, body: { health: 'at_risk' }, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    "publishing an agent's goal update",
+    (who, res) => {
+      const g = createTeamGoal(getDb(), TEAM, { title: 'Ship' }, null)
+      if (!g.ok) throw new Error(g.reason)
+      const d = draftGoalUpdate(getDb(), {
+        goalId: g.value.id,
+        teamId: TEAM,
+        body: 'Half done',
+        agent: { kind: 'agent', id: 'coder', name: 'Coder' },
+      })
+      if (!d.ok) throw new Error(d.reason)
+      return homeUpdatePublishPOST(
+        req({ params: { teamId: TEAM, updateId: d.value.id }, body: {}, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    "typing a KPI's value",
+    (who, res) => {
+      const k = createTeamKpi(getDb(), TEAM, { name: 'NPS', source: 'person' }, null)
+      if (!k.ok) throw new Error(k.reason)
+      return homeKpiValuesPOST(
+        req({ params: { teamId: TEAM, kpiId: k.value.id }, body: { value: 40 }, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    'writing a team page',
+    (who, res) =>
+      homePagesPOST(req({ params: { teamId: TEAM }, body: { title: 'Notes' }, ...who }), res),
+  ],
+  [
+    "turning on a team's lead-written status line",
+    (who, res) => {
+      // The fixture's agent is an OpenClaw agent, which could not write the line.
+      getDb().update(agents).set({ runtime: 'hermes' }).where(eq(agents.id, 'coder')).run()
+      return homeSettingsPUT(
+        req({ params: { teamId: TEAM }, body: { leadWritesStatus: true }, ...who }),
+        res,
+      )
+    },
+  ],
+  [
+    "turning on a team's weekly goal updates",
+    (who, res) => homeWeeklyUpdatesPOST(req({ params: { teamId: TEAM }, ...who }), res),
+  ],
   [
     'answering a plan',
     (who, res) => {
@@ -468,6 +552,23 @@ describe.each(ROUTES)('%s', (_name, call) => {
   it('takes the dashboard’s own page', async () => {
     const r = mockRes()
     await call({ headers: DASHBOARD }, r.res)
+    expect(r.code()).toBeLessThan(300)
+  })
+
+  // personCheck: verified (or a required sign-in proxy lane): the page's marks
+  // count for nothing, and only a person a verified token names acts.
+  it('verified: refuses the dashboard’s own page with no verified person', async () => {
+    setPersonCheckMode('verified')
+    const r = mockRes()
+    await call({ headers: DASHBOARD }, r.res)
+    expect(r.code()).toBe(403)
+    expect(r.body()['error']).toBe('person_only')
+  })
+
+  it('verified: still takes a person a sign-in proxy vouched for, on the page or not', async () => {
+    setPersonCheckMode('verified')
+    const r = mockRes()
+    await call({ person: ADA, headers: DASHBOARD }, r.res)
     expect(r.code()).toBeLessThan(300)
   })
 })
@@ -607,6 +708,15 @@ const REFUSED: Array<[string, (res: Response) => unknown]> = [
 
 describe('a caller nothing vouches for', () => {
   it.each(REFUSED)('gets no say over %s', async (_name, call) => {
+    const r = mockRes()
+    await call(r.res)
+    expect(r.code()).toBe(403)
+    expect(r.body()['error']).toBe('person_only')
+  })
+
+  it.each(REFUSED)('verified: nor does the dashboard’s own page, over %s', async (_name, call) => {
+    setPersonCheckMode('verified')
+    pageMarks = DASHBOARD
     const r = mockRes()
     await call(r.res)
     expect(r.code()).toBe(403)

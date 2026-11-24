@@ -19,6 +19,7 @@ import {
   LOCAL_PERSON,
   parseWaitingOn,
   personMoveAllowed,
+  quoteTitle,
   requestWaitsOn,
   strongerWakeReason,
   subtasksStillOut,
@@ -52,6 +53,8 @@ import {
 import { and, count, desc, eq, gt, gte, inArray, isNull, like, lt, ne, or, sql } from 'drizzle-orm'
 
 import { readyOrder } from './readyOrder'
+
+import { goalForNewTaskTx } from '../home/links'
 
 import type { ClawbooDb } from '../db'
 import { appendEvent } from '../events/appendEvent'
@@ -154,6 +157,9 @@ export interface CreateTaskInput {
   titleMatchAnyRequest?: boolean
   /** The one-to-one chat it was handed off from (see `tasks.chat_session_key`). */
   chatSessionKey?: string | null
+  /** The team goal it serves. Omitted: its parent's goal, when that is on its team.
+   *  A goal of another team is dropped (see home/links.ts). */
+  goalId?: string | null
 }
 
 /** What an open main task says it waits for. */
@@ -205,6 +211,8 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     runExecutionId: null,
     isMainTask: input.mainTaskLead ? 1 : 0,
     chatSessionKey: input.chatSessionKey ?? null,
+    goalId: input.goalId ?? null,
+    goalCleared: 0,
   }
 }
 
@@ -212,6 +220,12 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
  *  its idempotency key, so all three land or none do. */
 export function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
   const row = buildTaskRow(input)
+  // Every create path comes through here, so this is where a request's or a
+  // parent's goal is copied down.
+  row.goalId = goalForNewTaskTx(tx, row, input.goalId)
+  // An explicit "no goal" under a parent stops the resolver here, so the task does
+  // not read as its request's goal.
+  if (input.goalId === null && row.parentTaskId) row.goalCleared = 1
   row.identifier = allocateTaskIdentifier(tx, row.teamId)
   tx.insert(tasks).values(row).run()
   if (input.createKey) rememberCreateKey(tx, input.createKey, row.id, row.createdAt)
@@ -546,6 +560,8 @@ export interface MainTaskRequest {
   key: string
   /** The one-to-one chat the message came from: what reports on the request goes there. */
   chatSessionKey?: string | null
+  /** The team goal the person filed the message under; its work inherits it. */
+  goalId?: string | null
 }
 
 export type HandOffUnderRequestResult =
@@ -577,6 +593,7 @@ export function insertMainTaskTx(
       mainTaskLead: request.leadAgentId,
       createKey: { key: request.key },
       chatSessionKey: request.chatSessionKey ?? null,
+      goalId: request.goalId ?? null,
     }),
   }
 }
@@ -1961,7 +1978,8 @@ function releaseWaitersTx(
 ): BoardLifecycleEvent[] {
   const events: BoardLifecycleEvent[] = []
   const finished = to === 'done'
-  const name = `“${closed.title}”`
+  // Quoted so the note's quotes always mark where the title ends (see quoteTitle).
+  const name = quoteTitle(closed.title)
 
   const waiting = tx
     .select()
@@ -1974,12 +1992,18 @@ function releaseWaitersTx(
     const w = parseWaitingOn(waiter.waitingOn)
     if (w?.kind !== 'task' || w.taskId !== closed.id) continue
     if (finished) noteWaitOutcomeTx(tx, waiter.id, { waitedTaskDone: true })
+    // A wait can cross teams, and this text is stored on the waiter, where its own
+    // team reads it: a task on another team is not named there.
+    const what =
+      waiter.teamId === closed.teamId
+        ? `${name}, the task this waited on,`
+        : 'The task this waited on, on another team,'
     releaseWaiterTx(tx, waiter, now, events, {
       ready: finished,
-      note: `${name}, the task this waited on, is done.`,
+      note: `${what} is done.`,
       ifNot: finished
-        ? `${name}, the task this waited on, is done, and nothing started this one again. Retry it or decide what happens next.`
-        : `${name}, the task this waited on, was cancelled. Decide what happens next.`,
+        ? `${what} is done, and nothing started this one again. Retry it or decide what happens next.`
+        : `${what} was cancelled. Decide what happens next.`,
       reason: 'dependency_done',
     })
   }

@@ -121,9 +121,16 @@ const PINNED_FEATURES = [
   'system.selfUpdate',
   'system.hold',
   'system.idle',
+  'system.live',
   'board.pause',
   'auth.proxyIdentity',
   'auth.appLink',
+  'auth.roles',
+  'auth.personCheck',
+  'auth.readerKey',
+  'computer.controlClaim',
+  'ui.embedTitlebar',
+  'home.goals',
 ]
 
 /** The drain-and-hold answer (GET, POST /api/system/hold, DELETE /api/system/hold/:owner). */
@@ -140,6 +147,7 @@ const PINNED_IDLE_SOURCE_FIELDS = ['at', 'count', 'id', 'reason', 'state', 'time
 
 /** Every route the API router serves, as `METHOD /path`, in registration order. */
 const PINNED_ROUTES = [
+  'GET /api/system/live',
   'GET /api/settings',
   'POST /api/settings',
   'POST /api/access/launch-code',
@@ -216,6 +224,38 @@ const PINNED_ROUTES = [
   'PUT /api/team-rules/:teamId',
   'GET /api/team-agent-wakes/:teamId',
   'PUT /api/team-agent-wakes/:teamId',
+  'GET /api/home',
+  'GET /api/home/teams/:teamId/goals',
+  'POST /api/home/teams/:teamId/goals',
+  'POST /api/home/teams/:teamId/goals/reorder',
+  'GET /api/home/teams/:teamId/goals/:goalId',
+  'PATCH /api/home/teams/:teamId/goals/:goalId',
+  'DELETE /api/home/teams/:teamId/goals/:goalId',
+  'POST /api/home/teams/:teamId/goals/:goalId/health',
+  'GET /api/home/teams/:teamId/goals/:goalId/updates',
+  'POST /api/home/teams/:teamId/goals/:goalId/updates',
+  'POST /api/home/teams/:teamId/updates/:updateId/publish',
+  'POST /api/home/teams/:teamId/updates/:updateId/discard',
+  'GET /api/home/teams/:teamId/kpis',
+  'POST /api/home/teams/:teamId/kpis',
+  'PATCH /api/home/teams/:teamId/kpis/:kpiId',
+  'DELETE /api/home/teams/:teamId/kpis/:kpiId',
+  'POST /api/home/teams/:teamId/kpis/:kpiId/accept',
+  'POST /api/home/teams/:teamId/kpis/:kpiId/dismiss',
+  'GET /api/home/teams/:teamId/kpis/:kpiId/values',
+  'POST /api/home/teams/:teamId/kpis/:kpiId/values',
+  'GET /api/home/teams/:teamId/pages',
+  'POST /api/home/teams/:teamId/pages',
+  'GET /api/home/teams/:teamId/pages/:pageId',
+  'PATCH /api/home/teams/:teamId/pages/:pageId',
+  'DELETE /api/home/teams/:teamId/pages/:pageId',
+  'GET /api/home/teams/:teamId/pages/:pageId/revisions',
+  'GET /api/home/teams/:teamId/pages/:pageId/revisions/:revision',
+  'POST /api/home/teams/:teamId/pages/:pageId/revert',
+  'POST /api/home/teams/:teamId/pages/:pageId/pin',
+  'GET /api/home/teams/:teamId/settings',
+  'PUT /api/home/teams/:teamId/settings',
+  'POST /api/home/teams/:teamId/weekly-updates',
   'GET /api/team-plan-approval/:teamId',
   'PUT /api/team-plan-approval/:teamId',
   'GET /api/team-verify-command/:teamId',
@@ -453,6 +493,9 @@ const PINNED_STREAMS = {
         'checkHeldSince',
         'isMainTask',
         'planHolder',
+        'goalId',
+        'effectiveGoalId',
+        'goalLinkedVia',
       ],
       status: AGENT_STATUS_FIELDS,
     },
@@ -482,6 +525,9 @@ const PINNED_STREAMS = {
         'checkHeldSince',
         'isMainTask',
         'planHolder',
+        'goalId',
+        'effectiveGoalId',
+        'goalLinkedVia',
         'teamId',
       ],
       handOffs: ['on'],
@@ -868,6 +914,31 @@ describe('the route has no exemption in the origin guard or the access gate', ()
       expect((await fetch(url, { headers: cookie })).status).toBe(200)
       const foreign = { ...cookie, origin: 'https://elsewhere.example' }
       expect((await fetch(url, { headers: foreign })).status).toBe(403)
+    } finally {
+      await close(gated.server)
+    }
+  })
+})
+
+describe('GET /api/system/live', () => {
+  it('answers ok and nothing else, with no sign-in, in the server order', async () => {
+    const res = await fetch(`${base}/api/system/live`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(await res.json(), BUMP).toEqual({ ok: true })
+    expect((await fetch(`${base}/api/system/live`, { method: 'HEAD' })).status).toBe(200)
+
+    const gate = createAccessGate({ token: 'contract-test-token' })
+    const app = express()
+    app.use((req, res, next) => {
+      if (gate.handleHttp(req, res)) return
+      next()
+    })
+    app.use(apiRouter)
+    const gated = await listen(app)
+    try {
+      expect((await fetch(`${gated.base}/api/system/live`)).status).toBe(200)
+      expect((await fetch(`${gated.base}/api/system/live`, { method: 'POST' })).status).toBe(401)
     } finally {
       await close(gated.server)
     }

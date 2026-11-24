@@ -21,6 +21,7 @@ import {
   installServerStop,
   isShutdownMessage,
   watchEmbedderChannel,
+  watchStopSignals,
   type ChannelStopReason,
 } from '../serverStop'
 
@@ -164,6 +165,60 @@ describe('watchEmbedderChannel', () => {
   })
 })
 
+describe('watchStopSignals', () => {
+  it('keeps a signal sent while the server starts, and runs the stop with it once there is one', () => {
+    const proc = fakeProcess()
+    const signals = watchStopSignals(proc)
+    proc.emit('SIGTERM')
+    proc.emit('SIGINT')
+    const stop = vi.fn()
+    signals.onStop(stop)
+    // Once, with the first signal.
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect(stop).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('kept for the stop, a boot-time SIGTERM runs the graceful stop when it is installed', async () => {
+    const proc = fakeProcess()
+    const signals = watchStopSignals(proc)
+    proc.emit('SIGTERM')
+    const gracefulExit = vi.fn(async () => undefined)
+    const exit = vi.fn<(code: number) => void>()
+    const onStopping = vi.fn<(why: string) => void>()
+    const stop = installServerStop({
+      proc,
+      signals,
+      channel: watchEmbedderChannel(proc, {}),
+      gracefulExit,
+      exit,
+      onStopping,
+    })
+    expect(stop.stopping()).toBe(true)
+    expect(onStopping).toHaveBeenCalledWith('SIGTERM')
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+    expect(gracefulExit).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a second signal to end the process at once', () => {
+    const proc = fakeProcess()
+    watchStopSignals(proc)
+    proc.emit('SIGINT')
+    proc.emit('SIGTERM')
+    expect(proc.listenerCount('SIGINT')).toBe(0)
+    expect(proc.listenerCount('SIGTERM')).toBe(0)
+  })
+
+  it('runs the stop at once for a signal after the stop exists', () => {
+    const proc = fakeProcess()
+    const signals = watchStopSignals(proc)
+    const stop = vi.fn()
+    signals.onStop(stop)
+    expect(stop).not.toHaveBeenCalled()
+    proc.emit('SIGINT')
+    expect(stop).toHaveBeenCalledWith('SIGINT')
+  })
+})
+
 describe('installServerStop', () => {
   function setup() {
     const proc = fakeProcess()
@@ -208,22 +263,24 @@ describe('installServerStop', () => {
     await vi.waitFor(() => expect(s.exit).toHaveBeenCalledTimes(1))
   })
 
-  it('raises SIGTERM for the parts that end their own work on it', async () => {
+  it('does not raise SIGTERM on itself for the message, so a SIGTERM after it is still caught', async () => {
     for (const ask of ['message', 'disconnect'] as const) {
       const s = setup()
-      // Registered after the stop, as the routines ticker is.
-      const ticker = vi.fn()
-      s.proc.once('SIGTERM', ticker)
+      // Another SIGTERM listener: the message no longer reaches it.
+      const other = vi.fn()
+      s.proc.once('SIGTERM', other)
       if (ask === 'message') s.proc.emit('message', { type: 'shutdown' })
       else {
         s.proc.connected = false
         s.proc.emit('disconnect')
       }
-      expect(ticker).toHaveBeenCalledTimes(1)
+      expect(other).not.toHaveBeenCalled()
       expect(s.gracefulExit).toHaveBeenCalledTimes(1)
       expect(s.onStopping).toHaveBeenCalledWith(
         ask === 'message' ? 'shutdown message' : 'the IPC channel closed',
       )
+      // The stop's own SIGTERM listener is still there to catch a repeat.
+      expect(s.proc.listenerCount('SIGTERM')).toBe(2)
     }
   })
 
@@ -345,18 +402,22 @@ const { register } = await import(pathToFileURL(tsxApi).href)
 register()
 const { installServerStop, watchEmbedderChannel } = await import(pathToFileURL(moduleTs).href)
 const channel = watchEmbedderChannel(process, process.env)
+const gracefulMs = Number(process.env.STOP_TEST_GRACEFUL_MS || 0)
 installServerStop({
   proc: process,
   channel,
-  gracefulExit: async () => write({ event: 'graceful' }),
+  gracefulExit: async () => {
+    if (gracefulMs) await new Promise((r) => setTimeout(r, gracefulMs))
+    write({ event: 'graceful' })
+  },
   exit: (code) => {
     write({ event: 'exit', code })
     process.exit(code)
   },
   onStopping: (why) => write({ event: 'stopping', why }),
 })
-// Like the routines ticker and the approval reaper: a part of the server that
-// ends its own work on SIGTERM, registered after the stop.
+// Another SIGTERM listener, registered after the stop: a real SIGTERM reaches
+// it, the shutdown message does not (the server's parts no longer listen).
 process.once('SIGTERM', () => write({ event: 'subsystem' }))
 write({
   event: 'ready',
@@ -487,16 +548,32 @@ console.log(child.pid)
     child.send({ type: 'shutdown' })
     expect(await done).toBe(0)
     expect(stderr).toBe('')
-    // The parts that end their work on SIGTERM end it on the message too.
-    expect(readLines(s.out).map((l) => l.event)).toEqual([
-      'ready',
-      'stopping',
-      'graceful',
-      'subsystem',
-      'exit',
-    ])
+    // The message stops the server directly; it raises no SIGTERM in it.
+    expect(readLines(s.out).map((l) => l.event)).toEqual(['ready', 'stopping', 'graceful', 'exit'])
     expect(readLines(s.out)[1]).toMatchObject({ why: 'shutdown message' })
   }, 60_000)
+
+  // A wrapper that turns the message into a signal too, or an app's fallback,
+  // sends SIGTERM while the stop still runs. It used to find the stop's own
+  // listener spent by the SIGTERM the message raised, and ended the process
+  // halfway through its stop. Windows has no SIGTERM to catch.
+  it.skipIf(process.platform === 'win32')(
+    'finishes its stop when a SIGTERM follows the shutdown message',
+    async () => {
+      const s = setup()
+      const child = start(s, { ...s.env, STOP_TEST_GRACEFUL_MS: '800' })
+      const done = exited(child)
+      await ready(child)
+      child.send({ type: 'shutdown' })
+      await waitForLine(s.out, 'stopping')
+      child.kill('SIGTERM')
+      expect(await done).toBe(0)
+      const events = readLines(s.out).map((l) => l.event)
+      expect(events).toContain('graceful')
+      expect(events.at(-1)).toBe('exit')
+    },
+    60_000,
+  )
 
   it('stops when an app that opted in closes the channel', async () => {
     const s = setup()
@@ -506,7 +583,7 @@ console.log(child.pid)
     child.disconnect()
     expect(await done).toBe(0)
     expect(readLines(s.out)[1]).toMatchObject({ event: 'stopping', why: 'the IPC channel closed' })
-    expect(readLines(s.out).map((l) => l.event)).toContain('subsystem')
+    expect(readLines(s.out).map((l) => l.event)).not.toContain('subsystem')
   }, 60_000)
 
   it('keeps running when an app that did not opt in closes the channel', async () => {

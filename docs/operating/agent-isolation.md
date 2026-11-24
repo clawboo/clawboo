@@ -45,6 +45,8 @@ With the setting on, a prompt-injected agent can no longer:
 
 Clawboo checks the first and the last of these from inside the agent user's account every time it starts, and refuses to start when it cannot prove them.
 
+This is what gives [the person check](/operating/security#what-counts-as-a-person) its strength. Without it, an agent can act as you around every check by changing the database directly. With it, and from 0.9.0 with `personCheck: verified` behind a sign-in proxy, an agent other than OpenClaw's cannot act as you even if it gets the access token some other way. That rests on your proxy signing only for a browser a person signed in. An agent's browser is kept off the dashboard's own port, not off your proxy's address, so if a person signs in to the proxy in an agent's browser, for example while taking over its screen, or a [website login](/using/website-logins) saved for your sign-in page fills it there, that agent can act as that person. It also rests on the conditions in [What counts as a person](/operating/security#what-counts-as-a-person).
+
 It does **not**:
 
 - limit network access. An agent can send what it can read anywhere, and reach other services on the machine that have no password of their own;
@@ -209,7 +211,7 @@ Before it connects, the server checks the folder's and the socket's owners and m
 
 ## A user per agent
 
-Available in releases after 0.7.0. Clawboo 0.7.0 and older ignore `CLAWBOO_AGENT_USERS`. Run `clawboo --version` to see yours.
+Available from 0.8.0. Clawboo 0.7.0 and older ignore `CLAWBOO_AGENT_USERS`. Run `clawboo --version` to see yours.
 
 With `CLAWBOO_AGENT_USERS` (Linux only for now), each agent runs as a user of its own, taken from a pool of users you make once. It is used instead of `CLAWBOO_AGENT_USER`, never with it, and everything above still holds. On top of it, one agent cannot:
 

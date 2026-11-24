@@ -64,7 +64,7 @@ export function SearchInput({
             ? // The `!` beats the app-wide :focus-visible outline, which a text field
               // always matches; the firmer border is this field's focus mark.
               'border-transparent bg-foreground/[0.05] focus:border-foreground/25 focus:bg-foreground/[0.03] focus-visible:outline-none!'
-            : 'border-border bg-surface focus:border-primary focus:ring-4 focus:ring-primary/15',
+            : 'border-border bg-field focus:border-primary focus:ring-4 focus:ring-primary/15',
           d.wrap,
         ].join(' ')}
       />

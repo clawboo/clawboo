@@ -52,7 +52,7 @@ test.describe('Fleet Sidebar', () => {
     await expect(details.getByRole('tab', { name: 'Workspace' })).toHaveCount(0)
 
     // Settings still groups the install-wide panes under Workspace.
-    await sidebar.locator('[data-testid="nav-settings"]').click()
+    await page.locator('[data-testid="account-bar"] [data-testid="nav-settings"]').click()
     const settings = page.locator('[data-testid="settings-modal"]')
     await expect(settings).toBeVisible({ timeout: 5_000 })
     await expect(settings.getByText('Workspace', { exact: true })).toBeVisible()

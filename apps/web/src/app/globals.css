@@ -16,6 +16,16 @@
   /* ── Core brand colors (resolved from CSS variables below) ── */
   --color-background: var(--background);
   --color-surface: var(--surface);
+  /* The frame around the page: the team rail and top bar (`frame`), and the
+     agent column (`frame-column`). */
+  --color-frame: var(--frame);
+  --color-frame-column: var(--frame-column);
+  /* A view's own header row (a chat's, an agent page's). */
+  --color-page-header: var(--page-header);
+  /* A text field, and the Settings window's nav and pane. */
+  --color-field: var(--field);
+  --color-modal-nav: var(--modal-nav);
+  --color-modal-pane: var(--modal-pane);
   --color-text: var(--foreground);
   --color-secondary: var(--secondary);
   --color-blue: var(--blue);
@@ -131,6 +141,19 @@
   --card-foreground: #0f172a;
   --popover: #ffffff;
   --popover-foreground: #0f172a;
+
+  /* The frame around the page. In light mode the rail keeps the paper grey and
+     the agent column stays white; dark mode makes both one near-black step. */
+  --frame: var(--background);
+  --frame-column: var(--surface);
+  --frame-column-rgb: 255 255 255;
+  /* A chat's or an agent page's header row: white on the paper page. */
+  --page-header: var(--surface);
+  /* A text field: white. The Settings window: a faint tint on its glass nav,
+     the paper grey under its panels. */
+  --field: var(--surface);
+  --modal-nav: rgb(15 23 42 / 0.02);
+  --modal-pane: var(--background);
 
   /* Deepened 4 units from #dc2a48, which measured 4.45:1 as text on the dimmest
      light surface — just under AA. Imperceptible as a hue change; it lifts every
@@ -285,49 +308,72 @@
 }
 
 /* ────────────────────────────────────────────────────────────────
-   DARK THEME (current production values — applied via .dark class)
+   DARK THEME (applied via .dark class)
+   A neutral near-black palette: greys with a faint violet lean (blue a touch
+   above red and green), in three steps that each column takes in turn.
+     Frame   #131215  the team rail, the agent column, the top bar
+     Content #1b1a1f  the page beside the sidebar, every view's main area
+     Raised  #212025  panes, the account bar, the composer; cards #232227
+   Above those: selected rows #2c2b30. Inputs sit a little BELOW the surface
+   they are on (#18181b). Dividers are faint, white at about 6%.
    ──────────────────────────────────────────────────────────────── */
 .dark {
-  --background: #0a0e1a;
-  --surface: #111827;
-  --foreground: #e8e8e8;
-  --foreground-rgb: 232 232 232;
-  --surface-rgb: 17 24 39;
-  /* slate-400. #6b7280 (gray-500) measured 3.67:1 on --surface — below AA for
-     the ~50 `text-secondary*` call sites. See tokenContrast.test.ts. */
-  --secondary: #94a3b8;
+  --background: #1b1a1f;
+  --surface: #212025;
+  --foreground: #f6f5fa;
+  --foreground-rgb: 246 245 250;
+  --surface-rgb: 33 32 37;
+  /* Secondary text, a soft neutral grey (7.46:1 on the lightest surface). */
+  --secondary: #b1b2b6;
 
-  --card: #111827;
-  --card-foreground: #e8e8e8;
-  --popover: #111827;
-  --popover-foreground: #e8e8e8;
+  --card: #232227;
+  --card-foreground: #f6f5fa;
+  --popover: #232227;
+  --popover-foreground: #f6f5fa;
+
+  /* The frame: rail, agent column and top bar, darker than the page. */
+  --frame: #131215;
+  --frame-column: #131215;
+  --frame-column-rgb: 19 18 21;
+  /* A view's header row stays on the content step, over a hairline. */
+  --page-header: var(--background);
+  /* A text field sits a little below the surface around it. The Settings
+     window keeps its nav on the content step and lifts its pane one step. */
+  --field: #18181b;
+  --modal-nav: var(--background);
+  --modal-pane: var(--surface);
 
   /* Dark mode cannot serve both roles from ONE value, which is why there are two.
      As TEXT the brand red has to be light enough to clear the dark surfaces
-     (#e94560 measured 4.47:1 on --surface-raised); under a WHITE button label it
+     (#e94762 measured 4.17:1 on the #232227 cards); under a WHITE button label it
      has to be dark (white on #e94560 is only 3.83:1 — that was every primary CTA
      in the app). Lightening fixes the first and worsens the second.
-     So `--primary` is the TEXT/accent/ring red (4.52:1 on the dimmest surface)
-     and `--primary-solid` is the deeper FILL that carries a white label at
-     4.99:1. Light mode needs no split; there `--primary-solid` aliases
+     So `--primary` is the TEXT/accent/ring red (4.56:1 on the lightest surface,
+     the cards) and `--primary-solid` is the deeper FILL that carries a white
+     label at 4.99:1. Light mode needs no split; there `--primary-solid` aliases
      `--primary`. Both are guarded by src/app/__tests__/tokenContrast.test.ts. */
-  --primary: #e94762;
+  --primary: #eb556e;
   --primary-foreground: #ffffff;
   --primary-solid: #c83b53;
-  --primary-rgb: 233 71 98;
+  --primary-rgb: 235 85 110;
 
-  --muted: #1f2937;
-  /* The dark half of the AA-safe muted-text token (see the :root note). */
-  --muted-foreground: #8b95a5;
+  /* A selected row. */
+  --muted: #2c2b30;
+  /* The dark half of the AA-safe muted-text token (see the :root note): light
+     enough for 4.5:1 on a selected row (4.87:1 on --muted) and on a hover tint
+     over a card (4.54:1), not only on the surfaces themselves. */
+  --muted-foreground: #96989e;
 
-  --border: rgb(255 255 255 / 0.08);
-  --border-strong: rgb(255 255 255 / 0.16);
-  --input: #1f2937;
+  --border: rgb(255 255 255 / 0.06);
+  --border-strong: rgb(255 255 255 / 0.12);
+  /* Recessed: a field sits a little darker than the surface around it. */
+  --input: #18181b;
   /* Alias — see the :root note. */
   --ring: var(--primary);
 
-  --destructive: #ef4444;
-  --destructive-rgb: 239 68 68;
+  /* Lifted from #ef4444 (4.20:1 on the cards) to clear AA on every surface. */
+  --destructive: #f05252;
+  --destructive-rgb: 240 82 82;
   --destructive-foreground: #ffffff;
   /* Same split as --primary-solid: white on #ef4444 is 3.76:1, on this deeper
      fill it is 4.89:1. --destructive stays the lighter error TEXT colour. */
@@ -353,9 +399,9 @@
   --category-other: #6b7280; /* gray-500 */
 
   /* Memory-graph surface system: dark counterparts (see :root for the rule).
-     The node sits one step ABOVE --surface so it lifts off the canvas without
-     a glow: elevation, not a coloured halo, separates it. */
-  --graph-node-bg: #171f2e;
+     The node sits one step ABOVE the canvas so it lifts off it without a glow:
+     elevation, not a coloured halo, separates it. */
+  --graph-node-bg: #232227;
   --graph-node-border: rgb(255 255 255 / 0.13);
   --graph-node-border-strong: rgb(255 255 255 / 0.32);
   --graph-node-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 20px -10px rgb(0 0 0 / 0.6);
@@ -365,30 +411,30 @@
   --graph-cluster-label: rgb(255 255 255 / 0.34);
   --graph-label: rgb(255 255 255 / 0.72);
 
-  --canvas: #0a0e1a;
-  --canvas-rgb: 10 14 26;
-  --canvas-dot: rgb(255 255 255 / 0.03);
-  --canvas-control: #111827;
-  --canvas-control-border: rgb(255 255 255 / 0.08);
+  /* A canvas is page content, so it takes the content step. */
+  --canvas: #1b1a1f;
+  --canvas-rgb: 27 26 31;
+  --canvas-dot: rgb(255 255 255 / 0.04);
+  --canvas-control: #232227;
+  --canvas-control-border: rgb(255 255 255 / 0.07);
   --canvas-control-hover: rgb(255 255 255 / 0.06);
-  --canvas-mask: rgb(10 14 26 / 0.75);
+  --canvas-mask: rgb(27 26 31 / 0.75);
 
-  /* Surface elevation tiers (applied to components below).
-     Values chosen to preserve production dark-mode appearance exactly when
-     `--overlay-scrim` / `--code-block-bg` replace existing rgb(0,0,0,X) usages. */
-  --surface-raised: #141b2e;
-  --surface-floating: rgb(17 24 39 / 0.85);
-  --surface-overlay: rgb(20 27 46 / 0.75);
-  --overlay-scrim: rgb(0 0 0 / 0.6);
-  --overlay-scrim-soft: rgb(0 0 0 / 0.32);
-  --code-block-bg: rgb(0 0 0 / 0.32);
+  /* Surface elevation tiers (applied to components below). The raised tier is
+     the cards' step; floating and overlay glass is the raised grey, and the
+     scrim behind a modal is near-black. */
+  --surface-raised: #232227;
+  --surface-floating: rgb(35 34 39 / 0.88);
+  --surface-overlay: rgb(33 32 37 / 0.85);
+  --overlay-scrim: rgb(0 0 0 / 0.8);
+  --overlay-scrim-soft: rgb(0 0 0 / 0.4);
+  --code-block-bg: rgb(0 0 0 / 0.28);
 
   /* Glass-tier borders — slight highlight to read on dark surface */
-  --border-floating: rgb(255 255 255 / 0.1);
-  --border-overlay: rgb(255 255 255 / 0.12);
+  --border-floating: rgb(255 255 255 / 0.08);
+  --border-overlay: rgb(255 255 255 / 0.1);
 
-  /* Elevation shadows — dark mode keeps the deep-black drop-shadow look
-     close to current production values. */
+  /* Elevation shadows: dark mode keeps a deep-black drop shadow. */
   --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.25), 0 1px 1px rgb(0 0 0 / 0.15);
   --shadow-floating: 0 8px 24px rgb(0 0 0 / 0.5), 0 4px 8px rgb(0 0 0 / 0.3);
   --shadow-floating-drop: drop-shadow(0 0 0.5px rgb(255 255 255 / 0.12))
@@ -1315,4 +1361,43 @@ samp {
    rule above is unlayered and would otherwise win the cascade. */
 .welcome-cta:focus-visible {
   outline: none;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   The slim top bar (features/layout/EmbedTitlebar.tsx), drawn only when an
+   app that shows the dashboard in its own window sets
+   `data-clawboo-embed-titlebar` on <html>. The bar is the window's drag area,
+   so a press on its empty space moves the window and a double-click does what
+   the window does. Every control in it opts out, or the window would swallow
+   its clicks. The clip margin leaves room for a control's focus ring.
+   ──────────────────────────────────────────────────────────────── */
+.clawboo-titlebar {
+  -webkit-app-region: drag;
+  app-region: drag;
+  -webkit-user-select: none;
+  user-select: none;
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+.clawboo-titlebar-control {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+/* A layer drawn over the bar (a dialog, a drawer, a menu, the file editor)
+   opts out too, or a button of its own that lands in the bar's band would
+   move the window instead of being pressed. The drag area is worked out from
+   boxes, not from what is painted on top, and these come later in the page
+   than the bar, so their opt-out wins. */
+html[data-clawboo-embed-titlebar]
+  :is(
+    [role='dialog'],
+    [role='alertdialog'],
+    [aria-modal='true'],
+    [role='menu'],
+    [role='listbox'],
+    [role='tooltip'],
+    [data-clawboo-overlay]
+  ) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }

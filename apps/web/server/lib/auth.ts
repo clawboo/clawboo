@@ -6,6 +6,9 @@ import type { EventActor } from '@clawboo/obs'
 import type { PersonRef } from '@clawboo/protocol'
 
 import { isDashboardRequest } from './dashboardRequest'
+import { personCheckMode } from './personCheck'
+import type { RoleScope } from './roles/guard'
+import type { PersonAccess } from './roles/policy'
 import { getTenantId } from './tenant'
 
 const log = createLogger('person-check')
@@ -27,6 +30,23 @@ declare global {
       /** Which issuer vouched for `person`: a sign-in proxy, or the app that
        *  started the engine (its app link). Unset with no person. */
       personVia?: 'proxy' | 'app'
+      /** What the person's token grants, read by the identity lane only while
+       *  roles are enforced (lib/roles). Unset otherwise. */
+      access?: PersonAccess | null
+      /** The program a service token names (roles enforced, `svc: true`): a
+       *  caller the sign-in front vouched for that is not a person. Unset otherwise. */
+      service?: PersonRef | null
+      /** The `sub` of a reader key's verified token (`reader:...`): a program
+       *  running beside the server making one of its reads, never a person.
+       *  Unset otherwise. */
+      reader?: string | null
+      /** The teams a guest may see on this request, set by the route's role
+       *  guard. Unset for everyone else. */
+      roleScope?: RoleScope
+      /** The agent whose screen this request's person may take over, from the
+       *  `control` claim of a sign-in proxy's request-bound token, read only
+       *  while `proxyIdentityControlClaim` is `required`. Null or unset otherwise. */
+      controlClaim?: string | null
     }
   }
 }
@@ -51,8 +71,9 @@ export function personOf(req: Request): PersonRef | null {
 /**
  * Who a person-only write acts as: the person a sign-in proxy vouched for, else the
  * install's one built-in person. Only for a write that already passed the person
- * check (`actsAsPerson`), so locally this stays the speed bump that check is:
- * it names who the dashboard stands for, and proves nothing about who sent it.
+ * check (`actsAsPerson`), so in its `page` mode this stays the speed bump that
+ * check is: it names who the dashboard stands for, and proves nothing about who
+ * sent it.
  */
 export function actingPerson(req: Request): PersonRef {
   return personOf(req) ?? { ...LOCAL_PERSON }
@@ -75,21 +96,40 @@ export function personField(req: Request): { person?: PersonRef } {
 /**
  * May this request act as the person? The ONE check behind every person write:
  * moving a card, Retry, Assign, answering an approval, a person's comment and a
- * team's work check. True for a person a sign-in proxy vouched for, and for the
+ * team's work check. True for a person a verified token names; with the person
+ * check in `page` mode (lib/personCheck.ts, the default), also for the
  * dashboard's own page.
  *
- * Behind a sign-in proxy in `required` mode this is real: every request names a
- * verified person. Everywhere else it is a speed bump, NOT a security boundary
- * (see isDashboardRequest): agents run as the same OS user, so one can read the
- * access token, send the same headers or write the database, until agent mode
- * keeps it out. It stops an agent or a script passing for the person by accident
- * or by setting a field.
+ * With `personCheck: verified`, or behind a sign-in proxy in `required` mode
+ * (which is always `verified`), only a verified token counts. In `page` mode it
+ * is a speed bump, NOT a security boundary (see isDashboardRequest): anything
+ * holding the access token can send the page's headers. Either way an agent
+ * running as this server's OS user can still write the database directly,
+ * until agent mode keeps it out. It stops an agent or a script passing for the
+ * person by accident or by setting a field.
  *
  * `personOf` must stay "a person something vouched for". A built-in local person
  * would answer it for every request, so that person belongs behind this check.
  */
 export function actsAsPerson(req: Request): boolean {
-  return personOf(req) !== null || isDashboardRequest(req)
+  // A service token or a reader key's token is a program, whatever headers it
+  // sends (the dashboard's fetch metadata included): it never acts as a person.
+  if (req.service || req.reader) return false
+  if (personOf(req) !== null) return true
+  return personCheckMode() === 'page' && isDashboardRequest(req)
+}
+
+/**
+ * Whether this request's token lets its person take over `agentId`'s screen:
+ * a sign-in proxy's person whose `control` claim names exactly that agent. Only
+ * meaningful while `proxyIdentityControlClaim` is `required`; the lane never
+ * sets the claim otherwise.
+ */
+export function controlClaimFor(req: Request, agentId: string): boolean {
+  if (req.service || req.reader || personOf(req) === null || req.personVia !== 'proxy') {
+    return false
+  }
+  return typeof req.controlClaim === 'string' && req.controlClaim === agentId && agentId !== ''
 }
 
 /** Refuse a request that may not act as the person: answers 403 `person_only` and
@@ -99,6 +139,16 @@ export function refuseUnlessPerson(req: Request, res: Response): boolean {
   log.warn({ method: req.method, path: req.path }, 'refused a person write')
   res.status(403).json({ ok: false, error: 'person_only' })
   return true
+}
+
+/**
+ * For a route the access cookie opens in `page` mode but that is a person's under
+ * `personCheck: verified`: what an agent's screen shows (its live view, its
+ * browser's screenshots) and taking it over. Refuses like `refuseUnlessPerson`
+ * under `verified`; does nothing in `page` mode.
+ */
+export function refuseUnlessVerifiedPerson(req: Request, res: Response): boolean {
+  return personCheckMode() === 'verified' && refuseUnlessPerson(req, res)
 }
 
 /** `{ actor, person? }` to spread into the event of what a request wrote: `person`

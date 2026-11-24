@@ -19,13 +19,19 @@ import {
   APP_LINK_ROUTES,
   APP_LINK_KEY_ENV,
   appLinkOn,
+  controlClaimModeOf,
   identityConfigs,
   loadAppLinkConfig,
+  loadPersonCheck,
   loadProxyIdentityConfig,
   parsePublicKeySetting,
   proxyIdentityFileWarning,
   proxyIdentityMode,
+  READER_HEADER,
+  loadReaderConfig,
+  readerKeyOn,
   replaceableBy,
+  rolesModeOf,
   type PathProbe,
 } from '../config'
 
@@ -552,5 +558,292 @@ describe('the app link', () => {
     expect(allows('POST', '/api/agents/a1/chat/stop')).toBe(false)
     expect(allows('POST', '/api/agents/../chat')).toBe(false)
     expect(allows('POST', '/api/agents/./chat')).toBe(false)
+  })
+})
+
+describe('roles', () => {
+  it('are off by default: a role in a token is only recorded', () => {
+    stubLane()
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.roles).toBe('off')
+    expect(rolesModeOf(proxy)).toBe('off')
+    expect(rolesModeOf(null)).toBe('off')
+  })
+
+  it('are enforced behind a lane that requires a token', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce' })
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.roles).toBe('enforce')
+    expect(rolesModeOf(proxy)).toBe('enforce')
+  })
+
+  it('refuse to start in on mode, where a request without a token names nobody', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY: 'on', CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce' })
+    expect(refusal()).toMatch(/proxyIdentityRoles is enforce but proxyIdentity is on/)
+  })
+
+  it('refuse to start with no lane at all, rather than apply to nobody', () => {
+    vi.stubEnv('CLAWBOO_PROXY_IDENTITY_ROLES', 'enforce')
+    expect(refusal()).toMatch(/proxyIdentityRoles is enforce but proxyIdentity is off/)
+  })
+
+  it('refuse a setting they do not know', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'strict' })
+    expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+
+  it("apply to the app link's people too while enforced", () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce' })
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
+    expect(identityConfigs(proxy, appLink).map((c) => c.roles)).toEqual(['enforce', 'enforce'])
+  })
+})
+
+describe('the person check (personCheck)', () => {
+  it('is page when nothing is set, with the lane off or on', () => {
+    initOperatorSettings()
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('page')
+    stubLane({ CLAWBOO_PROXY_IDENTITY: 'on' })
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('page')
+  })
+
+  it('reads CLAWBOO_PERSON_CHECK behind a lane that is on', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY: 'on', CLAWBOO_PERSON_CHECK: 'verified' })
+    initOperatorSettings()
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('verified')
+  })
+
+  it('is verified behind a required lane, whatever it says', () => {
+    stubLane({ CLAWBOO_PERSON_CHECK: 'page' })
+    initOperatorSettings()
+    expect(loadPersonCheck(loadProxyIdentityConfig())).toBe('verified')
+  })
+
+  it('stops the server on verified with the sign-in proxy lane off', () => {
+    vi.stubEnv('CLAWBOO_PERSON_CHECK', 'verified')
+    initOperatorSettings()
+    // Only the sign-in proxy's config is passed: an app link on its own signs a
+    // handful of routes, so the dashboard could do no person act (index.ts).
+    let message = ''
+    try {
+      loadPersonCheck(loadProxyIdentityConfig())
+    } catch (err) {
+      expect(err).toBeInstanceOf(OperatorSettingsError)
+      message = (err as Error).message
+    }
+    expect(message).toMatch(/personCheck is verified but the sign-in proxy lane/)
+  })
+
+  it('refuses a value it does not know', () => {
+    vi.stubEnv('CLAWBOO_PERSON_CHECK', 'strict')
+    expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+
+  it('makes the operator file warning cover it, as an agent could set it back', () => {
+    writeFileSync(path.join(home, 'operator.json'), JSON.stringify({ personCheck: 'verified' }))
+    initOperatorSettings()
+    expect(proxyIdentityFileWarning()).toMatch(/every agent it runs/)
+  })
+})
+
+describe('the take-over claim (proxyIdentityControlClaim)', () => {
+  it('is off by default', () => {
+    stubLane()
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.controlClaim).toBe('off')
+    expect(controlClaimModeOf(proxy)).toBe('off')
+    expect(controlClaimModeOf(null)).toBe('off')
+  })
+
+  it('is read behind a lane that is on or required, with request binding', () => {
+    for (const mode of ['on', 'required']) {
+      resetOperatorSettings()
+      stubLane({ CLAWBOO_PROXY_IDENTITY: mode, CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required' })
+      initOperatorSettings()
+      const proxy = loadProxyIdentityConfig()!
+      expect(controlClaimModeOf(proxy)).toBe('required')
+    }
+  })
+
+  it('stops the server with the lane off', () => {
+    vi.stubEnv('CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM', 'required')
+    expect(refusal()).toMatch(/proxyIdentityControlClaim is required but proxyIdentity is off/)
+  })
+
+  it('stops the server with session binding, where a claim would last the whole sign-in', () => {
+    stubLane({
+      CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required',
+      CLAWBOO_PROXY_IDENTITY_BINDING: 'session',
+    })
+    expect(refusal()).toMatch(
+      /proxyIdentityControlClaim is required but proxyIdentityBinding is session/,
+    )
+  })
+
+  it('is never handed to the app link', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required' })
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
+    expect(identityConfigs(proxy, appLink).map((c) => c.controlClaim)).toEqual([
+      'required',
+      undefined,
+    ])
+  })
+
+  it('refuses a setting it does not know', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'on' })
+    expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+})
+
+describe('the reader key (proxyIdentityReaderPublicKey)', () => {
+  const reader = generateKeyPairSync('ed25519')
+  const readerPem = reader.publicKey.export({ format: 'pem', type: 'spki' }).toString()
+  const readerJwk = reader.publicKey.export({ format: 'jwk' })
+  const READER_ENV = 'CLAWBOO_PROXY_IDENTITY_READER_PUBLIC_KEY'
+
+  /** Every config the server builds, as index.ts builds them. */
+  function load(env: NodeJS.ProcessEnv = {}) {
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()
+    const appLink = loadAppLinkConfig(env)
+    const readerConfig = loadReaderConfig(proxy, appLink)
+    return { proxy, appLink, readerConfig, all: identityConfigs(proxy, appLink, readerConfig) }
+  }
+
+  function loadRefusal(env: NodeJS.ProcessEnv = {}): string {
+    try {
+      load(env)
+    } catch (err) {
+      expect(err).toBeInstanceOf(OperatorSettingsError)
+      return (err as Error).message
+    }
+    throw new Error('expected a refusal')
+  }
+
+  it('is off with nothing set', () => {
+    stubLane()
+    const { readerConfig, all } = load()
+    expect(readerConfig).toBeNull()
+    expect(readerKeyOn()).toBe(false)
+    expect(all.map((c) => c.refuseReaderSubjects)).toEqual([undefined])
+  })
+
+  it('trusts its own key for request-bound reader: tokens in its own header, in on and required', () => {
+    for (const mode of ['on', 'required']) {
+      resetOperatorSettings()
+      stubLane({
+        CLAWBOO_PROXY_IDENTITY: mode,
+        CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME: '120',
+        [READER_ENV]: readerPem,
+      })
+      const { readerConfig, all } = load()
+      expect(readerKeyOn()).toBe(true)
+      expect(readerConfig).toEqual({
+        mode: 'on',
+        header: 'clawboo-reader-identity',
+        issuer: 'clawboo-reader',
+        audience: 'clawboo-engine',
+        binding: 'request',
+        maxLifetimeSeconds: 120,
+        nameClaim: 'name',
+        roleClaim: 'role',
+        keys: {
+          source: 'public-key',
+          jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: readerJwk.x }] },
+        },
+        accountSubjects: 'never',
+        reader: true,
+      })
+      // Beside it, the sign-in proxy may name no reader: subject.
+      expect(all.map((c) => c.refuseReaderSubjects ?? null)).toEqual([true, null])
+      expect(all[1]).toBe(readerConfig)
+    }
+  })
+
+  it('takes a JWK, and is read from the operator file too', () => {
+    writeFileSync(
+      path.join(home, 'operator.json'),
+      JSON.stringify({
+        proxyIdentity: 'on',
+        proxyIdentityPublicKey: edPem,
+        proxyIdentityIssuer: 'https://proxy.example.com',
+        proxyIdentityAudience: 'clawboo',
+        proxyIdentityReaderPublicKey: JSON.stringify(readerJwk),
+      }),
+    )
+    const { readerConfig } = load()
+    expect(readerConfig?.keys).toEqual({
+      source: 'public-key',
+      jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: readerJwk.x }] },
+    })
+    // Set in a file, it is a key an agent could swap: the warning covers it.
+    writeFileSync(
+      path.join(home, 'operator.json'),
+      JSON.stringify({ proxyIdentityReaderPublicKey: readerPem }),
+    )
+    resetOperatorSettings()
+    stubLane()
+    initOperatorSettings()
+    expect(proxyIdentityFileWarning()).toMatch(/every agent it runs/)
+  })
+
+  it('stops the server with the lane off, as the take-over claim does', () => {
+    vi.stubEnv(READER_ENV, readerPem)
+    expect(refusal()).toMatch(/proxyIdentityReaderPublicKey is set but proxyIdentity is off/)
+    // And loadReaderConfig on its own refuses it too, so no caller can go around.
+    resetOperatorSettings()
+    initOperatorSettings()
+    expect(() => loadReaderConfig(null, null)).toThrow(/proxyIdentity is off/)
+  })
+
+  it("stops the server when it is one of the proxy's keys, however each is written", () => {
+    stubLane({ [READER_ENV]: JSON.stringify({ keys: [readerJwk, { ...edJwk, kid: 'other' }] }) })
+    expect(loadRefusal()).toMatch(/proxyIdentityPublicKey holds too/)
+    resetOperatorSettings()
+    stubLane({ CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY: JSON.stringify(edJwk), [READER_ENV]: edPem })
+    expect(loadRefusal()).toMatch(/must never be able to sign a person/)
+  })
+
+  it("stops the server when it is the app link's key", () => {
+    stubLane({ [READER_ENV]: readerPem })
+    expect(loadRefusal({ [APP_LINK_KEY_ENV]: readerPem })).toMatch(
+      /holds the key in CLAWBOO_APP_LINK_PUBLIC_KEY/,
+    )
+  })
+
+  it('refuses a private key without repeating it, and anything that is no key', () => {
+    const privatePem = reader.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
+    stubLane({ [READER_ENV]: privatePem })
+    const message = loadRefusal()
+    expect(message).toMatch(/proxyIdentityReaderPublicKey holds a private key/)
+    expect(message).not.toContain(privatePem.split('\n')[1]!)
+    resetOperatorSettings()
+    stubLane({ [READER_ENV]: 'not a key' })
+    expect(loadRefusal()).toMatch(/must be a PEM public key/)
+  })
+
+  it('keeps its header from a sign-in proxy that uses the same name', () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_HEADER: READER_HEADER, [READER_ENV]: readerPem })
+    expect(loadRefusal()).toMatch(/proxyIdentityHeader is clawboo-reader-identity/)
+  })
+
+  it("is never given a role, a take-over claim or the app link's routes", () => {
+    stubLane({
+      CLAWBOO_PROXY_IDENTITY_ROLES: 'enforce',
+      CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM: 'required',
+      [READER_ENV]: readerPem,
+    })
+    const { all } = load({ [APP_LINK_KEY_ENV]: edPem })
+    const readerEntry = all.find((c) => c.reader)!
+    expect(readerEntry.roles).toBeUndefined()
+    expect(readerEntry.controlClaim).toBeUndefined()
+    expect(readerEntry.routes).toBeUndefined()
   })
 })

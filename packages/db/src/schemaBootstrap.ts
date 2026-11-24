@@ -256,7 +256,15 @@ const SCHEMA_DDL = `
       check_held_since     INTEGER,
       run_execution_id     TEXT,
       is_main_task         INTEGER NOT NULL DEFAULT 0,
-      chat_session_key     TEXT
+      chat_session_key     TEXT,
+      -- The team goal this task serves (team_goals.id, same team), or NULL. Copied
+      -- from the request or parent when the task is made; a read-time resolver
+      -- covers tasks made before their request had one. No foreign key: a goal
+      -- that is gone reads as none.
+      goal_id              TEXT,
+      -- 1: a person said this task serves no goal. The read-time resolver stops
+      -- here instead of walking up to its request's goal.
+      goal_cleared         INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);
@@ -266,6 +274,7 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_tasks_chat_session ON tasks (chat_session_key, updated_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent_dropped_created ON tasks (parent_task_id, dropped, created_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee_person ON tasks (assignee_person_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_goal ON tasks (goal_id);
     -- One assignee, agent or person, never both, for every writer. Other processes
     -- write this file too, so the rule is here and not only in the repository.
     CREATE TRIGGER IF NOT EXISTS trg_tasks_one_assignee_insert BEFORE INSERT ON tasks
@@ -370,6 +379,147 @@ const SCHEMA_DDL = `
       created_at      INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_task_documents_revision ON task_documents (task_id, key, revision);
+
+    -- ── Home: a team's goals, KPIs, pages and status line (see src/home/) ──
+    -- People and agents in these rows are a JSON {kind: 'person'|'agent', id, name}.
+    -- A team's goals. Flat, each optionally under one parent goal of the same team;
+    -- a goal with a parent is never itself a parent.
+    CREATE TABLE IF NOT EXISTS team_goals (
+      id                  TEXT    PRIMARY KEY,
+      team_id             TEXT    NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      parent_goal_id      TEXT,
+      title               TEXT    NOT NULL,
+      description         TEXT    NOT NULL DEFAULT '',
+      owner               TEXT,
+      target_date         INTEGER,
+      -- active | done | dropped
+      status              TEXT    NOT NULL DEFAULT 'active',
+      -- on_track | at_risk | off_track, set only by a person
+      health              TEXT,
+      health_set_by       TEXT,
+      health_set_at       INTEGER,
+      update_cadence_days INTEGER NOT NULL DEFAULT 7,
+      position            INTEGER NOT NULL DEFAULT 0,
+      created_by          TEXT,
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL,
+      archived_at         INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_goals_team ON team_goals (team_id, position);
+    CREATE INDEX IF NOT EXISTS idx_team_goals_parent ON team_goals (parent_goal_id);
+
+    -- Every change of a goal's health, by a person directly or by publishing an update.
+    CREATE TABLE IF NOT EXISTS team_goal_health (
+      id         TEXT    PRIMARY KEY,
+      goal_id    TEXT    NOT NULL REFERENCES team_goals(id) ON DELETE CASCADE,
+      health     TEXT,
+      set_by     TEXT,
+      set_at     INTEGER NOT NULL,
+      update_id  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_goal_health_goal ON team_goal_health (goal_id, set_at);
+
+    -- Status updates on a goal. An agent only drafts; a person publishes or discards.
+    CREATE TABLE IF NOT EXISTS team_goal_updates (
+      id            TEXT    PRIMARY KEY,
+      goal_id       TEXT    NOT NULL REFERENCES team_goals(id) ON DELETE CASCADE,
+      team_id       TEXT    NOT NULL,
+      body          TEXT    NOT NULL,
+      health        TEXT,
+      author        TEXT,
+      execution_id  TEXT,
+      -- draft | published | discarded
+      state         TEXT    NOT NULL DEFAULT 'draft',
+      published_by  TEXT,
+      published_at  INTEGER,
+      created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_goal_updates_goal ON team_goal_updates (goal_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_team_goal_updates_team_state ON team_goal_updates (team_id, state);
+
+    -- KPIs a person defines once. Values come from the board (computed), an agent or
+    -- a person. An agent may suggest one (status 'suggested'); only a person defines.
+    CREATE TABLE IF NOT EXISTS team_kpis (
+      id                TEXT    PRIMARY KEY,
+      team_id           TEXT    NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      goal_id           TEXT    REFERENCES team_goals(id) ON DELETE SET NULL,
+      name              TEXT    NOT NULL,
+      unit              TEXT    NOT NULL DEFAULT '',
+      -- up | down: which way is better
+      direction         TEXT    NOT NULL DEFAULT 'up',
+      target            REAL,
+      -- week | month | quarter | all
+      period            TEXT    NOT NULL DEFAULT 'week',
+      -- computed | agent | person
+      source            TEXT    NOT NULL,
+      metric            TEXT,
+      reporter_agent_id TEXT,
+      stale_after_hours REAL,
+      -- active | suggested | archived
+      status            TEXT    NOT NULL DEFAULT 'active',
+      suggested_by      TEXT,
+      suggestion_note   TEXT,
+      created_by        TEXT,
+      position          INTEGER NOT NULL DEFAULT 0,
+      created_at        INTEGER NOT NULL,
+      updated_at        INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_kpis_team ON team_kpis (team_id, status, position);
+    CREATE INDEX IF NOT EXISTS idx_team_kpis_goal ON team_kpis (goal_id);
+
+    -- A KPI's values, append-only.
+    CREATE TABLE IF NOT EXISTS team_kpi_values (
+      id            TEXT    PRIMARY KEY,
+      kpi_id        TEXT    NOT NULL REFERENCES team_kpis(id) ON DELETE CASCADE,
+      value         REAL    NOT NULL,
+      as_of         INTEGER NOT NULL,
+      reported_by   TEXT,
+      execution_id  TEXT,
+      task_id       TEXT,
+      source_url    TEXT,
+      note          TEXT,
+      created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_kpi_values_kpi ON team_kpi_values (kpi_id, as_of);
+
+    -- A team's pages. The words live in revisions: nothing is overwritten.
+    CREATE TABLE IF NOT EXISTS team_pages (
+      id          TEXT    PRIMARY KEY,
+      team_id     TEXT    NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      goal_id     TEXT    REFERENCES team_goals(id) ON DELETE SET NULL,
+      title       TEXT    NOT NULL,
+      pinned      INTEGER NOT NULL DEFAULT 0,
+      archived_at INTEGER,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_pages_team ON team_pages (team_id, updated_at);
+
+    -- 1, 2, 3 per page. A revert is a new revision that copies an old one.
+    CREATE TABLE IF NOT EXISTS team_page_revisions (
+      id            TEXT    PRIMARY KEY,
+      page_id       TEXT    NOT NULL REFERENCES team_pages(id) ON DELETE CASCADE,
+      revision      INTEGER NOT NULL,
+      title         TEXT    NOT NULL,
+      body          TEXT    NOT NULL,
+      author        TEXT,
+      execution_id  TEXT,
+      reverted_from INTEGER,
+      created_at    INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_team_page_revisions_revision ON team_page_revisions (page_id, revision);
+
+    -- The status line a team's lead wrote, when the team turned that on. board_seq is
+    -- the team board's newest task change when it was written, to tell when it moved.
+    CREATE TABLE IF NOT EXISTS team_home_summary (
+      team_id       TEXT    PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+      body          TEXT    NOT NULL,
+      author        TEXT,
+      execution_id  TEXT,
+      model         TEXT,
+      written_at    INTEGER NOT NULL,
+      board_seq     INTEGER NOT NULL DEFAULT 0
+    );
 
     CREATE TABLE IF NOT EXISTS task_comments (
       id              TEXT    PRIMARY KEY,
@@ -1116,7 +1266,21 @@ const SCHEMA_DDL = `
       updated_at  INTEGER NOT NULL
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_team_os_groups_team
-      ON team_os_groups (team_id) WHERE state = 'assigned';`
+      ON team_os_groups (team_id) WHERE state = 'assigned';
+
+    -- The id (jti) of every request-bound identity token the server has accepted,
+    -- per issuer lane ('proxy', 'app' or 'reader'), until the token could no longer
+    -- be accepted anyway (until_ms, epoch ms). A second use of the same id within
+    -- that time is a replay and is refused, across restarts too. Swept at boot and
+    -- as tokens are checked.
+    CREATE TABLE IF NOT EXISTS identity_token_uses (
+      issuer   TEXT    NOT NULL,
+      jti      TEXT    NOT NULL,
+      until_ms INTEGER NOT NULL,
+      PRIMARY KEY (issuer, jti)
+    );
+    CREATE INDEX IF NOT EXISTS idx_identity_token_uses_until
+      ON identity_token_uses (until_ms);`
 
 /**
  * Bring the database up to the schema above, so the file is immediately usable
