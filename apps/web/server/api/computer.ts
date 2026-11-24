@@ -82,6 +82,7 @@ import {
   type ViewerSink,
   type ViewerVia,
 } from '../lib/desktop/liveView'
+import { desktopToolDownloadRefusal, linkKindRefusal } from '../lib/desktop/screenSettings'
 import { controlClaimRequired, personCheckMode } from '../lib/personCheck'
 
 const log = createLogger('computer')
@@ -130,6 +131,9 @@ function agentRow(agentId: string): AgentRow | null {
 function workingLink(token: string | null | undefined): PublicLink | null {
   const link = resolveLink(token)
   if (!link) return null
+  // An administrator turned this kind of link off: it opens nothing, whenever
+  // it was made. Checked before the database, on every request.
+  if (linkKindRefusal(link.kind) !== null) return null
   const row = agentRow(link.agentId)
   return row && row.createdAt === linkAgentStamp(link.id) ? link : null
 }
@@ -152,7 +156,8 @@ function linkOf(req: Request): PublicLink | null {
 }
 
 /**
- * Why control links cannot be made here, or null when they can.
+ * Why control links cannot be made here, or null when they can: turned off by
+ * an administrator (`computerLinks`), or agents on the server's own user.
  *
  * A person who takes over an agent's screen can do whatever its browser's OS
  * user can do on this machine: a file dialog, a `file:` address or another
@@ -162,6 +167,8 @@ function linkOf(req: Request): PublicLink | null {
  * cannot open Clawboo's database, vault or access token.
  */
 export function controlLinkRefusal(): string | null {
+  const turnedOff = linkKindRefusal('control')
+  if (turnedOff) return turnedOff
   return isAgentUserMode()
     ? null
     : "Control links need agents to run as their own OS user (CLAWBOO_AGENT_USER). Whoever takes over an agent's screen can reach what its browser's user can on this machine, which otherwise includes Clawboo's own files. Make a view link, or take over from here yourself."
@@ -211,7 +218,9 @@ function refuseWithoutControlClaim(req: Request, res: Response, agentId: string)
  * install offer stands only where installing would help: Xvnc is what is
  * missing and Clawboo has a build of it for this machine (TigerVNC's own,
  * x86_64), or displays work and Cua Driver is not installed yet. Never on a
- * Mac or Windows, never where an operator turned displays off.
+ * Mac or Windows, never where an operator turned displays off, and never for a
+ * tool whose download an administrator turned off or whose program they named
+ * (`downloadRefusal`).
  */
 export function displaysStatus(
   support: DisplaySupport,
@@ -219,6 +228,7 @@ export function displaysStatus(
   problem: string | null,
   driverInstalled: boolean,
   agentUserMode: boolean = isAgentUserMode(),
+  downloadRefusal: (tool: 'tigervnc' | 'cuaDriver') => string | null = desktopToolDownloadRefusal,
 ) {
   return support.ok
     ? {
@@ -227,13 +237,20 @@ export function displaysStatus(
         // Why the last display failed to start, when it did (a missing library).
         problem,
         // Cua Driver runs only with agents on their own OS user (driverPolicy).
-        driverInstallable: plan.cuaDriver !== null && !driverInstalled && agentUserMode,
+        driverInstallable:
+          plan.cuaDriver !== null &&
+          !driverInstalled &&
+          agentUserMode &&
+          downloadRefusal('cuaDriver') === null,
       }
     : {
         available: false as const,
         code: support.code,
         reason: support.reason,
-        installable: support.code === 'no-xvnc' && plan.tigervnc !== null,
+        installable:
+          support.code === 'no-xvnc' &&
+          plan.tigervnc !== null &&
+          downloadRefusal('tigervnc') === null,
       }
 }
 
@@ -271,6 +288,7 @@ export function computerStatusGET(req: Request, res: Response): void {
     ),
     watchers: viewerCount(agentId),
     links: listLinks(agentId),
+    viewLinks: { allowed: linkKindRefusal('view') === null, reason: linkKindRefusal('view') },
     controlLinks: { allowed: controlLinkRefusal() === null, reason: controlLinkRefusal() },
     // Whether a take over needs the sign-in proxy's say-so for this agent, and
     // whether this request's token has it.
@@ -554,6 +572,12 @@ export function computerLinksPOST(req: Request, res: Response): void {
     res.status(400).json({ ok: false, error: 'kind must be view or control' })
     return
   }
+  // Turned off by an administrator: refused outright, not a conflict to fix here.
+  const turnedOff = linkKindRefusal(kind)
+  if (turnedOff) {
+    res.status(403).json({ ok: false, error: turnedOff })
+    return
+  }
   const refusal = kind === 'control' ? controlLinkRefusal() : null
   if (refusal) {
     res.status(409).json({ ok: false, error: refusal })
@@ -604,7 +628,9 @@ export function computerLinksDELETE(req: Request, res: Response): void {
  * POST /api/computer/tools/install: install the pinned desktop tools (TigerVNC's
  * Xvnc, Cua Driver) into Clawboo's runtimes folder. A person's act; Linux only.
  * Downloads each release, checks it against its pinned SHA-256 before it is
- * unpacked, and switches to it only when everything worked.
+ * unpacked, and switches to it only when everything worked. Refused (403) when
+ * an administrator turned the download off, and a tool whose program they
+ * named is never downloaded.
  */
 export async function computerToolsInstallPOST(req: Request, res: Response): Promise<void> {
   if (refuseUnlessPerson(req, res)) return
@@ -613,7 +639,9 @@ export async function computerToolsInstallPOST(req: Request, res: Response): Pro
     res.json({ ok: true, xvnc: done.tigervnc !== null, cuaDriver: done.cuaDriver !== null })
   } catch (err) {
     const code = err instanceof DesktopToolsError ? err.code : 'INSTALL_FAILED'
-    res.status(code === 'UNSUPPORTED' ? 422 : 502).json({
+    const status =
+      code === 'UNSUPPORTED' ? 422 : code === 'TURNED_OFF' ? 403 : code === 'TOO_NEW' ? 409 : 502
+    res.status(status).json({
       ok: false,
       code,
       error: err instanceof Error ? err.message : String(err),

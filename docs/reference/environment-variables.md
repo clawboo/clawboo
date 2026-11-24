@@ -22,6 +22,11 @@ keywords:
     'CLAWBOO_AGENT_USERS',
     'CLAWBOO_STOP_ON_DISCONNECT',
     'clawboo-launch',
+    'CLAWBOO_COMPUTER_LINKS',
+    'CLAWBOO_XVNC_PATH',
+    'CLAWBOO_CUA_DRIVER_PATH',
+    'CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL',
+    'CLAWBOO_MAX_AGENT_DISPLAYS',
   ]
 ---
 
@@ -29,95 +34,100 @@ These are the environment variables Clawboo's own code reads, and the ones it se
 
 Durations are in milliseconds, and an unset, empty or non-numeric duration means the default. Each variable's section below says how it handles other values. Agent runtimes and OpenClaw read variables of their own, which this page does not cover.
 
-| Variable                               | Default                           | What it does                                                           |
-| -------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
-| **Access and network**                 |                                   |                                                                        |
-| `HOST`                                 | `127.0.0.1`                       | Address the dashboard listens on                                       |
-| `STUDIO_ACCESS_TOKEN`                  | per-install token file            | The access token for `/api/*`; blank turns the gate off                |
-| `CLAWBOO_ALLOW_INSECURE`               | unset                             | Allows a wide bind with no token                                       |
-| `CLAWBOO_ALLOWED_ORIGINS`              | loopback only                     | Extra browser origins allowed to call the API                          |
-| `CLAWBOO_ALLOWED_HOSTS`                | loopback and the bind host        | Extra `Host` header values the server accepts                          |
-| `CLAWBOO_BASE_PATH`                    | unset (root)                      | Serves the whole app under a URL prefix                                |
-| `CLAWBOO_SECRETS_MASTER_KEY`           | generated key file                | Key that encrypts saved provider keys                                  |
-| **Ports**                              |                                   |                                                                        |
-| `CLAWBOO_API_PORT`                     | unset (scan from 18790)           | Exact port for the dashboard                                           |
-| `CLAWBOO_API_PORT_START`               | `18790`                           | First port of the 20-port scan                                         |
-| `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset           |
-| `CLAWBOO_HERMES_GATEWAY_PORT`          | `8642`                            | First port the Hermes gateway tries, on `127.0.0.1`                    |
-| `CLAWBOO_HERMES_STOP_GRACE_MS`         | `5000`                            | The Hermes gateway's time to stop when Clawboo stops (at most 8000)    |
-| **Folders**                            |                                   |                                                                        |
-| `CLAWBOO_HOME`                         | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
-| `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
-| `CLAWBOO_RUNTIMES_DIR`                 | `~/clawboo-runtimes`              | Runtimes Clawboo installs; `<CLAWBOO_HOME>-runtimes` when that is set  |
-| `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes                      |
-| `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                              |
-| `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                                |
-| `CLAWBOO_CATALOG_INDEX_URL`            | this release's catalog on GitHub  | Where the marketplace catalog comes from                               |
-| **Agent isolation**                    |                                   |                                                                        |
-| `CLAWBOO_AGENT_USER`                   | unset (off)                       | Runs every agent as this separate operating system user                |
-| `CLAWBOO_AGENT_USERS`                  | unset (off)                       | Linux: runs each agent as a user of its own, from this pool            |
-| `CLAWBOO_AGENT_GROUPS`                 | unset                             | With `CLAWBOO_AGENT_USERS`: the groups, one for each team              |
-| `CLAWBOO_AGENT_SWITCH`                 | `sudo`                            | How the server starts the agent host: `sudo` or `doas`                 |
-| `CLAWBOO_AGENT_HOST_SOCKET`            | unset                             | Set by `clawboo-launch`: the socket of the agent host it started       |
-| `CLAWBOO_AGENT_HOST_SCRIPT`            | `<server folder>/agent-host.js`   | The agent host script                                                  |
-| `CLAWBOO_SERVER_USER`                  | none                              | `clawboo-launch` only: the user the server runs as                     |
-| `CLAWBOO_RUN_DIR`                      | `/run/clawboo`                    | `clawboo-launch` only: the folder for the agent host's socket          |
-| `CLAWBOO_NODE`                         | `node` on `PATH`                  | `clawboo-launch` only: the Node that runs the server and the host      |
-| **Started by an app**                  |                                   |                                                                        |
-| `CLAWBOO_STOP_ON_DISCONNECT`           | unset                             | `1` stops the server when its app's IPC channel closes                 |
-| **Pinned by an administrator**         |                                   |                                                                        |
-| `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                             |
-| `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off                   |
-| `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    | unset                             | `1` stops the browsers starting on a new install                       |
-| `CLAWBOO_PROXY_IDENTITY`               | `off`                             | Checks a sign-in proxy's signed identity tokens                        |
-| `CLAWBOO_PROXY_IDENTITY_*`             | see below                         | The proxy's keys, issuer, audience, header and binding                 |
-| **Provider keys**                      |                                   |                                                                        |
-| `ANTHROPIC_API_KEY`                    | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes                        |
-| `OPENAI_API_KEY`                       | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings                     |
-| `OPENROUTER_API_KEY`                   | unset                             | Hermes, Clawboo Native (OpenRouter)                                    |
-| `GEMINI_API_KEY` and six more          | unset                             | Clawboo Native through OpenAI-compatible providers                     |
-| `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup                   |
-| `OPENROUTER_BASE_URL` and nine more    | each provider's own address       | Sends a provider's traffic through a gateway or proxy                  |
-| `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                                 |
-| **Runs and verification**              |                                   |                                                                        |
-| `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn              |
-| `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                                   |
-| `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                                 |
-| `CLAWBOO_MAX_FIX_CYCLES`               | `1`                               | Retries after a failed verification                                    |
-| `CLAWBOO_REVIEWER_MODEL`               | the builder's model               | Model for the verification reviewer                                    |
-| `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`  | `600000` (10 min)                 | Wait for an OpenClaw agent's Routine run                               |
-| **Board timing**                       |                                   |                                                                        |
-| `CLAWBOO_BOARD_STALE_TTL_MS`           | `180000` (3 min)                  | Missed heartbeats before a running task is released                    |
-| `CLAWBOO_BOARD_STALE_SWEEP_MS`         | `60000` (1 min)                   | How often that check runs                                              |
-| `CLAWBOO_DISPATCH_PUMP_MS`             | `60000` (1 min)                   | How often waiting delegated work is woken                              |
-| `CLAWBOO_DB_WRITE_BUDGET_MS`           | `1500`                            | Retry time for a busy database write                                   |
-| **Approvals and retention**            |                                   |                                                                        |
-| `CLAWBOO_APPROVAL_TTL_MS`              | `86400000` (24 h)                 | Age at which the reaper expires a forgotten approval                   |
-| `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`  | `3600000` (1 h)                   | How often the reaper runs                                              |
-| `CLAWBOO_TOOL_RESULT_TTL_MS`           | `604800000` (7 days)              | How long stored large tool results are kept                            |
-| **Memory, browsers and MCP**           |                                   |                                                                        |
-| `CLAWBOO_DISABLE_EMBEDDINGS`           | unset                             | `1` turns memory embeddings off                                        |
-| `CLAWBOO_MAX_AGENT_BROWSERS`           | `4`                               | Agent browsers open at once                                            |
-| `CLAWBOO_AGENT_BROWSER_IDLE_MS`        | `600000` (10 min)                 | Idle time before an agent browser closes                               |
-| `CLAWBOO_AGENT_DISPLAYS`               | on (Linux with `Xvnc`)            | `0` gives agents no display of their own                               |
-| `CLAWBOO_AGENT_DISPLAY_SIZE`           | `1280x800`                        | Size of each agent's display                                           |
-| `CLAWBOO_OPENCLAW_CDP_PORT`            | `18800`                           | Debugging port of OpenClaw's browser                                   |
-| `OPENCLAW_GATEWAY_PORT`                | `18789`                           | Only used to work out that debugging port                              |
-| `CLAWBOO_MCP_PROBE_MS`                 | `60000` (1 min)                   | How often the server checks its MCP servers                            |
-| **Logging and tracing**                |                                   |                                                                        |
-| `LOG_LEVEL`                            | `info`                            | Server log level                                                       |
-| `NODE_ENV`                             | unset (the CLI sets `production`) | `production` writes JSON logs                                          |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`          | unset                             | Exports traces over OTLP                                               |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`   | unset                             | Traces-only OTLP endpoint                                              |
-| `OTEL_SERVICE_NAME`                    | `clawboo`                         | Service name on exported traces                                        |
-| **Read from other tools**              |                                   |                                                                        |
-| `CODEX_HOME`                           | `~/.codex`                        | Where Clawboo looks for your `codex login`                             |
-| `HERMES_HOME`                          | `~/.hermes`                       | Where Clawboo looks for your Hermes sign-in                            |
-| `CLAUDE_CODE_USE_BEDROCK`              | unset                             | Keeps AWS keys for runtimes Clawboo starts                             |
-| `HTTP_PROXY` and other proxy variables | unset                             | Clawboo keeps its own loopback traffic off the proxy                   |
-| **Testing and development**            |                                   |                                                                        |
-| `CLAWBOO_ENABLE_MOCK_RUNTIME`          | unset                             | `1` adds a fault-injection test runtime                                |
-| `CLAWBOO_SERVER_PATH`                  | found automatically               | Source checkout the CLI starts in development                          |
+| Variable                                | Default                           | What it does                                                           |
+| --------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| **Access and network**                  |                                   |                                                                        |
+| `HOST`                                  | `127.0.0.1`                       | Address the dashboard listens on                                       |
+| `STUDIO_ACCESS_TOKEN`                   | per-install token file            | The access token for `/api/*`; blank turns the gate off                |
+| `CLAWBOO_ALLOW_INSECURE`                | unset                             | Allows a wide bind with no token                                       |
+| `CLAWBOO_ALLOWED_ORIGINS`               | loopback only                     | Extra browser origins allowed to call the API                          |
+| `CLAWBOO_ALLOWED_HOSTS`                 | loopback and the bind host        | Extra `Host` header values the server accepts                          |
+| `CLAWBOO_BASE_PATH`                     | unset (root)                      | Serves the whole app under a URL prefix                                |
+| `CLAWBOO_SECRETS_MASTER_KEY`            | generated key file                | Key that encrypts saved provider keys                                  |
+| **Ports**                               |                                   |                                                                        |
+| `CLAWBOO_API_PORT`                      | unset (scan from 18790)           | Exact port for the dashboard                                           |
+| `CLAWBOO_API_PORT_START`                | `18790`                           | First port of the 20-port scan                                         |
+| `PORT`                                  | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset           |
+| `CLAWBOO_HERMES_GATEWAY_PORT`           | `8642`                            | First port the Hermes gateway tries, on `127.0.0.1`                    |
+| `CLAWBOO_HERMES_STOP_GRACE_MS`          | `5000`                            | The Hermes gateway's time to stop when Clawboo stops (at most 8000)    |
+| **Folders**                             |                                   |                                                                        |
+| `CLAWBOO_HOME`                          | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
+| `CLAWBOO_WORK_DIR`                      | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
+| `CLAWBOO_RUNTIMES_DIR`                  | `~/clawboo-runtimes`              | Runtimes Clawboo installs; `<CLAWBOO_HOME>-runtimes` when that is set  |
+| `OPENCLAW_STATE_DIR`                    | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes                      |
+| `CLAWBOO_DB_PATH`                       | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                              |
+| `CLAWBOO_UI_DIR`                        | `<server folder>/ui`              | Built dashboard files the server serves                                |
+| `CLAWBOO_CATALOG_INDEX_URL`             | this release's catalog on GitHub  | Where the marketplace catalog comes from                               |
+| **Agent isolation**                     |                                   |                                                                        |
+| `CLAWBOO_AGENT_USER`                    | unset (off)                       | Runs every agent as this separate operating system user                |
+| `CLAWBOO_AGENT_USERS`                   | unset (off)                       | Linux: runs each agent as a user of its own, from this pool            |
+| `CLAWBOO_AGENT_GROUPS`                  | unset                             | With `CLAWBOO_AGENT_USERS`: the groups, one for each team              |
+| `CLAWBOO_AGENT_SWITCH`                  | `sudo`                            | How the server starts the agent host: `sudo` or `doas`                 |
+| `CLAWBOO_AGENT_HOST_SOCKET`             | unset                             | Set by `clawboo-launch`: the socket of the agent host it started       |
+| `CLAWBOO_AGENT_HOST_SCRIPT`             | `<server folder>/agent-host.js`   | The agent host script                                                  |
+| `CLAWBOO_SERVER_USER`                   | none                              | `clawboo-launch` only: the user the server runs as                     |
+| `CLAWBOO_RUN_DIR`                       | `/run/clawboo`                    | `clawboo-launch` only: the folder for the agent host's socket          |
+| `CLAWBOO_NODE`                          | `node` on `PATH`                  | `clawboo-launch` only: the Node that runs the server and the host      |
+| **Started by an app**                   |                                   |                                                                        |
+| `CLAWBOO_STOP_ON_DISCONNECT`            | unset                             | `1` stops the server when its app's IPC channel closes                 |
+| **Pinned by an administrator**          |                                   |                                                                        |
+| `CLAWBOO_OPERATOR_SETTINGS`             | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                             |
+| `CLAWBOO_DISABLE_SELF_UPDATE`           | unset                             | `1` turns the dashboard's update chip and update off                   |
+| `CLAWBOO_DISABLE_BROWSER_AUTOSTART`     | unset                             | `1` stops the browsers starting on a new install                       |
+| `CLAWBOO_PROXY_IDENTITY`                | `off`                             | Checks a sign-in proxy's signed identity tokens                        |
+| `CLAWBOO_PROXY_IDENTITY_*`              | see below                         | The proxy's keys, issuer, audience, header and binding                 |
+| `CLAWBOO_COMPUTER_LINKS`                | `on`                              | After 0.9.1: links to agents' screens, `on`, `view` or `off`           |
+| `CLAWBOO_XVNC_PATH`                     | unset                             | After 0.9.1: the `Xvnc` agents' displays run on                        |
+| `CLAWBOO_CUA_DRIVER_PATH`               | unset                             | After 0.9.1: the Cua Driver agents use                                 |
+| `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL` | unset                             | After 0.9.1: `1` turns the desktop tools download off                  |
+| `CLAWBOO_MAX_AGENT_DISPLAYS`            | `CLAWBOO_MAX_AGENT_BROWSERS`      | After 0.9.1: agent displays running at once                            |
+| **Provider keys**                       |                                   |                                                                        |
+| `ANTHROPIC_API_KEY`                     | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes                        |
+| `OPENAI_API_KEY`                        | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings                     |
+| `OPENROUTER_API_KEY`                    | unset                             | Hermes, Clawboo Native (OpenRouter)                                    |
+| `GEMINI_API_KEY` and six more           | unset                             | Clawboo Native through OpenAI-compatible providers                     |
+| `OLLAMA_BASE_URL`                       | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup                   |
+| `OPENROUTER_BASE_URL` and nine more     | each provider's own address       | Sends a provider's traffic through a gateway or proxy                  |
+| `COMPOSIO_BASE_URL`                     | `https://backend.composio.dev`    | Composio API address for brokered apps                                 |
+| **Runs and verification**               |                                   |                                                                        |
+| `CLAWBOO_MAX_CONCURRENT_RUNS`           | `8`                               | Agent runs that execute at once; the rest wait their turn              |
+| `CLAWBOO_RUN_SILENT_TIMEOUT_MS`         | `1800000` (30 min)                | Silence after which a run is stopped                                   |
+| `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`         | `600000` (10 min)                 | Wait for the same agent's previous run                                 |
+| `CLAWBOO_MAX_FIX_CYCLES`                | `1`                               | Retries after a failed verification                                    |
+| `CLAWBOO_REVIEWER_MODEL`                | the builder's model               | Model for the verification reviewer                                    |
+| `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`   | `600000` (10 min)                 | Wait for an OpenClaw agent's Routine run                               |
+| **Board timing**                        |                                   |                                                                        |
+| `CLAWBOO_BOARD_STALE_TTL_MS`            | `180000` (3 min)                  | Missed heartbeats before a running task is released                    |
+| `CLAWBOO_BOARD_STALE_SWEEP_MS`          | `60000` (1 min)                   | How often that check runs                                              |
+| `CLAWBOO_DISPATCH_PUMP_MS`              | `60000` (1 min)                   | How often waiting delegated work is woken                              |
+| `CLAWBOO_DB_WRITE_BUDGET_MS`            | `1500`                            | Retry time for a busy database write                                   |
+| **Approvals and retention**             |                                   |                                                                        |
+| `CLAWBOO_APPROVAL_TTL_MS`               | `86400000` (24 h)                 | Age at which the reaper expires a forgotten approval                   |
+| `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`   | `3600000` (1 h)                   | How often the reaper runs                                              |
+| `CLAWBOO_TOOL_RESULT_TTL_MS`            | `604800000` (7 days)              | How long stored large tool results are kept                            |
+| **Memory, browsers and MCP**            |                                   |                                                                        |
+| `CLAWBOO_DISABLE_EMBEDDINGS`            | unset                             | `1` turns memory embeddings off                                        |
+| `CLAWBOO_MAX_AGENT_BROWSERS`            | `4`                               | Agent browsers open at once                                            |
+| `CLAWBOO_AGENT_BROWSER_IDLE_MS`         | `600000` (10 min)                 | Idle time before an agent browser closes                               |
+| `CLAWBOO_AGENT_DISPLAYS`                | on (Linux with `Xvnc`)            | `0` gives agents no display of their own                               |
+| `CLAWBOO_AGENT_DISPLAY_SIZE`            | `1280x800`                        | Size of each agent's display                                           |
+| `CLAWBOO_OPENCLAW_CDP_PORT`             | `18800`                           | Debugging port of OpenClaw's browser                                   |
+| `OPENCLAW_GATEWAY_PORT`                 | `18789`                           | Only used to work out that debugging port                              |
+| `CLAWBOO_MCP_PROBE_MS`                  | `60000` (1 min)                   | How often the server checks its MCP servers                            |
+| **Logging and tracing**                 |                                   |                                                                        |
+| `LOG_LEVEL`                             | `info`                            | Server log level                                                       |
+| `NODE_ENV`                              | unset (the CLI sets `production`) | `production` writes JSON logs                                          |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`           | unset                             | Exports traces over OTLP                                               |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`    | unset                             | Traces-only OTLP endpoint                                              |
+| `OTEL_SERVICE_NAME`                     | `clawboo`                         | Service name on exported traces                                        |
+| **Read from other tools**               |                                   |                                                                        |
+| `CODEX_HOME`                            | `~/.codex`                        | Where Clawboo looks for your `codex login`                             |
+| `HERMES_HOME`                           | `~/.hermes`                       | Where Clawboo looks for your Hermes sign-in                            |
+| `CLAUDE_CODE_USE_BEDROCK`               | unset                             | Keeps AWS keys for runtimes Clawboo starts                             |
+| `HTTP_PROXY` and other proxy variables  | unset                             | Clawboo keeps its own loopback traffic off the proxy                   |
+| **Testing and development**             |                                   |                                                                        |
+| `CLAWBOO_ENABLE_MOCK_RUNTIME`           | unset                             | `1` adds a fault-injection test runtime                                |
+| `CLAWBOO_SERVER_PATH`                   | found automatically               | Source checkout the CLI starts in development                          |
 
 `HOSTNAME`, `OPENCLAW_CONFIG_PATH`, `CLAWBOO_API_URL` and `GATEWAY_AUTH_TOKEN` (outside a `${...}` template) are not read. `TAVILY_API_KEY` is no longer used: Clawboo has no built-in web search, so connect a search connector such as Exa Search instead. Variables Clawboo sets on the processes it starts are listed under [Set by Clawboo](#set-by-clawboo).
 
@@ -517,6 +527,11 @@ The file is a JSON object of the keys below. Clawboo reads it once at startup an
 | `togetherBaseUrl`              | URL                       | `TOGETHER_BASE_URL`                        |
 | `cerebrasBaseUrl`              | URL                       | `CEREBRAS_BASE_URL`                        |
 | `moonshotBaseUrl`              | URL                       | `MOONSHOT_BASE_URL`                        |
+| `computerLinks`                | `on`, `view` or `off`     | `CLAWBOO_COMPUTER_LINKS`                   |
+| `xvncPath`                     | absolute path             | `CLAWBOO_XVNC_PATH`                        |
+| `cuaDriverPath`                | absolute path             | `CLAWBOO_CUA_DRIVER_PATH`                  |
+| `disableDesktopToolsInstall`   | boolean                   | `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL`    |
+| `maxAgentDisplays`             | whole number (1 to 64)    | `CLAWBOO_MAX_AGENT_DISPLAYS`               |
 
 Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
 
@@ -657,6 +672,69 @@ From 0.9.0. The public key of a program running beside Clawboo that makes its ow
 - Example: `CLAWBOO_PERSON_CHECK=verified`
 
 From 0.9.0. Who may act as a person on the routes that take [the person check](/operating/security#the-person-check). `page`: a person a verified token names, or the dashboard's own page. `verified`: only a person a verified token names, and the same for the Gateway WebSocket and every route of an agent's screen. See [Only signed requests act as a person](/guides/sso-proxy#only-signed-requests-act-as-a-person). It needs `CLAWBOO_PROXY_IDENTITY` on or required; with it off the server refuses to start. `CLAWBOO_PROXY_IDENTITY=required` always works as `verified`. Operator file key: `personCheck`.
+
+### Agent screens
+
+In releases after 0.9.1, these settings let an administrator decide who can reach agents' screens from outside the dashboard and which programs give agents those screens. They matter on Linux, where agents get a display of their own (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Only the variables and the operator file set them; **Settings** offers none of them. A value Clawboo cannot read stops the server at startup with `CONFIG: refusing to start.`
+
+### CLAWBOO_COMPUTER_LINKS
+
+Whether links to an agent's screen work.
+
+- Type: `on`, `view` or `off`
+- Default: `on`
+- Example: `CLAWBOO_COMPUTER_LINKS=view`
+
+With `view`, no control link can be made, and one made earlier stops working: no one can take over a screen through a link, while view links still work. With `off`, no link of either kind can be made or used, and the access gate admits nothing on `/api/computer-link/*` without the access cookie. The setting is checked on every request a link makes, not only when a link is made.
+
+It closes the one way to a screen that needs no access token. It leaves the dashboard as it is: who may watch and take over there is decided as before, and behind a sign-in proxy by [`CLAWBOO_PERSON_CHECK`](#clawboo_person_check) and [`CLAWBOO_PROXY_IDENTITY_CONTROL_CLAIM`](#clawboo_proxy_identity_control_claim). Those two apply to links too, on top of this setting: a link it leaves on still needs a verified person under `verified`, and a take over through it needs the control claim where that is required. `off` turns links off whatever they say. Operator file key: `computerLinks`.
+
+### CLAWBOO_XVNC_PATH
+
+The `Xvnc` that agents' displays run on, such as a build your distribution packages or one you hardened.
+
+- Type: absolute path, written plainly (no `.` or `..` part, no doubled or trailing slash)
+- Default: unset, so Clawboo uses the system's own TigerVNC `Xvnc` (`Xtigervnc` or `Xvnc`), then the copy it installed
+- Example: `CLAWBOO_XVNC_PATH=/usr/bin/Xtigervnc`
+
+When it is set, Clawboo runs that program and no other: not one on `PATH`, not its own copy, and **Install the desktop tools** downloads no TigerVNC. Before running it, even to ask its version, Clawboo checks that:
+
+- the path is the program itself, with no link anywhere in it;
+- it is a file that can be run;
+- it and every folder above it belong to root or to the user running Clawboo, and none of them can be written by its group or by other users;
+- its `-version` says `Xvnc TigerVNC`, since displays are started with TigerVNC's options.
+
+If any check fails, agents get no display, and the agent's **Screen** view says why. Clawboo cannot check what the program does: whoever can change it, root included, decides what agents' displays run. Operator file key: `xvncPath`.
+
+### CLAWBOO_CUA_DRIVER_PATH
+
+The Cua Driver agents use, instead of the copy Clawboo installs.
+
+- Type: absolute path, written plainly
+- Default: unset, so Clawboo uses the copy in its runtimes folder (Cua Driver 0.38.0)
+- Example: `CLAWBOO_CUA_DRIVER_PATH=/opt/cua-driver/cua-driver`
+
+When it is set, Clawboo runs that program and no other, and downloads no Cua Driver. It must pass the same checks as `CLAWBOO_XVNC_PATH`, except the version; otherwise **Connect** says why and nothing starts. Clawboo does not check which release it is. Its browser, scripting, install and settings tools are refused by name in any release, as described in [Connectors](/using/connectors) under "A desktop driver for each agent's screen", but a tool a newer release adds under another name is offered like the rest. Its other rules are written for 0.38.0 too: which of its tools need **Admin** access, and the arguments with which it writes a file wherever they point (`screenshot_out_file` and `output_dir`). A newer release's destructive tool, or such an argument under another name, is not caught. With [agent isolation](/operating/agent-isolation) on, the agent user must be able to run it, which the startup check proves. Operator file key: `cuaDriverPath`.
+
+### CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL
+
+Turns off downloading the desktop tools from the dashboard.
+
+- Type: flag
+- Default: unset
+- Example: `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL=1`
+
+With it on, the **Screen** view offers no download, and `POST /api/computer/tools/install` answers `403`. Use it where something else installs `Xvnc` and Cua Driver, such as a container image or your package manager, or where the server should fetch nothing. A copy installed earlier keeps working. Naming one tool's program with `CLAWBOO_XVNC_PATH` or `CLAWBOO_CUA_DRIVER_PATH` already turns off the download of that tool alone. Operator file key: `disableDesktopToolsInstall`.
+
+### CLAWBOO_MAX_AGENT_DISPLAYS
+
+How many agent displays run at once.
+
+- Type: whole number from 1 to 64
+- Default: unset, so the same number as [`CLAWBOO_MAX_AGENT_BROWSERS`](#clawboo_max_agent_browsers) (4 unless set)
+- Example: `CLAWBOO_MAX_AGENT_DISPLAYS=2`
+
+Each display takes about 70 MB. A display stays up while its agent's browser or desktop driver is open, whether or not the agent is running, so this cap is separate from [`CLAWBOO_MAX_CONCURRENT_RUNS`](#clawboo_max_concurrent_runs). When every place is taken, a display only waiting out its 30-second stop is stopped to make room; otherwise the agent's browser opens without a screen of its own, and its desktop driver does not start. Operator file key: `maxAgentDisplays`.
 
 ## Provider keys
 
@@ -897,7 +975,9 @@ An agent browser nobody has used for this long is closed. Time the computer spen
 - Default: on, on Linux with TigerVNC's `Xvnc` found
 - Example: `CLAWBOO_AGENT_DISPLAYS=0`
 
-On Linux, each agent's browser opens on a display of the agent's own, which you can watch and take over (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Turned off, agents' browsers start as they would without `Xvnc`. Has no effect on macOS or Windows, where agents get no display.
+On Linux, each agent's browser opens on a display of the agent's own, which you can watch and take over (see [Watch a screen and take over](/using/agents#watch-a-screen-and-take-over)). Turned off, agents' browsers start as they would without `Xvnc`. Has no effect on macOS or Windows, where agents get no display. [`CLAWBOO_MAX_AGENT_DISPLAYS`](#clawboo_max_agent_displays) caps how many run at once, and [`CLAWBOO_XVNC_PATH`](#clawboo_xvnc_path) names the `Xvnc` they run on.
+
+In releases after 0.9.1, a display keeps its files (its cookie, its sockets and its window manager's settings) in a runtime folder in memory when the user running it has one: `XDG_RUNTIME_DIR` for the server's own user, then `/run/user/<uid>`, used only when it is a real folder owned by that user, closed to everyone else, and on `tmpfs`. The files are then not written to the data folder or a home folder, and are gone after a reboot, though a `tmpfs` can still move them to swap. Where there is none, which is usual for an agent user that never logs in, the files stay where 0.9.1 keeps them: under `CLAWBOO_HOME`, or in the agent user's home. To give an agent user one on a systemd machine, have the folder made at boot with a `tmpfiles.d` line, such as `d /run/user/10002 0700 clawboo-agent clawboo-agent -` (that user's uid and name); a login session of that user would put one of its own in its place until the session ends. Do not turn on lingering for an agent user (`loginctl enable-linger`): it starts a service manager of that user's own, through which agent code could set up services that keep running after Clawboo stops its agents, the reason [agent isolation](/operating/agent-isolation#set-it-up-on-linux) also keeps that user out of `cron` and `at`. A runtime folder can go away while Clawboo runs (systemd removes a user's own when their last login session ends): a display started in it loses its files, and the next display starts in the fallback folder.
 
 ### CLAWBOO_AGENT_DISPLAY_SIZE
 

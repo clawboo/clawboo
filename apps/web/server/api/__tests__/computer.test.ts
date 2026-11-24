@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { agents } from '@clawboo/db'
+import { createAccessGate } from '@clawboo/gateway-proxy'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -20,11 +21,13 @@ import { desktopToolsPlan } from '../../lib/desktop/tools'
 import { resetLiveViewForTests, setBrowserCaptureForTests } from '../../lib/desktop/liveView'
 import {
   carriesComputerLink,
+  computerLinkControlPOST,
   computerLinkDELETE,
   computerLinkInfoGET,
   computerLinkLiveGET,
   computerLinksPOST,
   computerStatusGET,
+  computerToolsInstallPOST,
   displaysStatus,
   forgetAgentComputer,
 } from '../computer'
@@ -357,6 +360,41 @@ describe('connectorPlaceRefusal', () => {
     }
     expect(connectorPlaceRefusal(connectorBySlug('playwright')!, 'darwin')).toBeNull()
   })
+
+  it('takes the driver an administrator named in place of an install, and refuses one that fails its check', async () => {
+    const { connectorPlaceRefusal } = await import('../connectors')
+    const { connectorBySlug } = await import('@clawboo/connector-catalog')
+    const screens = await import('../../lib/desktop/screenSettings')
+    const def = connectorBySlug('cua-driver')!
+    const named = '/opt/cua-driver/cua-driver'
+    process.env['CLAWBOO_CUA_DRIVER_PATH'] = named
+    const trusted = {
+      lstat: (p: string) =>
+        ({
+          uid: 0,
+          mode: 0o755,
+          isFile: () => p === named,
+          isDirectory: () => p !== named,
+        }) as never,
+      realpath: (p: string) => p,
+      canExecute: () => true,
+      uid: 0,
+    }
+    try {
+      // Nothing installed: the named driver passes the install check (and stops
+      // only at "no screen here", since this test machine has no Xvnc).
+      screens.setProgramCheckDepsForTests(trusted)
+      expect(connectorPlaceRefusal(def, 'linux', true)).toMatchObject({ reason: 'no-display' })
+      screens.setProgramCheckDepsForTests({ ...trusted, realpath: () => '/tmp/other' })
+      expect(connectorPlaceRefusal(def, 'linux', true)).toMatchObject({
+        reason: 'named-program-refused',
+        error: expect.stringMatching(/administrator named may not run.*is a link/),
+      })
+    } finally {
+      screens.setProgramCheckDepsForTests(null)
+      delete process.env['CLAWBOO_CUA_DRIVER_PATH']
+    }
+  })
 })
 
 describe('displaysStatus', () => {
@@ -392,5 +430,143 @@ describe('displaysStatus', () => {
     expect(displaysStatus({ ok: true, tools }, arm, null, false, false)).toMatchObject({
       driverInstallable: false,
     })
+  })
+})
+
+describe("computerLinks, the administrator's switch for links", () => {
+  const ENV = 'CLAWBOO_COMPUTER_LINKS'
+  let prevAgentUser: string | undefined
+  beforeEach(() => {
+    prevAgentUser = process.env['CLAWBOO_AGENT_USER']
+  })
+  afterEach(() => {
+    delete process.env[ENV]
+    if (prevAgentUser === undefined) delete process.env['CLAWBOO_AGENT_USER']
+    else process.env['CLAWBOO_AGENT_USER'] = prevAgentUser
+  })
+
+  /** A cookieless request to the access gate, from another machine, with a link. */
+  function gateReq(url: string, token: string): IncomingMessage {
+    return {
+      url,
+      method: 'GET',
+      headers: { host: 'dash.local', [LINK_HEADER]: token },
+      socket: { remoteAddress: '203.0.113.7' },
+    } as unknown as IncomingMessage
+  }
+  function gateRes() {
+    const res = { statusCode: 200, setHeader() {}, end() {} }
+    return res as unknown as import('node:http').ServerResponse & { statusCode: number }
+  }
+  const linkReq = (token: string) =>
+    ({ headers: { [LINK_HEADER]: token } }) as unknown as IncomingMessage
+
+  it('off: no link is made, and one made before opens nothing, at the access gate too', async () => {
+    const token = (await mint('a1', 'view')).body()['token'] as string
+    const gate = createAccessGate({
+      token: 'operator-token-0123456789',
+      authorizeLink: carriesComputerLink,
+    })
+    // On: the gate admits it without the cookie.
+    expect(gate.handleHttp(gateReq('/api/computer-link/info', token), gateRes())).toBe(false)
+
+    process.env[ENV] = 'off'
+    expect(carriesComputerLink(linkReq(token))).toBe(false)
+    for (const url of [
+      '/api/computer-link/info',
+      '/api/computer-link/live',
+      '/api/computer-link/input',
+    ]) {
+      const res = gateRes()
+      expect(gate.handleHttp(gateReq(url, token), res)).toBe(true)
+      expect(res.statusCode).toBe(401)
+    }
+    // With the gate off (no access token), the route refuses the link itself.
+    const info = mockRes()
+    computerLinkInfoGET(req({ headers: { [LINK_HEADER]: token } }), info.res)
+    expect(info.status()).toBe(401)
+    const live = streamRes()
+    computerLinkLiveGET(req({ headers: { [LINK_HEADER]: token } }), live.res)
+    expect(live.status()).toBe(401)
+
+    process.env['CLAWBOO_AGENT_USER'] = 'clawboo-agent'
+    for (const kind of ['view', 'control']) {
+      const r = await mint('a1', kind)
+      expect(r.status()).toBe(403)
+      expect(String(r.body()['error'])).toMatch(/CLAWBOO_COMPUTER_LINKS=off/)
+    }
+    const s = mockRes()
+    computerStatusGET(req({ params: { agentId: 'a1' } }), s.res)
+    expect(s.body()['viewLinks']).toMatchObject({ allowed: false })
+    expect(s.body()['controlLinks']).toMatchObject({ allowed: false })
+  })
+
+  it('view: control links are neither made nor honoured, and view links still work', async () => {
+    process.env['CLAWBOO_AGENT_USER'] = 'clawboo-agent'
+    const control = (await mint('a1', 'control')).body()['token'] as string
+    const view = (await mint('a1', 'view')).body()['token'] as string
+
+    process.env[ENV] = 'view'
+    expect(carriesComputerLink(linkReq(control))).toBe(false)
+    expect(carriesComputerLink(linkReq(view))).toBe(true)
+    const take = mockRes()
+    computerLinkControlPOST(
+      req({
+        method: 'POST',
+        headers: { [LINK_HEADER]: control },
+        body: { viewerId: 'v1', action: 'take' },
+      }),
+      take.res,
+    )
+    expect(take.status()).toBe(401)
+
+    const refused = await mint('a1', 'control')
+    expect(refused.status()).toBe(403)
+    expect(String(refused.body()['error'])).toMatch(/CLAWBOO_COMPUTER_LINKS=view/)
+    expect((await mint('a1', 'view')).status()).toBe(201)
+    const s = mockRes()
+    computerStatusGET(req({ params: { agentId: 'a1' } }), s.res)
+    expect(s.body()['viewLinks']).toMatchObject({ allowed: true })
+    expect(s.body()['controlLinks']).toMatchObject({ allowed: false })
+  })
+
+  it('a value it cannot read turns links off rather than on', async () => {
+    const token = (await mint('a1', 'view')).body()['token'] as string
+    process.env[ENV] = 'sometimes'
+    expect(carriesComputerLink(linkReq(token))).toBe(false)
+  })
+})
+
+describe("the administrator's download switch", () => {
+  const tools = { xvnc: '/usr/bin/Xvnc', windowManager: null, dbusDaemon: null }
+  const noXvnc = { ok: false as const, code: 'no-xvnc' as const, reason: 'No Xvnc' }
+  afterEach(() => {
+    delete process.env['CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL']
+    delete process.env['CLAWBOO_XVNC_PATH']
+    delete process.env['CLAWBOO_CUA_DRIVER_PATH']
+  })
+
+  it('offers no download when turned off, or of a tool whose program is named', () => {
+    const x64 = desktopToolsPlan('linux', 'x64')
+    process.env['CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL'] = '1'
+    expect(displaysStatus(noXvnc, x64, null, false)).toMatchObject({ installable: false })
+    expect(displaysStatus({ ok: true, tools }, x64, null, false, true)).toMatchObject({
+      driverInstallable: false,
+    })
+    delete process.env['CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL']
+    process.env['CLAWBOO_XVNC_PATH'] = '/opt/vnc/bin/Xvnc'
+    expect(displaysStatus(noXvnc, x64, null, false)).toMatchObject({ installable: false })
+    process.env['CLAWBOO_CUA_DRIVER_PATH'] = '/opt/cua/cua-driver'
+    expect(displaysStatus({ ok: true, tools }, x64, null, false, true)).toMatchObject({
+      driverInstallable: false,
+    })
+  })
+
+  it('refuses the install route outright when turned off', async () => {
+    process.env['CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL'] = 'true'
+    const r = mockRes()
+    await computerToolsInstallPOST(req({ method: 'POST' }), r.res)
+    expect(r.status()).toBe(403)
+    expect(r.body()).toMatchObject({ ok: false, code: 'TURNED_OFF' })
   })
 })

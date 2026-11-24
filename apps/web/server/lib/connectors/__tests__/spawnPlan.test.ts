@@ -329,6 +329,41 @@ describe('a program Clawboo installs itself (Cua Driver)', () => {
     expect(plan.args).toEqual(['mcp', '--direct'])
   })
 
+  it('runs the program an administrator named instead of its own install, once it passes its check', async () => {
+    const screens = await import('../../desktop/screenSettings')
+    const named = '/opt/cua/cua-driver'
+    vi.stubEnv('CLAWBOO_CUA_DRIVER_PATH', named)
+    const ok = {
+      lstat: (p: string) =>
+        ({
+          uid: 0,
+          mode: 0o755,
+          isFile: () => p === named,
+          isDirectory: () => p !== named,
+        }) as never,
+      realpath: (p: string) => p,
+      canExecute: () => true,
+      uid: 0,
+    }
+    screens.setProgramCheckDepsForTests(ok)
+    try {
+      const plan = planConnectorSpawn(launch)
+      expect(plan).toMatchObject({ command: named, args: ['mcp', '--direct'], unresolved: false })
+      expect(plan.problem).toBeUndefined()
+      // The same opt-outs as Clawboo's own copy.
+      expect(plan.env['CUA_DRIVER_RS_TELEMETRY_ENABLED']).toBe('0')
+
+      // One that fails its check is not run, and nothing runs in its place.
+      screens.setProgramCheckDepsForTests({ ...ok, realpath: () => '/tmp/elsewhere' })
+      const refused = planConnectorSpawn(launch)
+      expect(refused.unresolved).toBe(true)
+      expect(refused.command).not.toBe(named)
+      expect(refused.problem).toMatch(/your administrator named may not run.*is a link/)
+    } finally {
+      screens.setProgramCheckDepsForTests(null)
+    }
+  })
+
   it('turns off its telemetry and update check, and passes on DO_NOT_TRACK only when set', () => {
     expect(planConnectorSpawn(launch).env).toEqual({
       CUA_DRIVER_RS_TELEMETRY_ENABLED: '0',

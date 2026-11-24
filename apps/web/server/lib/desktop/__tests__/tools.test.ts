@@ -11,13 +11,18 @@ import { Readable } from 'node:stream'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { resetOperatorSettings } from '../../operatorSettings'
 import { readRuntimeInstall } from '../../runtimeFolder'
+import { setProgramCheckDepsForTests } from '../screenSettings'
 import {
   DesktopToolsError,
   desktopToolsPlan,
   httpsDownload,
   installDesktopTools,
+  MIN_RELEASE_AGE_MS,
+  releaseAgeRefusal,
   systemXvnc,
+  xvncProgram,
   type DownloadProcess,
   type PinnedArtifact,
 } from '../tools'
@@ -43,6 +48,7 @@ const art = (sha256: string, maxBytes = 1024): PinnedArtifact => ({
   url: 'https://releases.example.test/tool.tar.gz',
   sha256,
   maxBytes,
+  publishedAt: '2026-01-01T00:00:00Z',
 })
 const goodSha = createHash('sha256').update(BODY).digest('hex')
 const fetchBody = (body: Buffer) => async () => ({ status: 200, body: Readable.from([body]) })
@@ -293,4 +299,180 @@ describe('desktop tools install', () => {
     expect(b.folder).toBe(a.folder)
     expect(readRuntimeInstall('desktop', env)?.launchers['cua-driver']?.command).toBe(a.cuaDriver)
   })
+})
+
+const DAY = 24 * 60 * 60_000
+
+describe('pinned releases are at least 14 days old', () => {
+  it('pins every release Clawboo installs to one published 14 days ago or more', () => {
+    for (const plan of [desktopToolsPlan('linux', 'x64'), desktopToolsPlan('linux', 'arm64')]) {
+      for (const pinned of [plan.tigervnc, plan.cuaDriver]) {
+        if (!pinned) continue
+        expect(Date.now() - Date.parse(pinned.publishedAt)).toBeGreaterThanOrEqual(
+          MIN_RELEASE_AGE_MS,
+        )
+      }
+    }
+  })
+
+  it('installs nothing from a release younger than that, or one whose date cannot be read', async () => {
+    const now = Date.parse('2026-11-15T12:00:00Z')
+    for (const publishedAt of [new Date(now - 13 * DAY).toISOString(), 'soon']) {
+      let downloads = 0
+      await expect(
+        installDesktopTools({
+          env,
+          download: async () => {
+            downloads += 1
+            return { status: 200, body: Readable.from([BODY]) }
+          },
+          run: fakeTar([]),
+          systemXvnc: () => null,
+          now: () => now,
+          plan: { tigervnc: null, cuaDriver: { ...art(goodSha), publishedAt } },
+        }),
+      ).rejects.toMatchObject({ code: 'TOO_NEW' })
+      expect(downloads).toBe(0)
+    }
+    expect(
+      releaseAgeRefusal(
+        { ...art(goodSha), publishedAt: new Date(now - 14 * DAY).toISOString() },
+        'X',
+        now,
+      ),
+    ).toBeNull()
+  })
+})
+
+describe("the administrator's download switches", () => {
+  it('downloads nothing when downloads are turned off', async () => {
+    let downloads = 0
+    await expect(
+      installDesktopTools({
+        env,
+        download: async () => {
+          downloads += 1
+          return { status: 200, body: Readable.from([BODY]) }
+        },
+        run: fakeTar([]),
+        systemXvnc: () => null,
+        installRefusal: () => 'Downloading the desktop tools is turned off.',
+        plan: { tigervnc: art(goodSha), cuaDriver: art(goodSha) },
+      }),
+    ).rejects.toMatchObject({ code: 'TURNED_OFF' })
+    expect(downloads).toBe(0)
+  })
+
+  it('never downloads a tool whose program the administrator named', async () => {
+    const urls: string[] = []
+    const calls: string[][] = []
+    const done = await installDesktopTools({
+      env,
+      download: async (url) => {
+        urls.push(url)
+        return { status: 200, body: Readable.from([BODY]) }
+      },
+      run: fakeTar(calls),
+      systemXvnc: () => null,
+      downloadRefusal: (tool) => (tool === 'tigervnc' ? 'named by the administrator' : null),
+      plan: {
+        tigervnc: { ...art(goodSha), url: 'https://releases.example.test/tigervnc.tar.gz' },
+        cuaDriver: { ...art(goodSha), url: 'https://releases.example.test/cua.tar.gz' },
+      },
+    })
+    expect(urls).toEqual(['https://releases.example.test/cua.tar.gz'])
+    // The system's Xvnc was not even looked for (looking runs it): TigerVNC is named.
+    let looked = 0
+    await installDesktopTools({
+      env,
+      download: fetchBody(BODY),
+      run: fakeTar([]),
+      systemXvnc: () => {
+        looked += 1
+        return null
+      },
+      downloadRefusal: (tool) => (tool === 'tigervnc' ? 'named by the administrator' : null),
+      plan: { tigervnc: art(goodSha), cuaDriver: art(goodSha) },
+    })
+    expect(looked).toBe(0)
+    expect(done.tigervnc).toBeNull()
+    expect(done.cuaDriver).not.toBeNull()
+    // Both named: nothing to install, and it says why.
+    await expect(
+      installDesktopTools({
+        env,
+        download: fetchBody(BODY),
+        run: fakeTar([]),
+        systemXvnc: () => null,
+        downloadRefusal: () => 'named by the administrator',
+        plan: { tigervnc: art(goodSha), cuaDriver: art(goodSha) },
+      }),
+    ).rejects.toThrow(/Nothing to install: named by the administrator/)
+  })
+})
+
+describe('xvncProgram', () => {
+  const onWindows = process.platform === 'win32'
+  let dir: string
+  const saved = process.env['CLAWBOO_XVNC_PATH']
+  /** A filesystem where everything is root's and closed: only the trust check is stood in for. */
+  const trusted = (file: string) => ({
+    lstat: (p: string) =>
+      ({
+        uid: 0,
+        mode: 0o755,
+        isFile: () => p === file,
+        isDirectory: () => p !== file,
+      }) as fs.Stats,
+    realpath: (p: string) => p,
+    canExecute: () => true,
+    uid: 0,
+  })
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawboo-xvnc-'))
+    resetOperatorSettings()
+  })
+  afterEach(() => {
+    setProgramCheckDepsForTests(null)
+    if (saved === undefined) delete process.env['CLAWBOO_XVNC_PATH']
+    else process.env['CLAWBOO_XVNC_PATH'] = saved
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+  const script = (name: string, says: string) => {
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, `#!/bin/sh\necho '${says}' >&2\n`, { mode: 0o755 })
+    return file
+  }
+
+  it.skipIf(onWindows)("runs the Xvnc the administrator named, and only TigerVNC's", () => {
+    const tiger = script('Xvnc', 'Xvnc TigerVNC 1.16.2 - built Mar 26 2026')
+    process.env['CLAWBOO_XVNC_PATH'] = tiger
+    setProgramCheckDepsForTests(trusted(tiger))
+    expect(xvncProgram()).toEqual({ path: tiger, problem: null })
+
+    const other = script('Xvnc-tight', 'Xvnc TightVNC 1.3.10')
+    process.env['CLAWBOO_XVNC_PATH'] = other
+    setProgramCheckDepsForTests(trusted(other))
+    expect(xvncProgram()).toMatchObject({
+      path: null,
+      problem: expect.stringMatching(/not TigerVNC/),
+    })
+  })
+
+  it.skipIf(onWindows)(
+    'runs no other Xvnc in place of a named one that fails its check, and never runs that one',
+    () => {
+      const marker = path.join(dir, 'ran')
+      const file = path.join(dir, 'Xvnc')
+      fs.writeFileSync(file, `#!/bin/sh\ntouch '${marker}'\necho 'Xvnc TigerVNC 1.16.2' >&2\n`, {
+        mode: 0o755,
+      })
+      process.env['CLAWBOO_XVNC_PATH'] = file
+      // The real check: a temporary folder is one others can write.
+      const found = xvncProgram()
+      expect(found.path).toBeNull()
+      expect(found.problem).toMatch(/can be changed by a user|a folder above|is a link/)
+      expect(fs.existsSync(marker)).toBe(false)
+    },
+  )
 })

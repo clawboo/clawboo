@@ -1253,7 +1253,7 @@ The settings an administrator can pin for everyone on this install, with the val
 
 ### Responses
 
-`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`, then the [proxy identity](/guides/sso-proxy#settings) keys from `proxyIdentity` to `proxyIdentityRoles`, then `proxyIdentityControlClaim` and `personCheck` (from 0.9.0), with `proxyIdentityReaderPublicKey` between them from 0.9.0, then the provider base URLs from `anthropicBaseUrl` to `moonshotBaseUrl`.
+`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`, then the [proxy identity](/guides/sso-proxy#settings) keys from `proxyIdentity` to `proxyIdentityRoles`, then `proxyIdentityControlClaim` and `personCheck` (from 0.9.0), with `proxyIdentityReaderPublicKey` between them from 0.9.0, then the provider base URLs from `anthropicBaseUrl` to `moonshotBaseUrl`, and, in releases after 0.9.1, the five [agent screens](/reference/environment-variables#agent-screens) keys from `computerLinks` to `maxAgentDisplays`, which only an administrator sets.
 
 | Field          | Type                                             | Notes                                                                                                               |
 | -------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |

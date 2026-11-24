@@ -3,7 +3,8 @@
 // a refusal.
 
 import { resolveBootAccessToken } from '../bootAccessToken'
-import { CUA_DRIVER_LAUNCHER, ownedCuaDriver, ownedXvnc, systemXvnc } from '../desktop/tools'
+import { operatorProgram } from '../desktop/screenSettings'
+import { CUA_DRIVER_LAUNCHER, ownedCuaDriver, xvncProgram } from '../desktop/tools'
 import { resolveRuntimeBin } from '../platform'
 import { ownedRuntimeBin, ownedRuntimeLaunch } from '../runtimeFolder'
 import { resolveAgentSdkBinary } from '../runtimes/agentSdkBinary'
@@ -36,9 +37,15 @@ function runtimeBinaries(): { runtime: string; path: string }[] {
   }
   // An agent's display and its desktop driver run as the agent user too:
   // the same files the spawns start (displays.ts, spawnPlan.ts), and for Cua
-  // Driver the program its launcher runs as well.
-  const xvnc = systemXvnc() ?? ownedXvnc()
+  // Driver the program its launcher runs as well. A program an administrator
+  // named is the one that runs, so it is the one checked.
+  const xvnc = xvncProgram().path
   if (xvnc) out.push({ runtime: 'xvnc', path: xvnc })
+  const namedCua = operatorProgram('cuaDriverPath')
+  if (namedCua) {
+    if (!namedCua.problem) out.push({ runtime: 'cua-driver', path: namedCua.path })
+    return out
+  }
   const cuaLauncher = ownedRuntimeBin(CUA_DRIVER_LAUNCHER)
   if (cuaLauncher) out.push({ runtime: 'cua-driver', path: cuaLauncher })
   const cua = ownedCuaDriver()
