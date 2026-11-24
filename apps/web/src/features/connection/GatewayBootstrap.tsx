@@ -497,8 +497,8 @@ async function hydrateFleetFromClient(liveClient: GatewayClient): Promise<number
         }
         // Auto-sync the display name into Boo Zero's SOUL.md. Idempotent
         // (no-op when the SOUL.md heading already matches). Best-effort —
-        // the per-turn rules block in `lib/booZeroRules.ts` is the
-        // authoritative anchor regardless of whether the sync sticks.
+        // the per-turn rules block (`booZeroRules.ts` in @clawboo/team-orchestration)
+        // is the authoritative anchor regardless of whether the sync sticks.
         // Fire-and-forget so a slow Gateway doesn't delay fleet hydration.
         void syncBooZeroSoulIdentity({
           agentId: booZeroId,

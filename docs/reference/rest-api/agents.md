@@ -1118,6 +1118,8 @@ Each turn resumes the session the agent's previous 1:1 turn saved, so the conver
 
 **The rows that answer it.** Every row the turn writes carries `inReplyTo`, the message's `entryId`: the reply, and any notice it leaves (a paused agent, a budget, a failed run, a turn too large for the model, an agent too busy to pick the message up, a hand-off that did not start). Two messages waiting for the same agent are not always answered in the order they arrived, so match a reply to its message by this field rather than by order. A turn the server starts by itself, such as Boo Zero's chat reading results a team sent back, writes no `inReplyTo`. A Stop writes nothing, so a stopped turn leaves no row to match, and a pause that stops several of one agent's turns at once writes one notice with no `inReplyTo`.
 
+**Boo Zero's chat.** On Clawboo Native, Claude Code, Codex and Hermes, the server builds what Boo Zero reads from your message, so send the person's words alone. Boo Zero's rules come first, under the display name set for it. When `teamId` names a team, what that team has been doing comes next: its brief, its board, its saved memory and its recent chat, as `GET /api/teams/:id/activity-summary` gives it. A guest gets that only for their own teams. Then come your words. A team's activity is text its agents wrote, so a turn that carries it can hand work only to the team `teamId` names and the teams your words name. Words you send never count as a team's activity, whatever they say. For one release, a `message` that already starts with Boo Zero's rules block, as a dashboard tab opened before the update sends it, is used as it is, with no second block. Other agents read `message` as sent, and `teamId` adds nothing for them.
+
 Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_no-team` for an agent on no team), created `0700` before the run. If the folder cannot be created, the turn ends with a notice instead of starting anywhere else. A native agent gets its file tools there, and `run_command` when its shell switch is on. A turn that fails before it writes any reply leaves a notice with the reason, including a run ended after `CLAWBOO_RUN_SILENT_TIMEOUT_MS` (30 minutes by default) with no events. A turn that fails partway keeps the text it had written.
 
 - **Path params**: `agentId`.
@@ -1125,10 +1127,12 @@ Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_
 
 ```ts
 {
-  message: string       // required; trimmed; must be non-empty. The context-injected
-                        // text delivered to the model.
-  displayText?: string  // what the transcript shows; defaults to `message`. The two
-                        // differ when the client prepends a rules block / @team brief.
+  message: string       // required; trimmed; must be non-empty. The person's words.
+                        // In Boo Zero's chat the server puts its rules and any @Team
+                        // activity before them.
+  displayText?: string  // what the transcript shows; defaults to `message`. The
+                        // dashboard sends the words with the @Team here, and without
+                        // it in `message`.
   entryId?: string      // your id for this message, unique across every chat; the
                         // server makes one when it is missing or empty. Sent again
                         // to this chat, it stores nothing and starts no turn (the
@@ -1136,8 +1140,9 @@ Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_
                         // In Boo Zero's chat it also names the request: what the
                         // message hands out goes under one main task per team.
   teamId?: string       // Boo Zero's chat only: the team named with @Team at the start
-                        // of the message, which a hand-off in the reply may then leave
-                        // out. Ignored when it is not an active team.
+                        // of the message. Boo Zero reads what it has been doing, and a
+                        // hand-off in the reply may then leave its name out (ignored
+                        // for a hand-off when it is not an active team).
 }
 ```
 

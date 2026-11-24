@@ -26,6 +26,9 @@ import {
 export const SETTING_BOO_ZERO_OVERRIDE = 'boo-zero:agent-id'
 /** The auto-created native Boo Zero (the DEFAULT universal leader for native teams). */
 export const SETTING_NATIVE_BOO_ZERO_ID = 'boo-zero:native-agent-id'
+/** The person's own name for Boo Zero, keyed by agent id (`<prefix><agentId>`): the
+ *  display name set in its Brief tab. */
+export const SETTING_BOO_ZERO_DISPLAY_NAME_PREFIX = 'boo-zero:display-name:'
 /** The provider + model the user picked at native onboarding for the leader — read by
  *  `ensureNativeBooZero` so the universal Boo Zero runs on the CHOSEN model instead of
  *  the auto-resolved per-provider default. JSON `{ provider, model }`. Absent → auto-resolve.
@@ -111,6 +114,14 @@ function resolveOverrideBooZero(db: ClawbooDb): AgentLite | null {
 export function resolveBooZero(db: ClawbooDb): { id: string; name: string } | null {
   const bz = resolveOverrideBooZero(db) ?? resolveNativeBooZero(db) ?? resolveOpenClawBooZero(db)
   return bz ? { id: bz.id, name: bz.name } : null
+}
+
+/** The name Boo Zero goes by in its rules: the person's display name for it, else the
+ *  agent's own name, which is what the dashboard shows when it has no override. */
+export function booZeroDisplayName(db: ClawbooDb, agentId: string): string {
+  const override = getSetting(db, SETTING_BOO_ZERO_DISPLAY_NAME_PREFIX + agentId)?.trim()
+  if (override) return override
+  return agentById(db, agentId)?.name ?? BOO_ZERO_NAME
 }
 
 function activeMembers(db: ClawbooDb, teamId: string): AgentLite[] {

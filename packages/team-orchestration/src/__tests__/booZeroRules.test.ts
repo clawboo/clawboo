@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildBooZeroAnchor, buildBooZeroRulesBlock } from '../booZeroRules'
+import { BOO_ZERO_RULES_OPENER, buildBooZeroAnchor, buildBooZeroRulesBlock } from '../booZeroRules'
 
 // `buildBooZeroRulesBlock` is the canonical entry point and returns the thin
 // anchor (~220 tokens). The verbose examples + full DO/DON'T list live in the
@@ -10,6 +10,16 @@ describe('buildBooZeroRulesBlock', () => {
     const out = buildBooZeroRulesBlock({ displayName: 'Boo Zero' })
     expect(out.startsWith('[Your Rules — authoritative]')).toBe(true)
     expect(out.trim().endsWith('[End Your Rules]')).toBe(true)
+  })
+
+  it('every block opens with the opener, which is how a message already carrying one is known', () => {
+    for (const p of [
+      { displayName: 'Boo Zero' },
+      { displayName: 'Boo Zero', handOffs: true },
+      { displayName: 'Boo Zero', teamName: 'Demo Team' },
+    ]) {
+      expect(buildBooZeroRulesBlock(p).startsWith(BOO_ZERO_RULES_OPENER)).toBe(true)
+    }
   })
 
   it('asserts the display name as authoritative', () => {

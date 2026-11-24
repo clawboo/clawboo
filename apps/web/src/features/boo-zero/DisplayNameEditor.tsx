@@ -4,8 +4,8 @@
 //
 // Saving also fires an auto-sync to the Gateway-side SOUL.md heading
 // (best-effort) so the LLM's persisted identity aligns with the override.
-// The per-turn rules block in `lib/booZeroRules.ts` is the authoritative
-// anchor either way.
+// The per-turn rules block (`booZeroRules.ts` in @clawboo/team-orchestration)
+// is the authoritative anchor either way.
 //
 // Lives under `features/boo-zero/` because the editor is Boo-Zero-agent-
 // scoped. Rendered by the Boo Zero individual agent's `Brief` tab in
