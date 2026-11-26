@@ -1,5 +1,35 @@
 # clawboo
 
+## 0.9.2
+
+### Patch Changes
+
+- 2d2cdc5: A program that posts into an agent's one-to-one chat, such as a script, a bot bridge or a second app, can now send each message once and tell which rows answer it.
+
+  - `POST /api/agents/:agentId/chat` starts one turn per `entryId`, ever. Sending the same id to the same chat again stores nothing, starts no turn and answers `202` with `"duplicate": true`, so retrying after a dropped connection is safe. To try again after a turn failed, send a new id. An id another chat already holds answers `409` with `"error": "entry_id_in_use"`. Before, that message was dropped and its turn still ran. Every `202` now returns the message's `entryId`, including the one the server makes when you send none.
+  - The reply and every notice of a message's turn (a paused agent, a budget, a failed run, a turn too large for the model, a busy agent, a hand-off that did not start) carry `inReplyTo`, that message's `entryId`. Two messages waiting for one agent are not always answered in the order they came, so this is how to match a reply to its message. Turns Clawboo starts by itself, such as Boo Zero reading results a team sent back, carry none.
+  - `GET /api/agents/chat/heads?agents=a,b` answers the newest row id of each chat, `{ "heads": { "<agentId>": <rowId> } }`, for agents whose chat the server runs (Clawboo Native, Claude Code, Codex and Hermes). Open that chat's stream with `?since=<head>` to get exactly what comes after it. Without `agents` it lists every such agent that is not archived. It takes up to 200 ids.
+
+- c47a201: When the server runs Boo Zero's one-to-one chat (Clawboo Native, Claude Code, Codex and Hermes), the server now writes Boo Zero's rules into each turn, instead of the dashboard.
+
+  - A program that posts to Boo Zero with `POST /api/agents/:agentId/chat` sends the person's words and, for an `@Team` message, that team's `teamId`. The server adds Boo Zero's rules and what the team has been doing, so every client gets the same turn as the dashboard.
+  - The server knows when a turn carries what a team has been doing, which limits the teams it can hand work to. Words a person types that only look like a team's activity no longer limit it.
+  - A dashboard tab left open from before the update keeps working for this release: a message that already carries Boo Zero's rules gets no second set.
+
+- 415411d: Settings for anyone who runs Clawboo for several people and wants a say over agents' screens on Linux. Each is an environment variable or a key in the operator settings file, and only an administrator sets them.
+
+  - `CLAWBOO_COMPUTER_LINKS` (`computerLinks`): `view` turns control links off, so nobody takes over a screen through a link, and `off` turns every link off. It is checked on every request, so a link made earlier stops working too, and with `off` the access gate admits nothing on `/api/computer-link/*` without the access cookie. It leaves the dashboard as it is, and stacks with the sign-in proxy's person check and control claim: a link it leaves on still needs what those ask, and `off` turns links off whatever they say. The Links buttons say when an administrator turned them off.
+  - `CLAWBOO_XVNC_PATH` (`xvncPath`) and `CLAWBOO_CUA_DRIVER_PATH` (`cuaDriverPath`) name the `Xvnc` and the Cua Driver to use, such as a packaged or hardened build. A named program is the only one used, it is never downloaded, and it runs only when it, and every folder above it, can be changed by no one but root and the user running Clawboo, with no link anywhere in its path. A named `Xvnc` must also be TigerVNC's. One that fails a check is not run, nothing runs in its place, and the Screen view or Connect says why.
+  - `CLAWBOO_DISABLE_DESKTOP_TOOLS_INSTALL` (`disableDesktopToolsInstall`) turns off downloading the desktop tools from the dashboard. Copies installed earlier keep working.
+  - `CLAWBOO_MAX_AGENT_DISPLAYS` (`maxAgentDisplays`, 1 to 64) caps how many agent displays run at once, apart from the cap on runs. Unset, it follows `CLAWBOO_MAX_AGENT_BROWSERS`, as before.
+
+  Also for agents' screens:
+
+  - Cua Driver's browser tools (which reach a browser through its debugging port, outside the agent browser's checks), its scripting tools (which run any of its tools in one call), its install and update tools and its settings tools are now refused outright. They are no longer offered to agents, no grant or approval turns them on, and the connectors API lists them as skipped, with the reason. A tool of a newer release is refused too when a part of its name marks it as one of these kinds.
+  - Clawboo installs a pinned release of the desktop tools only once it has been public for 14 days.
+  - A display keeps its cookie and sockets in the runtime folder of the user who runs it (`XDG_RUNTIME_DIR`, then `/run/user/<uid>`) when that folder is in memory and closed to everyone else, so they are not written to the data folder or a home folder and are gone after a reboot. Otherwise they stay where they were, under the data folder or in the agent user's home. The environment variables page says how to give an agent user one at boot, and why not by turning on lingering.
+  - The operator settings file takes two new kinds of value: an absolute path written plainly (no `.` or `..` part, no doubled or trailing slash) and a whole number in a range. Anything else stops the server at startup, as for every key.
+
 ## 0.9.1
 
 ### Patch Changes
